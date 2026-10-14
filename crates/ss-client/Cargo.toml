@@ -1,0 +1,13 @@
+[package]
+name = "ss-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Shadowsocks client side: local SOCKS5 inbound, encrypted tunnel to server"
+
+[dependencies]
+ss-core = { path = "../ss-core" }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

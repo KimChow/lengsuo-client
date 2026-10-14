@@ -1,0 +1,21 @@
+# ---- Rust ----
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# ---- 构建产物 / 临时 ----
+dist/
+node_modules/
+*.tmp
+*.log
+
+# ---- 机器本地信息（不入库，见 AGENTS.md）----
+.workbuddy/
+.claude/settings.local.json
+
+# ---- 密钥与凭据（绝不入库）----
+*.pem
+*.key
+*.keystore
+.env
+.env.*
