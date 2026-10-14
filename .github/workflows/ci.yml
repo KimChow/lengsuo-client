@@ -1,0 +1,22 @@
+name: client-checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust tools
+        run: rustup component add rustfmt clippy
+      - name: File length
+        run: python3 scripts/check_line_limit.py
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Lints
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: timeout 120 cargo test --workspace --locked
+      - name: Build
+        run: cargo build --workspace --locked
