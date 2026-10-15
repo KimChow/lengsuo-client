@@ -78,3 +78,13 @@ IP 包到受管连接的关联仍待集成。平台业务授权仍由私有服�
 Windows 原生 Rust 1.93.0/MSVC 在固定提交 `5cfd499` 上执行
 `cargo test -p lengsuo-environment -p lengsuo-anytls --locked`，退出码 0，
 路由 12 项与 AnyTLS 原语 5 项通过；该次测试尚不包含上述 4 项中继测试。
+
+## 报文分类与 DNS 语义（2026-10-16 新增）
+
+- 已实现 `src/classify.rs`/`src/flow.rs`/`src/session.rs`：流五元组 → 环境归属
+  分类器（复用既有 Router 权威路由）、DNS（UDP/53）识别与环境出口绑定、
+  会话表（TTL + 容量上限，满则拒绝不随机驱逐）。
+- 安全底线：**无归属环境的流一律拒绝，不得静默直连**；撤销环境后新流拒绝。
+- 已验证：29 项内存测试通过（归类/拒绝/DNS 绑定/跨环境隔离/上限/IPv6）；
+  fmt/clippy/行数门禁通过。
+- 未实现（待实现）：TUN 设备集成与真实分流验收（依赖设备接入层）。

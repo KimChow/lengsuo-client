@@ -303,6 +303,7 @@ name = "lengsuo-environment"
 version = "0.1.0"
 dependencies = [
  "getrandom",
+ "lengsuo-tun",
  "ss-core",
  "thiserror",
  "tokio",
