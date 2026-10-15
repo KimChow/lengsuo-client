@@ -9,6 +9,7 @@
 //! 参考实现的互通证明。互通验收状态见 `docs/shadowsocks-status.md`。
 
 use super::*;
+use ss_core::kdf::evp_bytes_to_key;
 
 /// 测试专用假口令，不代表任何真实凭据。
 pub(super) const PASSWORD: &str = "passw0rd";
@@ -122,10 +123,10 @@ fn master_key_and_salt_lengths_follow_suite() {
         assert_eq!(codec.salt_len(), suite.salt_len());
         assert_eq!(codec.suite(), suite);
         // 子模块可访问私有字段：主密钥长度必须等于套件密钥长度。
-        assert_eq!(codec.master_key.len(), suite.key_len());
+        assert_eq!(codec.key.raw().len(), suite.key_len());
         // 主密钥由 EVP_BytesToKey(MD5) 派生，与 ss-core 的已知向量一致。
         assert_eq!(
-            codec.master_key,
+            codec.key.raw(),
             evp_bytes_to_key(PASSWORD.as_bytes(), suite.key_len())
         );
     }
@@ -142,13 +143,14 @@ fn wrong_salt_length_is_rejected() {
             .seal_with_salt(&short, &v4(), PAYLOAD)
             .expect_err("短 salt 必须被拒绝");
         assert!(
-            matches!(err, Error::KeyLength { want, got } if want == suite.salt_len() && got == want - 1),
+            matches!(err, Error::KeyLength(KeyError::SaltLength { want, got })
+                if want == suite.salt_len() && got == want - 1),
             "{name} 的 salt 长度错误信息不符：{err:?}"
         );
         let long = rising_salt(suite.salt_len() + 1);
         assert!(matches!(
             codec.seal_with_salt(&long, &v4(), PAYLOAD),
-            Err(Error::KeyLength { .. })
+            Err(Error::KeyLength(KeyError::SaltLength { .. }))
         ));
     }
 }
@@ -161,7 +163,8 @@ fn empty_password_is_rejected_at_construction() {
         match UdpCodec::new(suite_of(name), b"") {
             Ok(_) => panic!("{name} 的空口令竟被接受"),
             Err(err) => assert!(
-                matches!(err, Error::KeyLength { got: 0, .. }),
+                matches!(err, Error::KeyLength(KeyError::EmptyPassword { key_len })
+                    if key_len == suite_of(name).key_len()),
                 "{name} 的空口令错误类型不符：{err}"
             ),
         }
