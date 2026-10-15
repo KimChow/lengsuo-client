@@ -33,3 +33,10 @@ Rust 1.93.0 / MSVC，使用已核验官方 Windows Xray v26.3.27，显式运行
 `cargo test -p lengsuo-trojan --locked --test xray_tls -- --ignored --nocapture`，
 两项测试均通过，退出码 0。范围仍为基础请求 codec 加测试 TLS 适配，
 没有据此声称产品异步服务或浏览器 TUN 验收通过。
+
+## 异步接口集成更新
+
+现已实现 stream 模块，九项请求与七项数据报测试通过；参考测试已改用实际
+异步接口，并增加双向 UDP/TLS、TCP 半关闭及错误密码拒绝检查。旧记录的
+“测试 TLS 适配”仅描述历史固定提交；当前状态与命令见 trojan-stream-status.md。
+尚未完成产品服务、全部异常与传输矩阵及 Windows 浏览器 TUN 验收。
