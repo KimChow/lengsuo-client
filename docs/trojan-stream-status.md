@@ -23,3 +23,7 @@ LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-trojan --locked --test xra
 这不代表产品服务已可部署：可信浏览器入口、出口运行时、目标策略、DNS、
 域名/IPv6 真实参考链路、所有异常路径及其他 Xray 外层传输仍需单独验证。
 Windows 浏览器 TUN 完整验收仍未完成。基本 TLS 互通也不证明 Chrome 指纹。
+
+Windows 原生记录：固定提交 `3dc49def5a09044b00f7cc66331be4e291382a7f`，
+Rust 1.93.0 / MSVC，二十七项本地测试及四项显式 Xray 参考测试全部通过，
+两个命令退出码均为 0。错误密码的“无目标连接”断言观察窗口为 100 毫秒。
