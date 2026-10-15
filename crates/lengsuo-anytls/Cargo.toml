@@ -9,3 +9,5 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+sha2 = { workspace = true }
+subtle = "2.6"
