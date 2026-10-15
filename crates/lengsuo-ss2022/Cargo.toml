@@ -9,3 +9,11 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+aes = "0.8"
+aes-gcm = { workspace = true }
+blake3 = "=1.8.3"
+getrandom = "0.2"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+base64 = "0.22"
