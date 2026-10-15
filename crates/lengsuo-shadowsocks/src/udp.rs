@@ -22,8 +22,9 @@
 //! 见 `docs/shadowsocks-status.md`。
 
 use ss_core::crypto::{CipherSuite, SessionAead, TAG_LEN};
-use ss_core::kdf::{evp_bytes_to_key, hkdf_sha1_subkey};
 use ss_core::target::TargetAddr;
+
+use crate::key::{KeyError, MasterKey};
 
 /// 单个 UDP 数据报的总长度上限（IPv4 最大报文扣除最小 IP/UDP 头）。
 /// `seal` 与 `open` 都拒绝超过该值的包，避免把巨型数据报交给网络层。
@@ -38,8 +39,8 @@ pub enum Error {
     #[error("数据报过长：{got} 字节超过 UDP 上限 {limit}")]
     TooLong { limit: usize, got: usize },
 
-    #[error("密钥或 salt 长度与套件不符：期望 {want} 字节，实际 {got}")]
-    KeyLength { want: usize, got: usize },
+    #[error("密钥或 salt 长度与套件不符：{0}")]
+    KeyLength(#[from] KeyError),
 
     #[error("随机 salt 获取失败")]
     Entropy,
@@ -60,38 +61,19 @@ pub enum Error {
 /// 避免密码、主密钥或 subkey 进入日志与调试输出。
 pub struct UdpCodec {
     suite: CipherSuite,
-    master_key: Vec<u8>,
+    key: MasterKey,
 }
 
 impl UdpCodec {
     /// 由套件与口令构造。口令只在派生期间使用，结构体不保留其明文。
     ///
     /// 空口令、salt/nonce/密钥长度与套件定义不符都在返回 `Err` 时失败，
-    /// 不会留下半构造的状态。
+    /// 不会留下半构造的状态。派生链复用 `crate::key`（与 TCP 方向同一实现）。
     pub fn new(suite: CipherSuite, password: &[u8]) -> Result<Self, Error> {
-        if password.is_empty() {
-            return Err(Error::KeyLength {
-                want: suite.key_len(),
-                got: 0,
-            });
-        }
-        // 四类 AEAD 套件的 salt 与密钥长度必须非零且互相对应；不满足说明
-        // 调用方给出的套件与本模块假设不一致，宁可不构造。
-        if suite.salt_len() == 0 || suite.nonce_len() == 0 {
-            return Err(Error::KeyLength {
-                want: suite.key_len(),
-                got: suite.salt_len(),
-            });
-        }
-        let master_key = evp_bytes_to_key(password, suite.key_len());
-        // evp_bytes_to_key 总是截断到请求长度；长度不符说明派生与套件不同步。
-        if master_key.len() != suite.key_len() {
-            return Err(Error::KeyLength {
-                want: suite.key_len(),
-                got: master_key.len(),
-            });
-        }
-        Ok(Self { suite, master_key })
+        Ok(Self {
+            suite,
+            key: MasterKey::new(suite, password)?,
+        })
     }
 
     /// 本编解码器使用的 AEAD 套件。
@@ -103,7 +85,7 @@ impl UdpCodec {
     /// salt 长度（= 套件 IV/salt 字节数），调用方预分配与截断判断可用。
     #[must_use]
     pub fn salt_len(&self) -> usize {
-        self.suite.salt_len()
+        self.key.salt_len()
     }
 
     /// 加密一个 UDP 数据报，返回 `salt || ct || tag`。
@@ -112,8 +94,7 @@ impl UdpCodec {
     /// `target` 与 `packet` 一起作为被认证的明文。非法目标（域名过长或含
     /// NUL）与超限长度在产生任何字节前失败。
     pub fn seal(&self, target: &TargetAddr, packet: &[u8]) -> Result<Vec<u8>, Error> {
-        let mut salt = vec![0u8; self.suite.salt_len()];
-        getrandom::getrandom(&mut salt).map_err(|_| Error::Entropy)?;
+        let salt = self.key.new_salt().map_err(|_| Error::Entropy)?;
         self.seal_with_salt(&salt, target, packet)
     }
 
@@ -135,7 +116,7 @@ impl UdpCodec {
         }
         let (salt, ct) = packet.split_at(salt_len);
         let plaintext = self
-            .aead_with_salt(salt)
+            .aead_with_salt(salt)?
             .open(ct)
             .map_err(|err| match err {
                 ss_core::Error::AuthFailed => Error::Authentication,
@@ -156,10 +137,10 @@ impl UdpCodec {
         packet: &[u8],
     ) -> Result<Vec<u8>, Error> {
         if salt.len() != self.suite.salt_len() {
-            return Err(Error::KeyLength {
+            return Err(Error::KeyLength(KeyError::SaltLength {
                 want: self.suite.salt_len(),
                 got: salt.len(),
-            });
+            }));
         }
         let mut plaintext = Vec::new();
         // encode_checked：不可信域名先校验，空/过长/含 NUL 都不写出任何字节。
@@ -184,7 +165,7 @@ impl UdpCodec {
         // 每包新建，因而生产入口不得复用发送 salt；接收重复 salt 仍须上层过滤。
         let mut out = Vec::with_capacity(total);
         out.extend_from_slice(salt);
-        let sealed = self.aead_with_salt(salt).seal(&plaintext)?;
+        let sealed = self.aead_with_salt(salt)?.seal(&plaintext)?;
         if sealed.len() != plaintext.len() + TAG_LEN {
             return Err(Error::Seal(ss_core::Error::SealFailed));
         }
@@ -192,10 +173,11 @@ impl UdpCodec {
         Ok(out)
     }
 
-    /// 由 salt 派生本包 subkey 并构造一次性 AEAD 上下文。
-    fn aead_with_salt(&self, salt: &[u8]) -> SessionAead {
-        let subkey = hkdf_sha1_subkey(&self.master_key, salt, self.suite.key_len());
-        SessionAead::new(self.suite, subkey)
+    /// 由 salt 派生本包 subkey 并构造一次性 AEAD 上下文（与 TCP 方向共用
+    /// `crate::key` 的派生实现）。每包新建：计数器从全 0xFF 起，本包首个 nonce
+    /// 即全 0，因此生产入口绝不复用发送 salt；接收侧重复 salt 仍须上层过滤。
+    fn aead_with_salt(&self, salt: &[u8]) -> Result<SessionAead, Error> {
+        Ok(self.key.session(salt)?)
     }
 }
 
