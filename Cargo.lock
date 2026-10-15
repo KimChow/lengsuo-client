@@ -327,7 +327,10 @@ dependencies = [
 name = "lengsuo-trojan"
 version = "0.1.0"
 dependencies = [
+ "hex",
+ "sha2",
  "ss-core",
+ "subtle",
  "thiserror",
  "tokio",
 ]

@@ -8,4 +8,7 @@ authors.workspace = true
 [dependencies]
 tokio = { workspace = true }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+subtle = "2.6"
 ss-core = { path = "../ss-core" }
