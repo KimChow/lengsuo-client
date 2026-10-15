@@ -32,7 +32,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/lengsuo-reference/target
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
     steps:
@@ -41,6 +40,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Environment and packet checks
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/lengsuo-reference/target
         run: cargo test -p lengsuo-environment -p lengsuo-tun --locked
       - name: Fixed reference tests
         run: python scripts/run_reference_tests.py --work-dir "${{ runner.temp }}/lengsuo-reference"
