@@ -2,6 +2,7 @@
 //! AnyTLS v2 认证、帧原语及服务端入站会话状态机；
 //! 尚未实现 TLS、复用池与参考互通，不可作为可用代理。
 pub mod auth;
+pub mod client_state;
 pub mod frame;
 pub mod server_state;
 
