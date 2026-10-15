@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
-//! SIP022 AES UDP 报文原语；包含内存会话与重放保护；完整运行时尚未完成，不是可用代理服务。
+//! SIP022 AES 原语：UDP 报文与会话，以及 TCP 双向流编解码；完整运行时尚未完成，不是可用代理服务。
 pub mod crypto;
 pub mod packet;
 pub mod receiver;
+pub mod tcp;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -30,6 +31,16 @@ pub enum Error {
     Exhausted,
     #[error("无法取得系统随机数")]
     Entropy,
+    #[error("AEAD 加密失败")]
+    Seal,
+    #[error("头部填充或声明长度非法")]
+    HeaderPadding,
+    #[error("读取超时")]
+    Timeout,
+    #[error("流已因失败永久失效")]
+    Poisoned,
+    #[error("流内 I/O 失败")]
+    Io(#[from] std::io::Error),
     #[error("目标地址非法：{0}")]
     Address(#[from] ss_core::Error),
 }
