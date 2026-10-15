@@ -15,8 +15,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod classify;
+pub mod flow;
 mod router;
-
-pub use router::{Binding, DeviceId, EnvironmentId, Lease, Router, RouterError};
-
 pub mod runtime;
+pub mod session;
+
+pub use classify::{Classifier, Decision, DenyReason};
+pub use flow::{
+    traffic_kind, Attribution, Direction, FlowKey, FlowProtocol, Timestamp, TrafficKind, DNS_PORT,
+};
+pub use router::{Binding, DeviceId, EnvironmentId, Lease, Router, RouterError};
+pub use session::{Session, SessionError, SessionTable};
