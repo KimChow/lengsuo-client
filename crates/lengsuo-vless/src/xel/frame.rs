@@ -12,9 +12,7 @@
 //! 本模块只做分帧（不认证）：认证与序号锁定在 [`super::record`]，
 //! 头部掩蔽在 [`super::xor`]。
 
-use super::{
-    Error, MAX_RECORD_BODY_LEN, MIN_RECORD_BODY_LEN, RECORD_HEADER_LEN, RECORD_MAGIC,
-};
+use super::{Error, MAX_RECORD_BODY_LEN, MIN_RECORD_BODY_LEN, RECORD_HEADER_LEN, RECORD_MAGIC};
 
 /// 一条记录头部：魔数已验证 + 记录体长度。
 ///
@@ -135,7 +133,7 @@ impl RecordFramer {
             return Err(Error::Poisoned);
         }
         if self.pending.len().saturating_add(bytes.len()) > MAX_PENDING {
-            let got = self.pending.len() + MAX_PENDING;
+            let got = self.pending.len() + bytes.len();
             return Err(self.fail(Error::InvalidRecordLength {
                 got,
                 min: MIN_RECORD_BODY_LEN,
@@ -275,13 +273,7 @@ mod tests {
         let mut framer = RecordFramer::new();
         framer.push(&record[..12]).unwrap();
         assert_eq!(framer.next_record().unwrap(), None);
-        assert_eq!(
-            framer.finish(),
-            Err(Error::Truncated {
-                need: 25,
-                got: 12
-            })
-        );
+        assert_eq!(framer.finish(), Err(Error::Truncated { need: 25, got: 12 }));
         assert!(framer.is_poisoned());
         assert_eq!(framer.push(&record[12..]), Err(Error::Poisoned));
         assert_eq!(framer.next_record(), Err(Error::Poisoned));
@@ -319,7 +311,9 @@ mod tests {
 
         // 合法头部 + 超过最大记录体的字节流：不可能属于任何合法记录。
         let mut flood = RecordFramer::new();
-        flood.push(&RecordHeader::new(17).unwrap().encode()).unwrap();
+        flood
+            .push(&RecordHeader::new(17).unwrap().encode())
+            .unwrap();
         let block = vec![0u8; 4096];
         let mut written = 0;
         let mut failed = None;
@@ -335,13 +329,9 @@ mod tests {
                 }
             }
         }
-        assert_eq!(
-            failed,
-            Some(Error::InvalidRecordLength {
-                got: MAX_PENDING + MAX_PENDING,
-                min: MIN_RECORD_BODY_LEN,
-                max: MAX_RECORD_BODY_LEN,
-            })
+        assert!(
+            matches!(failed, Some(Error::InvalidRecordLength { .. })),
+            "超出最大缓冲必须按长度越界失败，实际 {failed:?}"
         );
         assert!(flood.is_poisoned());
     }

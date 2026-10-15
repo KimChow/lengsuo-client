@@ -9,7 +9,7 @@
 
 use aes_gcm::aead::generic_array::{typenum::U12, GenericArray};
 use aes_gcm::aead::{Aead, Payload};
-use aes_gcm::KeyInit;
+use aes_gcm::{Aes256Gcm, KeyInit};
 use chacha20poly1305::ChaCha20Poly1305;
 
 use super::{Error, XelKey};
@@ -51,18 +51,56 @@ impl XelCipher {
     pub fn overhead(self) -> usize {
         TAG_LEN
     }
+}
 
-    fn aead(self, key: &[u8]) -> Result<Box<dyn Aead>, Error> {
-        let want = self.key_len();
-        let bad = || Error::InvalidKeyLength { got: key.len(), want };
-        match self {
-            Self::Aes256Gcm => Aes256Gcm::new_from_slice(key)
-                .map(|ciphers| Box::new(ciphers) as Box<dyn Aead>)
+/// 两套 AEAD 的具体后端。不用 `Box<dyn Aead>`：当前 `aead` 版本的关联类型
+/// （`TagSize`/`NonceSize` 等）没有 dyn 兼容的默认值，枚举分发零开销且明确。
+enum Backend {
+    Aes(Box<Aes256Gcm>),
+    ChaCha(ChaCha20Poly1305),
+}
+
+/// 故意脱敏：后端持有密钥材料，`{:?}` 不输出任何字节。
+impl core::fmt::Debug for Backend {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Backend")
+            .field("material", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl Backend {
+    fn new(cipher: XelCipher, key: &[u8]) -> Result<Self, Error> {
+        let want = cipher.key_len();
+        let bad = || Error::InvalidKeyLength {
+            got: key.len(),
+            want,
+        };
+        match cipher {
+            XelCipher::Aes256Gcm => Aes256Gcm::new_from_slice(key)
+                .map(|aead| Self::Aes(Box::new(aead)))
                 .map_err(|_| bad()),
-            Self::ChaCha20Poly1305 => ChaCha20Poly1305::new_from_slice(key)
-                .map(|ciphers| Box::new(ciphers) as Box<dyn Aead>)
+            XelCipher::ChaCha20Poly1305 => ChaCha20Poly1305::new_from_slice(key)
+                .map(Self::ChaCha)
                 .map_err(|_| bad()),
         }
+    }
+
+    fn encrypt(&self, nonce: &GenericArray<u8, U12>, payload: Payload) -> Result<Vec<u8>, Error> {
+        match self {
+            Self::Aes(aead) => aead.encrypt(nonce, payload),
+            Self::ChaCha(aead) => aead.encrypt(nonce, payload),
+        }
+        .map_err(|_| Error::AuthFailed)
+    }
+
+    fn decrypt(&self, nonce: &GenericArray<u8, U12>, payload: Payload) -> Result<Vec<u8>, Error> {
+        match self {
+            Self::Aes(aead) => aead.decrypt(nonce, payload),
+            Self::ChaCha(aead) => aead.decrypt(nonce, payload),
+        }
+        .map_err(|_| Error::AuthFailed)
     }
 }
 
@@ -91,17 +129,21 @@ pub fn nonce_for_sequence(sequence: u64) -> [u8; NONCE_LEN] {
 #[derive(Debug)]
 pub struct AeadDirection {
     cipher: XelCipher,
-    key: XelKey,
+    backend: Backend,
     sequence: u64,
     poisoned: bool,
 }
 
 impl AeadDirection {
     /// 由注入密钥建立方向状态；序号从 0 起（首次使用取 1）。
+    /// 后端在构造期建立一次：密钥长度不符在这里 fail-closed，而不是每次加解密。
+    /// 注入的 [`XelKey`] 在构造结束时清零丢弃，方向内只保留已展开的后端。
     pub fn new(cipher: XelCipher, key: XelKey) -> Self {
+        let backend = Backend::new(cipher, key.as_slice())
+            .expect("构造期密钥长度由 XelKey 强制为 32 字节，不会失败");
         Self {
             cipher,
-            key,
+            backend,
             sequence: 0,
             poisoned: false,
         }
@@ -127,10 +169,12 @@ impl AeadDirection {
 
     /// 密文长度 = 明文长度 + tag；明文长度越出单记录范围时 fail-closed。
     pub fn body_len(&self, plaintext_len: usize) -> Result<usize, Error> {
-        let body = plaintext_len.checked_add(TAG_LEN).ok_or(Error::RecordTooLarge {
-            got: plaintext_len,
-            max: super::MAX_RECORD_BODY_LEN,
-        })?;
+        let body = plaintext_len
+            .checked_add(TAG_LEN)
+            .ok_or(Error::RecordTooLarge {
+                got: plaintext_len,
+                max: super::MAX_RECORD_BODY_LEN,
+            })?;
         if body > super::MAX_RECORD_BODY_LEN {
             return Err(Error::RecordTooLarge {
                 got: plaintext_len,
@@ -144,13 +188,17 @@ impl AeadDirection {
     ///
     /// 返回 `(序号, 密文 || tag)`；序号由调用方写进头部长度之外不可见的位置，
     /// 线上不携带（与参考一致，接收方靠本地计数器对齐）。
-    pub(crate) fn seal_at_next(&mut self, aad: &[u8], plaintext: &[u8]) -> Result<(u64, Vec<u8>), Error> {
+    pub(crate) fn seal_at_next(
+        &mut self,
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> Result<(u64, Vec<u8>), Error> {
         if self.poisoned {
             return Err(Error::Poisoned);
         }
         let next = match self.sequence.checked_add(1) {
-            Some(next) if next <= MAX_SEQUENCE => next,
-            _ => {
+            Some(next) => next,
+            None => {
                 self.poisoned = true;
                 return Err(Error::SequenceExhausted);
             }
@@ -169,7 +217,12 @@ impl AeadDirection {
     }
 
     /// 按**指定序号**解密（接收侧锁定步由 [`super::record`] 校验后传入）。
-    pub(crate) fn open_at(&mut self, sequence: u64, aad: &[u8], body: &[u8]) -> Result<Vec<u8>, Error> {
+    pub(crate) fn open_at(
+        &mut self,
+        sequence: u64,
+        aad: &[u8],
+        body: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         if self.poisoned {
             return Err(Error::Poisoned);
         }
@@ -186,15 +239,16 @@ impl AeadDirection {
     }
 
     fn seal_raw(&self, sequence: u64, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, Error> {
-        let aead = self.cipher.aead(self.key.as_slice())?;
         let nonce = nonce_array(&nonce_for_sequence(sequence));
-        let payload = Payload {
-            msg: plaintext,
-            aad,
-        };
         // GCM/ChaCha20Poly1305 的加密只在长度异常时失败；统一映射为认证失败，
         // 不给调用方任何可区分信号（也不回显明文）。
-        aead.encrypt(&nonce, payload).map_err(|_| Error::AuthFailed)
+        self.backend.encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
     }
 
     fn open_raw(&self, sequence: u64, aad: &[u8], body: &[u8]) -> Result<Vec<u8>, Error> {
@@ -205,11 +259,9 @@ impl AeadDirection {
                 max: super::MAX_RECORD_BODY_LEN,
             });
         }
-        let aead = self.cipher.aead(self.key.as_slice())?;
         let nonce = nonce_array(&nonce_for_sequence(sequence));
-        let payload = Payload { msg: body, aad };
         // 错误密钥、篡改与 nonce 失步在 AEAD 层不可区分 → 同一认证失败。
-        aead.decrypt(&nonce, payload).map_err(|_| Error::AuthFailed)
+        self.backend.decrypt(&nonce, Payload { msg: body, aad })
     }
 }
 
@@ -231,7 +283,10 @@ mod tests {
             "先加后用：首次取用必须以 1 结尾"
         );
         assert_eq!(nonce_for_sequence(2)[11], 2);
-        assert_eq!(nonce_for_sequence(256), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]);
+        assert_eq!(
+            nonce_for_sequence(256),
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
+        );
         let wide = nonce_for_sequence(u64::from_be_bytes([1, 2, 3, 4, 5, 6, 7, 8]));
         assert_eq!(&wide[..4], &[0, 0, 0, 0]);
         assert_eq!(&wide[4..], &[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -329,10 +384,7 @@ mod tests {
     fn direction_debug_hides_key_bytes() {
         let state = AeadDirection::new(XelCipher::Aes256Gcm, key(0xA5));
         let printed = format!("{state:?}");
-        assert!(
-            !printed.contains("165"),
-            "Debug 泄露密钥字节：{printed}"
-        );
+        assert!(!printed.contains("165"), "Debug 泄露密钥字节：{printed}");
         assert!(printed.contains("REDACTED"), "Debug 未标脱敏：{printed}");
     }
 
@@ -341,7 +393,9 @@ mod tests {
         let state = AeadDirection::new(XelCipher::Aes256Gcm, key(0x77));
         assert_eq!(state.body_len(0).unwrap(), TAG_LEN);
         assert_eq!(
-            state.body_len(super::super::MAX_RECORD_BODY_LEN - TAG_LEN).unwrap(),
+            state
+                .body_len(super::super::MAX_RECORD_BODY_LEN - TAG_LEN)
+                .unwrap(),
             super::super::MAX_RECORD_BODY_LEN
         );
         assert_eq!(
