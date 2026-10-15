@@ -67,6 +67,10 @@ pub async fn launch(config: Value, port: u16) -> Reference {
         assert!(Instant::now() < end, "参考服务启动超时");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    println!("基线 {version}测试端口 {port}，配置 {}", config);
+    let inbound = config["inbounds"][0]["protocol"].as_str().unwrap_or("未知");
+    let security = config["inbounds"][0]["streamSettings"]["security"]
+        .as_str()
+        .unwrap_or("none");
+    println!("基线 {version}测试端口 {port}，入站 {inbound}，安全层 {security}");
     reference
 }
