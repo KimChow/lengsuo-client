@@ -59,3 +59,23 @@ LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --locked --offline -
 
 核验依据为参考源码 `proxy/vless/encoding/encoding.go`、
 `proxy/vless/encoding/addons.go`、`common/protocol/payload.go` 与本仓测试。
+
+## Windows 原生验证记录
+
+2026-10-15 使用 Windows x86_64 MSVC、Rust 1.93.0，独立干净工作区
+固定在 `128159c4cfa8edf3b3c85ce120dbcae359bb81b3`，构建目录放仓库外。
+
+```powershell
+cargo test -p lengsuo-vless -p lengsuo-tls --locked
+cargo test -p lengsuo-vless --locked --test xray_tcp --test xray_udp --test xray_tls -- --ignored --nocapture
+```
+
+两个命令退出码均为 0。第一项执行 TLS 五项与 VLESS 十七项本地测试；
+七项参考测试在第一项中明确忽略，第二项才显式执行并通过。
+第二项使用官方 `Xray-windows-64.zip` v26.3.27 发布包，SHA256 与
+GitHub 发布资产 digest 核对一致：
+`d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad`。
+运行时版本显示 `26.3.27 d2758a0 windows/amd64`。
+
+这些证据证明协议库原生 Windows 构建及该测试矩阵，未启动浏览器或 TUN
+设备，不能用来声明 Windows 浏览器 TUN 完整验收通过。
