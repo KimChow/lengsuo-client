@@ -19,3 +19,7 @@ node_modules/
 *.keystore
 .env
 .env.*
+
+# Python build-tool cache
+__pycache__/
+*.py[cod]
