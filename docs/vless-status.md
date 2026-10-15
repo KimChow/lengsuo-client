@@ -79,3 +79,16 @@ GitHub 发布资产 digest 核对一致：
 
 这些证据证明协议库原生 Windows 构建及该测试矩阵，未启动浏览器或 TUN
 设备，不能用来声明 Windows 浏览器 TUN 完整验收通过。
+
+## XEL 记录层（2026-10-16 新增）
+
+- 已实现 `src/xel/`：AEAD 记录层（blake3 派生 32 字节会话密钥，AES-256-GCM 与
+  ChaCha20-Poly1305 双套，密钥由调用方提供）与记录分帧（严格递增 nonce、
+  序号锁定防重放/乱序、最大记录上限、认证失败即 poison，fail-closed）。
+- 新增依赖 `aes-gcm`、`chacha20poly1305`（workspace 既有）、`aes`、`ctr`、
+  `blake3`、`zeroize`，均为 MIT / Apache-2.0 系许可，无 GPL/AGPL/SSPL。
+- 已验证：12 项新增测试通过（往返、序号、篡改、截断、错钥、密钥不入
+  Debug）；fmt/clippy/行数门禁通过。
+- 未实现（待实现）：XOR 记录层（`xor.go` 对应物，模块位已留）、
+  mlkem768x25519 密钥协商（明确范围外）、REALITY、与 Xray XEL 真实互通
+  （未互通，不宣称兼容）。
