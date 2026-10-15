@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Shadowsocks protocol core (self-implemented, wire-compatible with Xray v26.3.27): kdf, AEAD ciphers, TCP chunk codec, UDP packet codec, address model"
+description = "Shared Shadowsocks primitives and address codecs; reference interoperability tracked separately"
 
 [dependencies]
 tokio = { workspace = true }
