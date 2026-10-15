@@ -37,6 +37,13 @@
         "xray_udp"
       ],
       "expected_passed": 2
+    },
+    {
+      "crate": "lengsuo-shadowsocks",
+      "targets": [
+        "xray_udp"
+      ],
+      "expected_passed": 2
     }
   ]
 }

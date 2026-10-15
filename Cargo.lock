@@ -330,6 +330,8 @@ dependencies = [
 name = "lengsuo-shadowsocks"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
+ "serde_json",
  "ss-core",
  "thiserror",
  "tokio",
