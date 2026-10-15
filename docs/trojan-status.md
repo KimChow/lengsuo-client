@@ -27,3 +27,9 @@ LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-trojan --locked --test xra
 尚未实现产品异步握手、UDP 帧与参考互通、全部异常路径。
 本模块必须在经过服务器身份验证的 TLS 之上使用，不能作为裸 TCP 产品服务。
 这些原语测试不代表协议服务或浏览器网络验收完成。
+
+Windows 原生参考验证：固定提交 `9180e0d59f952011e1e4419ea37c14a969bac7bf`，
+Rust 1.93.0 / MSVC，使用已核验官方 Windows Xray v26.3.27，显式运行
+`cargo test -p lengsuo-trojan --locked --test xray_tls -- --ignored --nocapture`，
+两项测试均通过，退出码 0。范围仍为基础请求 codec 加测试 TLS 适配，
+没有据此声称产品异步服务或浏览器 TUN 验收通过。

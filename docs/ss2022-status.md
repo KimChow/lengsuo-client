@@ -35,3 +35,12 @@ UDP 会话至少 60 秒保留、地址更新、服务器会话切换、多环境
 
 TCP、可选 ChaCha 方法、SIP023 身份扩展、完整异常验证、固定随机源逐字节
 参考向量、测试流量重组证据和 Windows 浏览器 TUN 仍在完整交付范围内。
+
+## Windows 原生验证
+
+固定提交 `9f8a9271290f898232d82ad2720bd9bc8e763157`，Windows x86_64
+MSVC / Rust 1.93.0，仓库外独立构建目录。执行 `cargo test -p lengsuo-ss2022
+--locked`，五项本地测试通过；随后显式执行上面的 `xray_udp --ignored`
+命令，两项参考测试均通过且各覆盖两种 AES 方法，退出码均为 0。
+Windows Xray 使用已核验官方资产的 v26.3.27，完整发布包 SHA256
+见 vless-status.md 的 Windows 记录。没有启动浏览器或 TUN 设备。

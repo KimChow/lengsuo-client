@@ -18,3 +18,7 @@ Claude Code 到轮次上限后由集成负责人复核。初始任务误要求�
 方向、心跳、失效状态及载荷不复制。仅证明纯内存状态机，不代表 AnyTLS
 网络服务、SYNACK 发送、心跳调度、padding 更新、连接复用池或 UDP 完成。
 这些功能、双向参考互通及 Windows 浏览器网络仍在完整交付范围内。
+
+Windows 原生验证：固定提交 `9180e0d59f952011e1e4419ea37c14a969bac7bf`，
+Rust 1.93.0 / MSVC，`cargo test -p lengsuo-anytls --locked` 退出码 0，
+五项原语与十五项状态测试通过。没有执行 AnyTLS 参考网络互通。
