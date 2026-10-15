@@ -1,6 +1,7 @@
 //! 固定基线双向 Trojan/TLS 互通，测试证书运行时生成，不跳过验证。
 mod support;
 use lengsuo_tls::{PrivatePkcs8KeyDer, TlsClient, TlsServer};
+use lengsuo_trojan::stream::{receive_request, send_request, Error};
 use lengsuo_trojan::{Command, Credential, Request};
 use serde_json::json;
 use ss_core::target::TargetAddr;
@@ -62,11 +63,37 @@ async fn rust_tls_client_to_xray_server() {
             .unwrap();
         stream.write_all(PAYLOAD).await.unwrap();
         stream.flush().await.unwrap();
+        stream.shutdown().await.unwrap();
         let mut received = vec![0; PAYLOAD.len()];
         stream.read_exact(&mut received).await.unwrap();
         assert_eq!(received, PAYLOAD);
         stream.shutdown().await.unwrap();
         echo.await.unwrap();
+        let forbidden = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut denied = client.connect(endpoint).await.unwrap();
+        let request = Request {
+            command: Command::Tcp,
+            target: TargetAddr::V4([127, 0, 0, 1], forbidden.local_addr().unwrap().port()),
+        };
+        send_request(
+            &mut denied,
+            &request,
+            &Credential::new("wrong-test-password"),
+            WAIT,
+        )
+        .await
+        .unwrap();
+        let mut byte = [0];
+        let closed = timeout(WAIT, denied.read(&mut byte))
+            .await
+            .expect("参考端应关闭错误认证连接");
+        assert!(matches!(closed, Ok(0) | Err(_)), "错误认证不能收到成功载荷");
+        assert!(
+            timeout(std::time::Duration::from_millis(100), forbidden.accept())
+                .await
+                .is_err(),
+            "错误认证不得拨号目标"
+        );
         drop(reference);
     })
     .await
@@ -108,7 +135,8 @@ async fn xray_tls_client_to_rust_server() {
                 let request =
                     match receive_request(&mut stream, &Credential::new(PASSWORD), WAIT).await {
                         Ok(request) => request,
-                        Err(_) => continue,
+                        Err(Error::Io(_)) => continue,
+                        Err(error) => panic!("握手失败：{error}"),
                     };
                 assert_eq!(
                     request,
@@ -131,6 +159,7 @@ async fn xray_tls_client_to_rust_server() {
             .await
             .unwrap();
         stream.write_all(PAYLOAD).await.unwrap();
+        stream.shutdown().await.unwrap();
         let mut payload = vec![0; PAYLOAD.len()];
         stream.read_exact(&mut payload).await.unwrap();
         assert_eq!(payload, PAYLOAD);
@@ -140,38 +169,4 @@ async fn xray_tls_client_to_rust_server() {
     })
     .await
     .unwrap();
-}
-
-async fn send_request<W: tokio::io::AsyncWrite + Unpin>(
-    stream: &mut W,
-    request: &Request,
-    credential: &Credential,
-    wait: std::time::Duration,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let bytes = lengsuo_trojan::encode(request, credential)?;
-    timeout(wait, async {
-        stream.write_all(&bytes).await?;
-        stream.flush().await
-    })
-    .await??;
-    Ok(())
-}
-async fn receive_request<R: tokio::io::AsyncRead + Unpin>(
-    stream: &mut R,
-    credential: &Credential,
-    wait: std::time::Duration,
-) -> Result<Request, Box<dyn std::error::Error + Send + Sync>> {
-    timeout(wait, async {
-        let mut bytes = Vec::new();
-        loop {
-            match lengsuo_trojan::decode(&bytes, credential) {
-                Ok((request, _)) => return Ok(request),
-                Err(lengsuo_trojan::codec::Error::Truncated { .. }) => {
-                    bytes.push(stream.read_u8().await?)
-                }
-                Err(error) => return Err(error.into()),
-            }
-        }
-    })
-    .await?
 }
