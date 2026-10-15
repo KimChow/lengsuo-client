@@ -29,3 +29,13 @@
 - Windows 原生验证证据（与既有组件同格式补录）。
 
 本 crate 是协议原语层，不能作为可用 Hysteria2 客户端或服务端发布。
+
+## CONNECT-UDP 消息层与 padding 策略（2026-10-16 新增）
+
+- 已实现 `src/connect_udp.rs`（CONNECT-UDP 请求/响应消息编解码，帧类型与
+  长度上限对齐参考 `core/internal/protocol/proxy.go`）与 `src/padding.rs`
+  （padding 策略纯函数）；复用既有 varint/tcp 原语与错误风格，fail-closed。
+- 已验证：新增 36 项测试（connect_udp 请求/响应各 16/12、padding 8）与既有
+  30 项全部通过；fmt/clippy/行数门禁通过。
+- 未实现（待实现）：QUIC 连接与流、HTTP/3 伪装与认证 token、UDP 中继、
+  Salamander 混淆、与 apernet/hysteria 真实互通（未互通，不宣称兼容）。
