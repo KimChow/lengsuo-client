@@ -49,3 +49,19 @@ Python 生成器仅是可选测试工具，需要 cryptography，不参与 Rust 
   TCP 未互通，不宣称兼容）。
 - `src/tcp.rs` 414 行略超 400 行软目标（读写端与错误映射单文件内聚），700 行
   硬限内；后续可按读/写端拆分。
+
+## TCP 双向真实互通（2026-10-16 新增，已验证）
+
+- `tests/xray_tcp.rs`：两项显式测试（默认 `#[ignore]`，`LENGSUO_XRAY` 指向
+  锁定基线二进制）真实 spawn Xray 进程，仅绑 127.0.0.1、测试专用假口令、
+  随机空闲端口，进程与临时配置在测试结束清理。
+- `rust_client_to_xray_server_tcp`：本仓 `TcpWriter`/`TcpReader` 作为
+  Shadowsocks 客户端，经 Xray shadowsocks 入站转发到本地 echo 服务，
+  回程逐字节核对（含 1/512/8158 与超上限分块规格）——**通过**。
+- `xray_client_to_rust_server_tcp`：Xray socks 入站 + shadowsocks 出站指向
+  本仓实现的 Shadowsocks TCP 服务端视角（TcpReader 解请求方向、TcpWriter
+  写回程），端到端载荷核对——**通过**。
+- 基线：Xray 26.3.27，commit `d2758a023cd7f4174a5a5fa4ff66e487d4342ba0`
+  （go1.26.1 linux/amd64）。执行日期 2026-10-16，测试退出码 0。
+- 范围声明：仅证明传统 SS AEAD TCP 字节 chunk 层与该锁定基线的双向互通；
+  不覆盖 UDP 以外新协议、不证明任何生产部署可用性。
