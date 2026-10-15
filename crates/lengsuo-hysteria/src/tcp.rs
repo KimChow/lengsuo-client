@@ -13,12 +13,14 @@
 //! 解析；本模块 `TcpRequest::decode` 是完整帧解码，自己先读 `0x401` 并校验。
 //!
 //! 解码返回精确消耗长度，帧之后的字节保留给应用载荷，绝不吞掉。
-//! padding 由调用方传入，本模块不生成随机数，也不实现 padding 策略。
+//! padding 由调用方传入，本模块不生成随机数；填充长度策略见 `padding.rs`
+//! （CONNECT-UDP 消息层见 `connect_udp.rs`）。
 //! 长度字段接受 QUIC 允许的非最短 varint（与 `quicvarint.Read` 一致），
 //! 编码侧永远输出最短形式。地址/消息按 Rust 侧更严格的规则校验：必须为
 //! 合法 UTF-8 且不含 NUL（Go 字符串是字节切片，无此约束），长度上限与
 //! 参考实现相同。QUIC 连接、HTTP/3 伪装认证、UDP 与分片不属于本模块。
 
+use crate::frame::{check_len, read_varint, take_bytes, text, text_bytes};
 use crate::varint;
 use crate::Error;
 
@@ -46,7 +48,9 @@ impl Status {
         self as u8
     }
 
-    fn from_byte(byte: u8) -> Result<Self, Error> {
+    /// 状态字节解码；协议只定义 0x00/0x01，其余一律 `InvalidStatus`。
+    /// CONNECT-UDP 响应共用同一字节语义（见 `connect_udp.rs`）。
+    pub fn from_byte(byte: u8) -> Result<Self, Error> {
         match byte {
             0 => Ok(Status::Ok),
             1 => Ok(Status::Error),
@@ -186,61 +190,4 @@ impl TcpResponse {
             offset,
         ))
     }
-}
-
-/// 在 `offset` 处读取 varint，返回（取值，其后绝对偏移）。
-fn read_varint(input: &[u8], offset: usize) -> Result<(u64, usize), Error> {
-    let rest = input.get(offset..).ok_or(Error::Truncated {
-        need: offset.saturating_add(1),
-        got: input.len(),
-    })?;
-    let (value, used) = varint::decode(rest).map_err(|error| match error {
-        Error::Truncated { need, .. } => Error::Truncated {
-            need: offset.saturating_add(need),
-            got: input.len(),
-        },
-        other => other,
-    })?;
-    Ok((value, offset + used))
-}
-
-/// 取 `input[offset..offset+len]`，返回（切片，其后绝对偏移）。
-///
-/// 长度上限已在上游按协议常量校验，这里只处理输入不足。相加溢出归一为
-/// `usize::MAX`，仍按截断失败，不因大长度字段 panic。
-fn take_bytes(input: &[u8], offset: usize, len: u64) -> Result<(&[u8], usize), Error> {
-    let len = usize::try_from(len).unwrap_or(usize::MAX);
-    let end = offset.saturating_add(len);
-    input
-        .get(offset..end)
-        .map(|slice| (slice, end))
-        .ok_or(Error::Truncated {
-            need: end,
-            got: input.len(),
-        })
-}
-
-/// 长度范围检查；`min` 为 1 时为空视为协议违规。
-fn check_len(field: &'static str, len: u64, min: u64, max: u64) -> Result<(), Error> {
-    if len < min {
-        return Err(Error::EmptyField { field });
-    }
-    if len > max {
-        return Err(Error::TooLong { field, len, max });
-    }
-    Ok(())
-}
-
-/// NUL 先于 UTF-8 报告：NUL 本身是合法 UTF-8，但地址与消息一律禁止。
-fn text_bytes(field: &'static str, bytes: &[u8]) -> Result<(), Error> {
-    if bytes.contains(&0) {
-        return Err(Error::ContainsNul { field });
-    }
-    std::str::from_utf8(bytes).map_err(|_| Error::InvalidUtf8 { field })?;
-    Ok(())
-}
-
-fn text(field: &'static str, bytes: &[u8]) -> Result<String, Error> {
-    text_bytes(field, bytes)?;
-    Ok(String::from_utf8(bytes.to_vec()).expect("上文已确认字节是合法 UTF-8"))
 }
