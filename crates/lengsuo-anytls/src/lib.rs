@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
-//! AnyTLS v2 认证及帧原语；尚未实现会话复用和参考互通，不可作为可用代理。
+//! AnyTLS v2 认证、帧原语及服务端入站会话状态机；
+//! 尚未实现 TLS、复用池与参考互通，不可作为可用代理。
 pub mod auth;
 pub mod frame;
+pub mod server_state;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
