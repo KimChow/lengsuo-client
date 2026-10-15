@@ -270,6 +270,7 @@ dependencies = [
 name = "lengsuo-environment"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "ss-core",
  "thiserror",
  "tokio",
