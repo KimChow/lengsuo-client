@@ -9,6 +9,7 @@ pub mod chunk;
 pub mod crypto;
 pub mod error;
 pub mod kdf;
+pub mod replay;
 pub mod target;
 
 pub use error::Error;
