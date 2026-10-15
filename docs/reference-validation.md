@@ -15,12 +15,12 @@ python scripts/run_reference_tests.py --work-dir /绝对仓库外路径
 python scripts/run_reference_tests.py --work-dir /绝对仓库外路径 --archive /已下载官方包.zip
 ```
 
-当前清单为 VLESS 七项、Trojan 四项、SS2022 两项参考测试。每个 crate 显式
+当前清单为 VLESS 七项、Trojan 四项、SS2022 两项、传统 SS 两项参考测试。每个 crate 显式
 指定测试目标及 --ignored，任一退出码非零、超时或通过数量不等于清单即失败，
 防止零用例被误报成功。新增参考用例需要同步更新清单并审阅覆盖范围。
 
 当前只覆盖各状态文档已确认的范围，不代表八协议、全部外层传输或浏览器 TUN
-完成。AnyTLS、VMess、Hysteria、WireGuard、传统 SS 等尚待加入真实参考矩阵。
+完成。AnyTLS、VMess、Hysteria、WireGuard 等尚待加入真实参考矩阵。
 普通门禁与参考门禁职责独立，许可证自动检查仍未实现。
 
 构建目录在 work-dir/target，两个编译任务，禁用增量与调试信息；各 crate 依次
