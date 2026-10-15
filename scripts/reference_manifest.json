@@ -1,0 +1,42 @@
+{
+  "tag": "v26.3.27",
+  "commit": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0",
+  "platforms": {
+    "linux": {
+      "asset": "Xray-linux-64.zip",
+      "binary": "xray",
+      "sha256": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
+    },
+    "windows": {
+      "asset": "Xray-windows-64.zip",
+      "binary": "xray.exe",
+      "sha256": "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad"
+    }
+  },
+  "tests": [
+    {
+      "crate": "lengsuo-vless",
+      "targets": [
+        "xray_tcp",
+        "xray_tls",
+        "xray_udp"
+      ],
+      "expected_passed": 7
+    },
+    {
+      "crate": "lengsuo-trojan",
+      "targets": [
+        "xray_tls",
+        "xray_udp"
+      ],
+      "expected_passed": 4
+    },
+    {
+      "crate": "lengsuo-ss2022",
+      "targets": [
+        "xray_udp"
+      ],
+      "expected_passed": 2
+    }
+  ]
+}

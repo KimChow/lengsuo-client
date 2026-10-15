@@ -1,0 +1,55 @@
+name: reference-interop
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/run_reference_tests.py'
+      - 'scripts/reference_manifest.json'
+      - '.github/workflows/reference-tests.yml'
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/run_reference_tests.py'
+      - 'scripts/reference_manifest.json'
+      - '.github/workflows/reference-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: reference-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  interop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/lengsuo-reference/target
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Environment and packet checks
+        run: cargo test -p lengsuo-environment -p lengsuo-tun --locked
+      - name: Fixed reference tests
+        run: python scripts/run_reference_tests.py --work-dir "${{ runner.temp }}/lengsuo-reference"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/lengsuo-reference/report.json
+            ${{ runner.temp }}/lengsuo-reference/*.log
+          if-no-files-found: ignore
+          retention-days: 3
