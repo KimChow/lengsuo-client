@@ -228,6 +228,105 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "lengsuo-anytls"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-environment"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-hysteria"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-node"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-shadowsocks"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-ss2022"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-trojan"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-tun"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-vless"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-vmess"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lengsuo-wireguard"
+version = "0.1.0"
+dependencies = [
+ "ss-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
