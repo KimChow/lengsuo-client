@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lengsuo-tls",
     "crates/ss-core",
     "crates/ss-client",
     "crates/lengsuo-vless",
