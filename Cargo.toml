@@ -1,6 +1,20 @@
 [workspace]
 resolver = "2"
-members = ["crates/ss-core", "crates/ss-client", "crates/lengsuo-vless", "crates/lengsuo-vmess", "crates/lengsuo-trojan", "crates/lengsuo-shadowsocks", "crates/lengsuo-ss2022", "crates/lengsuo-hysteria", "crates/lengsuo-wireguard", "crates/lengsuo-anytls", "crates/lengsuo-environment", "crates/lengsuo-tun", "crates/lengsuo-node"]
+members = [
+    "crates/ss-core",
+    "crates/ss-client",
+    "crates/lengsuo-vless",
+    "crates/lengsuo-vmess",
+    "crates/lengsuo-trojan",
+    "crates/lengsuo-shadowsocks",
+    "crates/lengsuo-ss2022",
+    "crates/lengsuo-hysteria",
+    "crates/lengsuo-wireguard",
+    "crates/lengsuo-anytls",
+    "crates/lengsuo-environment",
+    "crates/lengsuo-tun",
+    "crates/lengsuo-node",
+]
 
 [workspace.package]
 version = "0.1.0"
