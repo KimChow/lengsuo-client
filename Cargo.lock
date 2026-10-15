@@ -419,6 +419,7 @@ dependencies = [
 name = "lengsuo-wireguard"
 version = "0.1.0"
 dependencies = [
+ "chacha20poly1305",
  "ss-core",
  "thiserror",
  "tokio",
