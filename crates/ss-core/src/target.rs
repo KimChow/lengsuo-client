@@ -13,7 +13,7 @@ pub enum TargetAddr {
 }
 
 impl TargetAddr {
-    /// 序列化为 SOCKS5 地址格式（ATYP + ADDR + PORT）。
+    /// 序列化已校验地址为 SOCKS5 格式；不可信输入须先使用 encode_checked。
     pub fn encode_into(&self, buf: &mut Vec<u8>) {
         match self {
             TargetAddr::V4(ip, port) => {
@@ -33,6 +33,18 @@ impl TargetAddr {
                 buf.extend_from_slice(&port.to_be_bytes());
             }
         }
+    }
+
+    /// Validate untrusted domain input before writing any bytes.
+    /// Existing encode_into is retained for already validated callers.
+    pub fn encode_checked(&self, buf: &mut Vec<u8>) -> Result<()> {
+        if let Self::Domain(host, _) = self {
+            if host.is_empty() || host.len() > u8::MAX as usize || host.contains('\0') {
+                return Err(Error::InvalidLength(host.len()));
+            }
+        }
+        self.encode_into(buf);
+        Ok(())
     }
 
     /// 编码后的字节长度（预分配用）。
@@ -70,6 +82,9 @@ impl TargetAddr {
                     });
                 }
                 let host_len = buf[1] as usize;
+                if host_len == 0 {
+                    return Err(Error::InvalidLength(host_len));
+                }
                 let need = 2 + host_len + 2;
                 if buf.len() < need {
                     return Err(Error::TooShort {
@@ -80,6 +95,9 @@ impl TargetAddr {
                 let host = std::str::from_utf8(&buf[2..2 + host_len])
                     .map_err(|_| Error::InvalidLength(host_len))?
                     .to_string();
+                if host.contains('\0') {
+                    return Err(Error::InvalidLength(host_len));
+                }
                 let port = u16::from_be_bytes([buf[2 + host_len], buf[3 + host_len]]);
                 Ok((TargetAddr::Domain(host, port), need))
             }
