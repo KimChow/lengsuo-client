@@ -1,14 +1,16 @@
-//! 仅回环 UDP 对拍；会话表和防重放尚未完成。
+//! 回环 UDP 参考互通；收包经过认证后会话与重放过滤。
 #[path = "../../lengsuo-trojan/tests/support/mod.rs"]
 mod support;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use lengsuo_ss2022::{
     crypto::{Key, Method},
     packet::Sender,
+    receiver::{Clock, Receiver},
+    Error,
 };
 use serde_json::json;
 use ss_core::target::TargetAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use support::*;
 use tokio::{net::UdpSocket, time::timeout};
 fn now() -> u64 {
@@ -16,6 +18,12 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
+}
+fn clock() -> Clock {
+    Clock {
+        unix_seconds: now(),
+        monotonic: Instant::now(),
+    }
 }
 fn methods() -> [(Method, &'static str); 2] {
     [
@@ -57,6 +65,13 @@ async fn rust_client_to_xray_server() {
                 .await
                 .unwrap();
             let mut sender = Sender::new(key.clone(), None).unwrap();
+            let mut receiver = Receiver::new(
+                key.clone(),
+                Some(sender.session_id()),
+                4,
+                Duration::from_secs(60),
+            )
+            .unwrap();
             let mut buffer = [0; 4096];
             for length in [1, 512, 1200] {
                 let packet = sender
@@ -69,9 +84,14 @@ async fn rust_client_to_xray_server() {
                     .unwrap();
                 socket.send(&packet).await.unwrap();
                 let received = socket.recv(&mut buffer).await.unwrap();
-                let decoded = key
-                    .open_server(&buffer[..received], now(), sender.session_id())
+                let peer = socket.peer_addr().unwrap();
+                let decoded = receiver
+                    .receive(&buffer[..received], peer, clock())
                     .unwrap();
+                assert!(matches!(
+                    receiver.receive(&buffer[..received], peer, clock()),
+                    Err(Error::Replay)
+                ));
                 assert_eq!(decoded.payload, vec![0x42; length]);
             }
             echo.await.unwrap();
@@ -99,9 +119,11 @@ async fn xray_client_to_rust_server() {
                     "address":"127.0.0.1","port":rust_port,"method":name,"password":STANDARD.encode(&psk)}]}}]}),port).await;
             let worker=tokio::spawn(async move {
                 let mut buffer=[0;4096];let mut sender=None;
+                let mut receiver=Receiver::new(key.clone(),None,4,Duration::from_secs(60)).unwrap();
                 for (index,length) in [1,512,1200].into_iter().enumerate() {
                     let (received,peer)=server.recv_from(&mut buffer).await.unwrap();
-                    let decoded=key.open_client(&buffer[..received],now()).unwrap();
+                    let decoded=receiver.receive(&buffer[..received],peer,clock()).unwrap();
+                    assert!(matches!(receiver.receive(&buffer[..received],peer,clock()),Err(Error::Replay)));
                     assert_eq!(decoded.packet_id,index as u64);
                     assert_eq!(decoded.target,TargetAddr::V4([127,0,0,1],18001));
                     assert_eq!(decoded.payload,vec![0x42;length]);
