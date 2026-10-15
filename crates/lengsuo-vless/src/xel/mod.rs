@@ -116,11 +116,7 @@ pub enum Error {
 
     /// 记录体长度越界（参考常量 17..=16640）。
     #[error("记录体长度越界：{got} 字节，允许 {min}..={max}")]
-    InvalidRecordLength {
-        got: usize,
-        min: usize,
-        max: usize,
-    },
+    InvalidRecordLength { got: usize, min: usize, max: usize },
 
     /// 明文超出单记录上限。
     #[error("明文超出单记录上限：{got} 字节，上限 {max} 字节")]
@@ -166,12 +162,15 @@ mod tests {
     fn key_must_be_32_bytes() {
         assert!(XelKey::new(&[0u8; KEY_LEN]).is_ok());
         for bytes in [&[0u8; 31][..], &[], &[0u8; 33][..]] {
-            assert_eq!(
-                XelKey::new(bytes),
-                Err(Error::InvalidKeyLength {
-                    got: bytes.len(),
-                    want: KEY_LEN
-                })
+            // XelKey 故意不实现 PartialEq/Debug，用 matches! 断言错误形状。
+            assert!(
+                matches!(
+                    XelKey::new(bytes),
+                    Err(Error::InvalidKeyLength { got, want })
+                        if got == bytes.len() && want == KEY_LEN
+                ),
+                "长度 {} 应被拒绝",
+                bytes.len()
             );
         }
     }
@@ -194,10 +193,7 @@ mod tests {
     #[test]
     fn error_display_never_prints_secret_bytes() {
         let errors = [
-            Error::InvalidKeyLength {
-                got: 32,
-                want: 16,
-            },
+            Error::InvalidKeyLength { got: 32, want: 16 },
             Error::InvalidHeader,
             Error::InvalidRecordLength {
                 got: 1,
