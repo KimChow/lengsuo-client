@@ -17,6 +17,7 @@ pub enum Error {
 pub enum Command {
     Tcp = 1,
     Udp = 2,
+    Mux = 3,
 }
 
 /// 不包含凭据，避免派生 Debug 意外输出用户标识。
@@ -32,7 +33,15 @@ pub fn encode(request: &Request, credential: &[u8; 16]) -> Result<Vec<u8>, Error
     result.push(0);
     result.extend_from_slice(credential);
     result.extend_from_slice(&[0, request.command as u8]);
-    match &request.target {
+    if request.command == Command::Mux {
+        return Ok(result);
+    }
+    encode_address(&request.target, &mut result)?;
+    Ok(result)
+}
+
+pub(crate) fn encode_address(target: &TargetAddr, result: &mut Vec<u8>) -> Result<(), Error> {
+    match target {
         TargetAddr::V4(ip, port) => {
             result.extend_from_slice(&port.to_be_bytes());
             result.push(1);
@@ -50,7 +59,7 @@ pub fn encode(request: &Request, credential: &[u8; 16]) -> Result<Vec<u8>, Error
             result.extend_from_slice(ip);
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 fn validate_domain(host: &str) -> Result<(), Error> {
@@ -74,8 +83,29 @@ pub fn decode(input: &[u8]) -> Result<([u8; 16], Request, usize), Error> {
     let command = match cursor.byte()? {
         1 => Command::Tcp,
         2 => Command::Udp,
+        3 => Command::Mux,
         _ => return Err(Error::Unsupported),
     };
+    if command == Command::Mux {
+        return Ok((
+            credential,
+            Request {
+                command,
+                target: TargetAddr::Domain("v1.mux.cool".into(), 0),
+            },
+            cursor.offset,
+        ));
+    }
+    let (target, consumed) = decode_address(&input[cursor.offset..])?;
+    Ok((
+        credential,
+        Request { command, target },
+        cursor.offset + consumed,
+    ))
+}
+
+pub(crate) fn decode_address(input: &[u8]) -> Result<(TargetAddr, usize), Error> {
+    let mut cursor = Cursor { input, offset: 0 };
     let port = u16::from_be_bytes(cursor.take(2)?.try_into().expect("固定长度"));
     let target = match cursor.byte()? {
         1 => TargetAddr::V4(cursor.take(4)?.try_into().expect("固定长度"), port),
@@ -89,7 +119,7 @@ pub fn decode(input: &[u8]) -> Result<([u8; 16], Request, usize), Error> {
         3 => TargetAddr::V6(cursor.take(16)?.try_into().expect("固定长度"), port),
         _ => return Err(Error::InvalidAddress),
     };
-    Ok((credential, Request { command, target }, cursor.offset))
+    Ok((target, cursor.offset))
 }
 
 struct Cursor<'a> {
@@ -175,7 +205,7 @@ mod tests {
             );
         }
         let bytes = encode(&request(TargetAddr::V4([1; 4], 80)), &[0; 16]).unwrap();
-        for (offset, value) in [(0, 1), (17, 1), (18, 3)] {
+        for (offset, value) in [(0, 1), (17, 1), (18, 4)] {
             let mut invalid = bytes.clone();
             invalid[offset] = value;
             assert_eq!(decode(&invalid), Err(Error::Unsupported));
