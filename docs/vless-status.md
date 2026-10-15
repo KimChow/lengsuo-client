@@ -25,6 +25,10 @@
 - 两项显式参考测试：Rust 客户端→Xray 服务端、Xray 客户端→Rust 服务端。
   IPv4 TCP 二进制载荷逐字节一致；前者还验证客户端半关闭后收取回复，
   错误用户标识导致参考端断开，测试目标在观察窗口内未收到连接。
+- 两项认证 TLS 参考测试：Rust TLS 客户端→Xray 服务端，以及 Xray TLS
+  客户端→Rust 服务端，二进制载荷一致。临时自签名证书运行时生成并显式信任，
+  不关闭证书验证；Rust 对参考端的错误主机名和不可信证书均拒绝。
+- 参考测试启动日志仅输出版本、端口、入站协议和安全层，不输出带私钥的配置。
 - 三项 UDP 参考测试：Rust 基础 UDP 客户端→Xray 服务端、Rust XUDP
   客户端→Xray 服务端，以及默认 Xray XUDP 客户端→Rust 服务端。
   每项逐个核对 1、512、1200 字节数据报，不将不同数据报合并。
@@ -37,18 +41,18 @@
 
 ```sh
 cargo test -p lengsuo-vless --locked --offline
-LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --locked --offline --test xray_tcp --test xray_udp -- --ignored --nocapture
+LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --locked --offline --test xray_tcp --test xray_udp --test xray_tls -- --ignored --nocapture
 ```
 
-参考测试检查版本与 commit 前缀，输出基线及配置摘要；普通测试默认忽略这五项，
+参考测试检查版本与 commit 前缀，输出基线及配置摘要；普通测试默认忽略这七项，
 不能将默认测试成功说成执行过参考互通。完整基线来源为研究机 references 中的
 固定源码、已核验官方发布包和二进制清单。测试进程只在当前测试期间存活。
 
 ## 尚未完成
 
 - 当前库尚未接入产品出口运行时；调用方必须在认证安全传输上使用。
-- 参考测试目前证明基础 IPv4 TCP、UDP 与单会话 XUDP 协议层；Xray TLS、
-  域名、IPv6、全部异常路径和真实测试流量重组对比尚未完成。
+- 参考测试目前证明基础 IPv4 TCP、UDP、单会话 XUDP 及 TCP/TLS；
+  UDP/TLS、域名、IPv6、全部异常路径和真实测试流量重组对比尚未完成。
 - 零长度、超大 UDP 数据报及拥塞/丢包场景仍需比较；XUDP 当前拒绝空数据报。
 - Vision、通用多会话 Mux、XUDP 跨连接会话恢复、反向代理及其他外层传输尚未实现。
 - Windows 浏览器环境隔离与 TUN 完整验收仍属于最终交付要求。
