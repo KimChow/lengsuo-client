@@ -8,6 +8,8 @@
 //!   净效果 = 存明文长；Decode 时加回 Overhead 得密文总长）
 //! - EOF：线上 size 明文 == 0（Xray 读者侧判据：decoded == Overhead(16)）
 //! - nonce：size 段与 payload 段共用同一小端递增序列（先 size 后 payload）
+//! - nonce 取尽：`write_chunk`/`write_eof`/`read_chunk` 一律透传
+//!   `Error::NonceExhausted`（fail-closed，不回绕重用；见 `crate::crypto::NonceCounter`）
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
