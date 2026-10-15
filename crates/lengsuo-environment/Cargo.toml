@@ -9,3 +9,4 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+getrandom = "0.2"
