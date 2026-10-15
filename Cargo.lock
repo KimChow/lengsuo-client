@@ -342,7 +342,11 @@ dependencies = [
 name = "lengsuo-vless"
 version = "0.1.0"
 dependencies = [
+ "lengsuo-tls",
+ "rcgen",
+ "serde_json",
  "ss-core",
+ "subtle",
  "thiserror",
  "tokio",
 ]

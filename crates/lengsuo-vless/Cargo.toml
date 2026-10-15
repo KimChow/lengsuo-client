@@ -9,3 +9,9 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+subtle = "2.6"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+lengsuo-tls = { path = "../lengsuo-tls" }
+rcgen = "0.13.2"
