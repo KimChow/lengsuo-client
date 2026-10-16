@@ -99,9 +99,17 @@ fn oracle_nonce(len: usize, bumps: u64) -> Vec<u8> {
 fn nonce_counter_matches_independent_oracle() {
     for len in [12usize, 24] {
         let mut n = NonceCounter::new(len);
-        assert_eq!(n.next(), vec![0u8; len], "FF 起始 + 先增后用 → 首值全 0");
+        assert_eq!(
+            n.next().expect("nonce"),
+            vec![0u8; len],
+            "FF 起始 + 先增后用 → 首值全 0"
+        );
         for k in 1..=300u64 {
-            assert_eq!(n.next(), oracle_nonce(len, k), "nonce #{k} len={len}");
+            assert_eq!(
+                n.next().expect("nonce"),
+                oracle_nonce(len, k),
+                "nonce #{k} len={len}"
+            );
         }
     }
     // 跨字节进位边界（byte0 走满一轮 → byte1 进位）
@@ -167,17 +175,10 @@ fn behavior_hmac_and_crc_semantics_match_vectors() {
             "crc32-IEEE pwd={}",
             c.password
         );
-        type Crc64Ecma = crc::Crc<u64, crc::TableSize<256>>;
-        const ECMA: crc::SixtyFour = crc::Spec {
-            poly: 0x42F0_E1BA_E9ED_C6B9,
-            init: 0xFFFF_FFFF_FFFF_FFFF,
-            refin: true,
-            refout: true,
-            xorout: 0xFFFF_FFFF_FFFF_FFFF,
-            check: 0x62EC_59E3_A116_F9FA,
-            residue: 0x0000_0000_0000_0000,
-        };
-        assert_eq!(Crc64Ecma::new(&ECMA).checksum(&seed_in), c.crc64_ecma);
+        // CRC-64/XZ（即 ECMA-182 反射形态）由 crate 内置参数承载，与手搓 Spec 完全一致
+        // （poly 0x42F0_E1BA_E9ED_C6B9 / init&xorout 全 F / 反射 / check 0x62EC_59E3_A116_F9FA）。
+        static ECMA: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_XZ);
+        assert_eq!(ECMA.checksum(&seed_in), c.crc64_ecma);
     }
 }
 
