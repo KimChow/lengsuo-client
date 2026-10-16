@@ -40,3 +40,18 @@ Rust 1.93.0 / MSVC，使用已核验官方 Windows Xray v26.3.27，显式运行
 异步接口，并增加双向 UDP/TLS、TCP 半关闭及错误密码拒绝检查。旧记录的
 “测试 TLS 适配”仅描述历史固定提交；当前状态与命令见 trojan-stream-status.md。
 尚未完成产品服务、全部异常与传输矩阵及 Windows 浏览器 TUN 验收。
+
+## 空闲/关闭语义（2026-10-16 新增）
+
+- 已实现 `src/drain.rs`：`BehaviorSeedLimitedDrainer`（对齐
+  `common/drain/drainer.go`：DeterministicDice 派生 DrainSize、
+  AcknowledgeReceive 抵消可成负数、DrainSize<=0 不触碰流）与 `NopDrainer`
+  （参考 trojan 默认不安装 drainer）。偏差如实注明：末端 roll 用种子化骰子
+  使其可复现（参考走 Go 全局随机），结构与取值域一致、不上线字节。
+- 已实现 `src/session.rs`（"先开门再转发"会话原语：成功响应前不交出载荷）
+  与 `stream.rs` 关闭集成（`close_stream`：drain + 写半关闭，drain 失败
+  不阻止半关闭，单截止时间覆盖两阶段）。
+- 已验证：新增 11 项 drain/session 测试与既有 27 项全过；fmt/clippy/行数
+  门禁通过。
+- 未实现（待实现）：与 Xray 的真实 drain 行为对照（需 Go 工具链生成种子
+  向量，基线环境无 Go）；互通本身已由既有 Xray TLS/UDP 测试覆盖。
