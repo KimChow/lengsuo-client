@@ -378,11 +378,6 @@ impl Handshake {
         let (ck2, tau2, key2) = kdf3(&self.chain_key, &psk);
         self.chain_key = ck2;
         self.hash = mix_hash(&self.hash, &tau2);
-        println!(
-            "CLIENT empty open: key={:02x?} aad={:02x?}",
-            &key2[..4],
-            &self.hash[..4]
-        );
         open(&key2, &empty_ct, &self.hash).map_err(|_| {
             self.state = State::Poisoned;
             Error::AuthFailed
