@@ -56,7 +56,7 @@ pub enum Error {
 }
 
 /// 本解析器认可的传输协议。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
     Tcp,
     Udp,
