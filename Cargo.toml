@@ -15,6 +15,7 @@ members = [
     "crates/lengsuo-environment",
     "crates/lengsuo-tun",
     "crates/lengsuo-node",
+    "crates/agent-memory",
     "crates/agent-core",
     "crates/agent-gateway",
 ]
