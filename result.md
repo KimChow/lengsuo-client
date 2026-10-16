@@ -9,6 +9,9 @@
   TDD 顺序：先建 crate 骨架与两份测试文件 → 编译期失败（`unresolved imports`，红）→ 再写实现转绿。
 - `cargo clippy -p agent-skills --all-targets -- -D warnings`：通过。
 - `cargo fmt -p agent-skills -- --check`：通过。
+- 基线说明：`cargo fmt --all -- --check` 在**本 crate 之外**仍有既有失败
+  （`crates/ss-core/tests/golden.rs`，我没有改动该文件；属于其它轨道/后续整理范围，
+  按本卡「仅本 crate」的完成定义不在这里顺手改，避免混入无关提交）。
 - `python scripts/check_line_limit.py`：hard-limit failures 0；本 crate 最大文件 199 行，全部低于 400 软目标。
 - 隔离 target：`CARGO_TARGET_DIR=/home/ubuntu/lengsuo-client-dev/target-skills`，未触碰其它工作树构建锁。
 - 依赖：运行时仅 `thiserror`（未需要 serde）；dev 依赖 `tempfile`。同步 fs IO，无 unsafe。

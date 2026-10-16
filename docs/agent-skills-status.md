@@ -21,6 +21,8 @@
   「站点级默认 + 用户级覆盖」分层；`load()` 扫描各根目录的一级子目录，忽略隐藏项、
   非目录与散落文件，按 `name` 升序返回（同输入同输出）；`find(name)` 大小写敏感，
   未命中返回 `Ok(None)`。
+  `find()` 每次都重新扫描目录（v0 无缓存、无 watcher）：技能文件的改动能立即生效，
+  代价是每次调用一轮同步 IO；若上层需要热点缓存，应在网关/运行时层做，不改本 API。
 - `SkillsError`：`NotFound` / `Malformed { path, reason }` / `Io { path, source }`。
   `NotFound` 只在技能目录（根目录）缺失时产生；`SKILL.md` 本身缺失走
   `load()` 的跳过语义或 `find()` 的 `Ok(None)`。
