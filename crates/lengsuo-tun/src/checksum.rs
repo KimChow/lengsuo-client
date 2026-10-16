@@ -1,8 +1,12 @@
 //! TCP/UDP 传输层校验和验证：RFC 1071 一补码和，覆盖伪首部与整个传输段。
 //!
-//! 本模块只做验证，不改写报文、不创建平台 TUN 设备、不计算或回填校验和，
+//! 本模块的公开 API 只做验证，不改写报文、不创建平台 TUN 设备、不回填校验和，
 //! 也不验证 TCP 状态机或任何应用层语义。头部结构检查复用 `packet::inspect`，
 //! 因此分片、扩展头、长度不一致和 IPv4 头部校验和失败仍以其原始错误种类返回。
+//!
+//! 唯一的例外是本 crate 内部可见的 [`checksum_of`]：`mtu` 生成 PMTUD 错误报文时
+//! 需要写入 ICMP 校验和，复用同一 RFC 1071 算法而不是另写一份。它不属于验证 API，
+//! 不改变 `verify` 的任何语义。
 //!
 //! 已知范围限制：IPv4 的 UDP 校验和字段为 0 表示发送端未计算（RFC 768），本模块
 //! 按未提供放行；IPv6 的 UDP 校验和字段为 0 一律拒绝（RFC 8200），TCP 在两个版本
@@ -150,10 +154,17 @@ fn checksum_field(protocol: Transport) -> usize {
     }
 }
 
+/// 本 crate 生成报文时写入校验和所需的内部入口：对给定各段求一补码和并取一补码。
+/// 与 `verify` 共用同一段折叠算法，避免在 `mtu` 里重写第二份实现；只读入参，
+/// 不改写任何缓冲区，也不参与 `verify` 的判定路径。
+pub(crate) fn checksum_of(parts: &[&[u8]]) -> u16 {
+    !ones_complement_sum(parts)
+}
+
 /// RFC 1071 一补码和：逐 16 位字累加，落单的末尾字节按尾部补零计入，再把进位
 /// 循环折叠回 16 位。累加用 u64：达到溢出需要 2^48 个字，远超任何真实报文长度。
 /// 所有非末尾分段均为偶数长度（伪首部 12 或 40 字节）；仅末尾传输段可补零。
-fn ones_complement_sum(parts: &[&[u8]]) -> u16 {
+pub(crate) fn ones_complement_sum(parts: &[&[u8]]) -> u16 {
     let mut sum: u64 = 0;
     for part in parts {
         let (words, tail) = part.as_chunks::<WORD>();

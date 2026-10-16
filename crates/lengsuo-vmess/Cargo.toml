@@ -6,6 +6,24 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-tokio = { workspace = true }
-thiserror = { workspace = true }
+# 以下原语 ss-core 已用（版本由 workspace 统一锁定）。本 crate 的 KDF 与 Xray VMess
+# 语义相关但不同于 ss-core::kdf（HKDF-SHA1），需直接构造 HMAC-SHA256 链与 AES-GCM；
+# ss-core::crypto::CipherSuite 不含 VMess 合法安全选项 chacha20-poly1305，故直接引入。
+# 许可：aes/aes-gcm/chacha20poly1305/hmac/sha2/rand 均为 MIT OR Apache-2.0。
+aes = { workspace = true }
+crc32fast = { workspace = true }
+sha3 = { workspace = true }
+getrandom = { workspace = true }
+md-5 = { workspace = true }
+aes-gcm = { workspace = true }
+chacha20poly1305 = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
 ss-core = { path = "../ss-core" }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util"] }
+hex = { workspace = true }
+sha1 = { workspace = true }
