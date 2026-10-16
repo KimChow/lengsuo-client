@@ -110,3 +110,14 @@ Windows Xray 使用已核验官方资产的 v26.3.27，完整发布包 SHA256
 - 结论：裸 SS2022 流量在跨境路径存在被主动探测/重置的风险——这正是仓库
   实现 AnyTLS/VLESS Reality 伪装层的原因；公网验收需经伪装层，裸协议仅限
   可信内网。相关测试保留（SS2022_VPS 环境变量触发），伪装层部署后复用。
+
+## 公网伪装层互通（2026-10-16，已验证）
+
+- 架构：本仓 SS2022 客户端 → 47 本机 Xray SS2022 入站(25002) → xray socks
+  出站 → anytls-client(31080) → [anytls TLS 隧道，公网跨境 47→VPS] →
+  anytls-server(8443) → VPS 本机 Xray SS2022 入站(25001) → SSH 端口。
+- 结果：响应头认证通过、SSH banner（SSH-2.0-OpenSSH_9.6p1）经公网隧道
+  逐字节读回——**通过**。裸 SS2022 被路径 DPI 阻断的问题由 anytls TLS
+  伪装层解决（对照实验见上一节）。
+- `tests/vps_tcp.rs` 已更新为该链路（SS2022_VPS 环境变量触发）。
+- 服务器端配套：Opened 新增 request_salt 字段（服务器派生同流响应子密钥）。
