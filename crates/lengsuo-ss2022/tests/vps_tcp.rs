@@ -46,7 +46,12 @@ async fn rust_client_ss2022_through_public_tunnel() {
     let mut replay = SessionReplay::new(Duration::from_secs(60)).unwrap();
     let now_c = clock_at(now, Instant::now());
     let opened = reader
-        .open(&mut client, &mut replay, now_c, Some(request_salt.as_slice()))
+        .open(
+            &mut client,
+            &mut replay,
+            now_c,
+            Some(request_salt.as_slice()),
+        )
         .await
         .expect("公网响应头应通过认证");
     let mut banner = opened.payload.clone();
@@ -56,6 +61,12 @@ async fn rust_client_ss2022_through_public_tunnel() {
             None => break,
         }
     }
-    println!("经公网隧道读到的 SSH banner: {}", String::from_utf8_lossy(&banner[..banner.len().min(40)]));
-    assert!(banner.starts_with(b"SSH-"), "公网隧道后必须读到真实 SSH banner");
+    println!(
+        "经公网隧道读到的 SSH banner: {}",
+        String::from_utf8_lossy(&banner[..banner.len().min(40)])
+    );
+    assert!(
+        banner.starts_with(b"SSH-"),
+        "公网隧道后必须读到真实 SSH banner"
+    );
 }
