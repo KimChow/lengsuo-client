@@ -1,0 +1,22 @@
+[package]
+name = "agent-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "本地网关：127.0.0.1 HTTP+WS、token 鉴权、域:动作 RPC 路由、事件订阅推送"
+
+[dependencies]
+agent-core = { path = "../agent-core" }
+axum = { workspace = true }
+futures-util = { workspace = true }
+getrandom = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
