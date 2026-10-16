@@ -74,7 +74,8 @@ pub enum Error {
 }
 
 /// 固定提示文案：说明「本层不加载 dll」这一约束，避免错误信息随平台漂移。
-const LIBRARY_HINT: &str = "请在宿主 crate 内加载 wintun.dll 后用 Library::from_handle 注入（本 crate 禁止 unsafe）";
+const LIBRARY_HINT: &str =
+    "请在宿主 crate 内加载 wintun.dll 后用 Library::from_handle 注入（本 crate 禁止 unsafe）";
 
 /// 设备接入层的统一返回类型。
 pub type Result<T> = std::result::Result<T, Error>;
