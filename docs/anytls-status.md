@@ -74,3 +74,23 @@ Stream ID 非零且严格递增、活跃流容量、数据与关闭的流归属�
 
 上述原语与状态机测试不能代表网络服务、复用或参考互通通过，
 不得作为可用代理发布。
+
+## 与 anytls-go v0.0.13 真实互通（2026-10-16 新增，已验证）
+
+- `tests/interop.rs` + `tests/interop/support.rs`：真实 spawn anytls-go
+  server 二进制（manifest 资产 sha256 `7e80fc09…`，源码 commit
+  `fd6167a…`，协议 v2），默认 `#[ignore]`，`LENGSUO_ANYTLS` 指向二进制。
+- 本仓客户端原语全链路：SHA256 认证 → Settings（StringMap `v=2`）→
+  SYN/PUSH（SOCKS 地址 + 载荷）→ SynAck/PUSH echo → FIN。echo 载荷
+  逐字节一致——**通过**。
+- v0.0.13 server 无条件包 TLS（自签现生成证书）。部署层 TLS 由测试的
+  python ssl 桥提供（`interop_bridge.py`：前端明文、后端 TLS 跳过校验）；
+  本仓 `lengsuo-tls` 不提供"跳过校验"配置（生产不提供），故原语层与
+  部署层的边界在测试中显式分离。server 端口随机、只绑 127.0.0.1、假口令、
+  进程由守卫回收，日志不含口令。
+- 语义核对（依据 server 源码 inbound_tcp.go/session.go）：认证成功无回包；
+  Settings 必须首个非 Waste 帧（StringMap，`v=2` 协商 ServerSettings）；
+  认证失败 fallback（v0.0.13 为空实现=断连）。
+- 已验证：6 套测试套件全过（含互通 1 项）；fmt/clippy/行数门禁通过。
+- 未验证：server→client 方向（anytls-go client 二进制 + 本仓 server 状态机
+  组装，待后续）；UDP over TCP；padding 策略协商。
