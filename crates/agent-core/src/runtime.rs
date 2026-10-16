@@ -142,10 +142,24 @@ impl Runtime {
             updated_at_ms: now,
             status: SessionStatus::Idle,
             last_seq: 0,
+            memory_digest: None,
         };
         // 会话绑定环境时，隔离键 env_id 必须与绑定一致（环境隔离边界）。
         if let Some(env) = &session.env_binding {
             session.isolation.env_id = Some(env.clone());
+        }
+        // 三层记忆注入（agent-memory-spec §4）：增强项，失败不阻断建会话。
+        if self.config.lock().expect("配置锁不得毒化").memory_enabled {
+            match self.compose_memory_digest(&session.workspace_root) {
+                Ok(digest) => session.memory_digest = Some(digest),
+                Err(e) => {
+                    self.emit(
+                        &session,
+                        "warning",
+                        json!({ "kind": "memory_compose_failed", "reason": e.to_string() }),
+                    )?;
+                }
+            }
         }
         let id = session.id;
         self.sessions.lock().expect("会话表锁不得毒化").insert(
@@ -160,6 +174,85 @@ impl Runtime {
             json!({ "status": session.status, "title": session.title, "mode": session.mode }),
         )?;
         Ok(session)
+    }
+
+    /// 组装记忆摘要（身份恒有；各层前 200 字符预览；总 ≤8000 字符）。
+    fn compose_memory_digest(&self, workspace_root: &str) -> Result<String, CoreError> {
+        use agent_memory::{MemoryEngine, MemoryPaths};
+        let engine = MemoryEngine::new(
+            MemoryPaths::new(self.workdir.join(".lengsuo"), workspace_root),
+            true,
+        );
+        let bundle = engine
+            .compose()
+            .map_err(|e| CoreError::InvalidConfig(format!("记忆组装失败: {e}")))?;
+        let mut out = String::new();
+        out.push_str(&format!(
+            "[身份] AI={} 用户={}\n",
+            bundle.identity.ai_name, bundle.identity.user_name
+        ));
+        if !bundle.identity.soul.is_empty() {
+            out.push_str(&format!("[人格] {}\n", preview(&bundle.identity.soul, 200)));
+        }
+        if let Some(m) = &bundle.user_memory {
+            out.push_str(&format!("[用户记忆] {}\n", preview(m, 200)));
+        }
+        if let Some(m) = &bundle.project_memory {
+            out.push_str(&format!("[项目记忆] {}\n", preview(m, 200)));
+        }
+        if let Some(t) = &bundle.daily_tail {
+            out.push_str(&format!("[当日日志尾] {}\n", preview(t, 200)));
+        }
+        Ok(preview(&out, 8000))
+    }
+
+    /// 记忆工具执行入口（权限门放行后由宿主调用；每次成功发 memory_update 事件）。
+    pub fn execute_memory_tool(
+        &self,
+        id: Uuid,
+        name: &str,
+        args: &Value,
+    ) -> Result<Value, CoreError> {
+        use agent_memory::{MemoryEngine, MemoryPaths};
+        let enabled = self.config.lock().expect("配置锁不得毒化").memory_enabled;
+        let session = self.get_session(id)?;
+        let engine = MemoryEngine::new(
+            MemoryPaths::new(self.workdir.join(".lengsuo"), &session.workspace_root),
+            enabled,
+        );
+        let arg = |key: &str| -> Result<String, CoreError> {
+            args.get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| CoreError::InvalidConfig(format!("缺少参数 {key}")))
+        };
+        let kind = match name {
+            "memory.append_daily" => {
+                let date = chrono::NaiveDate::parse_from_str(&arg("date")?, "%Y-%m-%d")
+                    .map_err(|_| CoreError::InvalidConfig("date 非法（YYYY-MM-DD）".into()))?;
+                let paths = agent_memory::MemoryPaths::new(
+                    self.workdir.join(".lengsuo"),
+                    &session.workspace_root,
+                );
+                agent_memory::append_daily(&paths, date, &arg("text")?)?;
+                "daily_append"
+            }
+            "memory.set_user" => {
+                engine.set_user_memory(&arg("text")?)?;
+                "user_memory"
+            }
+            "memory.set_project" => {
+                engine.set_project_memory(&arg("text")?)?;
+                "project_memory"
+            }
+            "identity.set_soul" => {
+                engine.set_soul(&arg("text")?)?;
+                "soul"
+            }
+            other => return Err(CoreError::InvalidConfig(format!("未知记忆工具: {other}"))),
+        };
+        self.emit(&session, "memory_update", json!({ "kind": kind }))?;
+        Ok(json!({ "ok": true, "kind": kind }))
     }
 
     /// 取会话快照。
@@ -571,6 +664,7 @@ impl RuntimeBuilder {
                 id,
                 HotSession {
                     session: Session {
+                        memory_digest: None,
                         id,
                         title,
                         workspace_root: workdir.display().to_string(),
@@ -614,6 +708,16 @@ fn replay_title(log: &Arc<dyn EventLog>, id: Uuid) -> String {
         }
     }
     format!("会话 {id}")
+}
+
+/// 字符级预览截断（≤max 字符，超限加省略标记）。
+fn preview(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let cut: String = text.chars().take(max).collect();
+        format!("{cut}…")
+    }
 }
 
 fn now_ms() -> u64 {

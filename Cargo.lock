@@ -41,6 +41,8 @@ dependencies = [
 name = "agent-core"
 version = "0.1.0"
 dependencies = [
+ "agent-memory",
+ "chrono",
  "regex",
  "serde",
  "serde_json",

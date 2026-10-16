@@ -47,3 +47,12 @@ pub enum CoreError {
     #[error("能力未实现（v0 占位）: {0}")]
     Unsupported(&'static str),
 }
+
+impl From<agent_memory::MemoryError> for CoreError {
+    fn from(e: agent_memory::MemoryError) -> Self {
+        match e {
+            agent_memory::MemoryError::Io { path, source } => Self::Io { path, source },
+            other => Self::InvalidConfig(other.to_string()),
+        }
+    }
+}
