@@ -268,10 +268,6 @@ impl Handshake {
         self.chain_key = initial_chain_key();
         self.hash = initial_hash();
         self.hash = mix_hash(&self.hash, &self.remote_static);
-        println!(
-            "CLIENT hash after remote_static mix: {:02x?}",
-            &self.hash[..4]
-        );
 
         // mixKey(ephemeral_public)
         let (new_ck, _) = kdf2(&self.chain_key, &ephemeral_public);
@@ -286,7 +282,6 @@ impl Handshake {
         }
         let (new_ck, temp_key) = kdf2(&self.chain_key, ss.as_bytes());
         self.chain_key = new_ck;
-        println!("CLIENT static key={:02x?}", &temp_key[..4]);
         println!("CLIENT static aad={:02x?}", &self.hash[..4]);
         let encrypted_static = seal(
             &temp_key,
@@ -309,7 +304,6 @@ impl Handshake {
         println!("CLIENT hash before ts seal={:02x?}", &self.hash[..4]);
         let encrypted_timestamp = seal(&temp_key2, &timestamp, &self.hash);
         self.hash = mix_hash(&self.hash, &encrypted_timestamp); // 参考先于组帧 mix
-        println!("CLIENT ts_ct={:02x?}", &encrypted_timestamp[..8]);
 
         // 组帧：type(1) sender(4) ephemeral(32) static(48) timestamp(28) mac1(16) mac2(16)。
         let mut msg = [0u8; INITIATION_LEN];
@@ -327,7 +321,6 @@ impl Handshake {
         self.local_ephemeral_secret = Some(ephemeral_secret);
         self.sent_index = self.local_index;
         self.state = State::InitiationCreated;
-        println!("CLIENT initiation tail hash: {:02x?}", &self.hash[..4]);
         Ok(msg)
     }
 
@@ -365,9 +358,7 @@ impl Handshake {
         let empty_ct: [u8; 16] = wire[44..60].try_into().expect("16B");
 
         // 三段 DH：mixHash/mixKey(eph) → DH(eph,eph) → DH(static,eph) → KDF3(psk)。
-        println!("CLIENT hash before resp-eph mix={:02x?}", &self.hash[..4]);
         self.hash = mix_hash(&self.hash, &ephemeral);
-        println!("CLIENT hash after resp-eph mix={:02x?}", &self.hash[..4]);
         let (new_ck, _) = kdf2(&self.chain_key, &ephemeral);
         self.chain_key = new_ck;
 
