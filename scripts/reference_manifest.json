@@ -41,9 +41,10 @@
     {
       "crate": "lengsuo-shadowsocks",
       "targets": [
+        "xray_tcp",
         "xray_udp"
       ],
-      "expected_passed": 2
+      "expected_passed": 4
     }
   ]
 }

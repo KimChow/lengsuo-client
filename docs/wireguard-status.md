@@ -24,3 +24,22 @@ Rust 双端与固定参考端双向互通、异常验证、Windows 浏览器环�
 - 未实现（待实现）：noise IK 握手消息构造（references 缺 wireguard-go
   源码，待参考入库后另开任务）、mac1/mac2 与 cookie、keepalive 计时器、
   与真实 WG 对端互通（未互通，不宣称兼容）。
+
+## Noise IK 握手客户端（2026-10-16 新增）
+
+- 已实现 `src/handshake.rs`（对齐 wireguard-go `device/noise-protocol.go`/
+  `noise-helpers.go`/`tai64n/tai64n.go`，commit `2631ce9`）：
+  initiation 构造（148B：type u32be=1 + sender + 临时公钥 + 加密静态公钥 +
+  加密 TAI64N 时间戳 + MAC1）、response 消费（92B：三段 DH + KDF3(PSK) +
+  empty AEAD 认证 + receiver 回指校验）、transport 收发密钥派生
+  （发起方 KDF2 第一输出）；MAC1 = keyed BLAKE2s-128（key =
+  BLAKE2s-256("mac1----" || 对端静态公钥)）；HKDF-BLAKE2s（KDF1/2/3）与
+  HMAC-BLAKE2s 手写实现（RFC 4231 向量锁定 HMAC 正确性——BLAKE2s 变体的
+  hmac crate 兼容性问题规避）。
+- 新增依赖 `x25519-dalek 2`（static_secrets feature）、`blake2 0.10`——
+  均 MIT/Apache-2.0 双许可。
+- 已验证：4 项新增测试（RFC 7748 §5.2 X25519 标准向量、initiation 组帧 +
+  MAC1 独立重算、响应长度失配拒绝、错对端公钥构造拒绝）与既有 24 项全过；
+  fmt/clippy/行数门禁通过。
+- 未实现（待实现）：与真实 WireGuard 对端互通（需 wireguard-go/内核对端，
+  未验证不宣称）；cookie/mac2 轮换；keepalive/重试计时；服务端响应方。

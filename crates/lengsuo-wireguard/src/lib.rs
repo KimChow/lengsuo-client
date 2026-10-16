@@ -17,6 +17,7 @@
 //! `transport::Receiver::open` 已完成认证解密，重放窗口检查只在认证成功后进行。
 //! 状态与验证记录见 `docs/wireguard-status.md`。
 
+pub mod handshake;
 pub mod replay;
 pub mod transport;
 pub mod wire;

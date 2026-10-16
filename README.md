@@ -22,3 +22,8 @@ cargo test --workspace --locked
 先阅读 [AGENTS.md](AGENTS.md)。文件硬上限 700 行、软目标 400 行；行数检查、格式、clippy、测试和构建必须通过。
 
 当前测试不代表客户端/服务端通信已实现，更不代表 Xray 所有协议完全一致。
+
+2026-10-16 协议复核：已有参考矩阵覆盖四类协议共17项测试；八协议全能力、
+安全路径及 Windows 浏览器 TUN 尚未完成。配置办法、确定缺陷与验收范围见
+[协议对等差距矩阵](docs/protocol-parity-gap.md)；自动门禁见
+[固定参考互通门禁](docs/reference-validation.md)。

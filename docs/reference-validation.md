@@ -15,7 +15,7 @@ python scripts/run_reference_tests.py --work-dir /绝对仓库外路径
 python scripts/run_reference_tests.py --work-dir /绝对仓库外路径 --archive /已下载官方包.zip
 ```
 
-当前清单为 VLESS 七项、Trojan 四项、SS2022 两项、传统 SS 两项参考测试。每个 crate 显式
+当前清单为 VLESS 七项、Trojan 四项、SS2022 两项、传统 SS 四项参考测试（TCP/UDP 各双向，共计 17 项）。每个 crate 显式
 指定测试目标及 --ignored，任一退出码非零、超时或通过数量不等于清单即失败，
 防止零用例被误报成功。新增参考用例需要同步更新清单并审阅覆盖范围。
 
@@ -34,3 +34,11 @@ python scripts/run_reference_tests.py --work-dir /绝对仓库外路径 --archiv
 7/4/2 项通过、全部退出码 0；错误 ZIP 哈希被拒绝且未执行任何参考测试。
 这些记录对应未提交运行器的工作区，报告包含源码 HEAD 与 dirty 标记，
 没有将本地结果冒充 GitHub 托管执行。托管结果应按最终提交另行核验。
+
+2026-10-16 复核：固定参考矩阵在研究机 47 执行 7/4/2/4 项，全部 exit 0。
+完整差距与配置校验见 [协议对等差距矩阵](protocol-parity-gap.md)。
+新增 SS TCP 目标已纳入清单；本轮不把 AnyTLS 的不验证证书桥接用例纳入安全互通证据。
+
+复核还发现默认分支 release/test/build-override 精简配置为空；已通过
+verify_build_profiles.py 先复现失败，再补齐 debug=0/strip，并关闭测试增量。
+不能以默认构建未报错替代此项门禁。
