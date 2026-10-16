@@ -1,0 +1,293 @@
+error[E0432]: unresolved import `crate::session::SessionBuilder`
+  --> crates/agent-mcp/src/client.rs:26:31
+   |
+26 | use crate::session::{Session, SessionBuilder, SessionConfig};
+   |                               ^^^^^^^^^^^^^^ no `SessionBuilder` in `session`
+
+error[E0425]: cannot find function `force_close` in module `crate::session`
+   --> crates/agent-mcp/src/client.rs:319:33
+    |
+319 |                 crate::session::force_close(&session).await;
+    |                                 ^^^^^^^^^^^ not found in `crate::session`
+
+error[E0425]: cannot find function `force_close` in module `crate::session`
+   --> crates/agent-mcp/src/client.rs:486:29
+    |
+486 |             crate::session::force_close(&self.session).await;
+    |                             ^^^^^^^^^^^ not found in `crate::session`
+
+error[E0425]: cannot find function `force_close` in module `crate::session`
+   --> crates/agent-mcp/src/client.rs:504:25
+    |
+504 |         crate::session::force_close(&self.session).await;
+    |                         ^^^^^^^^^^^ not found in `crate::session`
+
+error[E0425]: cannot find function `force_close` in module `crate::session`
+   --> crates/agent-mcp/src/client.rs:515:25
+    |
+515 |         crate::session::force_close(&self.session).await;
+    |                         ^^^^^^^^^^^ not found in `crate::session`
+
+error[E0308]: mismatched types
+   --> crates/agent-mcp/src/client.rs:287:26
+    |
+287 |                     Some(&params),
+    |                     ---- ^^^^^^^ expected `Duration`, found `&InitializeParams`
+    |                     |
+    |                     arguments to this enum variant are incorrect
+--
+error[E0061]: this method takes 3 arguments but 4 arguments were supplied
+   --> crates/agent-mcp/src/client.rs:284:18
+    |
+284 |                 .request(
+    |                  ^^^^^^^
+285 |                     &id,
+    |                     --- unexpected argument #1 of type `&RequestId`
+--
+error[E0308]: arguments to this method are incorrect
+   --> crates/agent-mcp/src/client.rs:297:18
+    |
+297 |                   .notify(
+    |                    ^^^^^^
+298 | /                     &OutNotification {
+299 | |                         method: "notifications/initialized",
+--
+error[E0599]: no method named `fail` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:318:25
+    |
+318 |                 session.fail(&format!("握手失败：{e}"));
+    |                         ^^^^ method not found in `Arc<Session>`
+
+error[E0599]: no method named `take_notifications` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:349:14
+    |
+347 |           let rx = client
+    |  __________________-
+348 | |             .session
+349 | |             .take_notifications()
+--
+error[E0609]: no field `notifications` on type `McpClient`
+   --> crates/agent-mcp/src/client.rs:354:16
+    |
+354 |         client.notifications = Some(rx);
+    |                ^^^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `config`, `session`, `result`, `next_id`, `shutting_down`
+--
+error[E0609]: no field `notifications` on type `McpClient`
+   --> crates/agent-mcp/src/client.rs:358:22
+    |
+358 |                     .notifications
+    |                      ^^^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `config`, `session`, `result`, `next_id`, `shutting_down`
+--
+error[E0061]: this method takes 3 arguments but 4 arguments were supplied
+   --> crates/agent-mcp/src/client.rs:418:22
+    |
+418 |         self.session.request(&id, method, params, self.config.request_timeout).await.map_err(|e| {
+    |                      ^^^^^^^ --- unexpected argument #1 of type `&RequestId`
+    |
+note: expected `Option<Value>`, found `Option<&Value>`
+--
+error[E0599]: no method named `request_value` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:428:14
+    |
+427 | /         self.session
+428 | |             .request_value(&id, method, params, self.config.request_timeout)
+    | |_____________-^^^^^^^^^^^^^
+    |
+--
+error[E0061]: this method takes 3 arguments but 4 arguments were supplied
+   --> crates/agent-mcp/src/client.rs:492:14
+    |
+492 |             .request(&id, "shutdown", None::<&Value>, self.config.request_timeout)
+    |              ^^^^^^^ --- unexpected argument #1 of type `&RequestId`
+    |
+note: expected `Option<Value>`, found `Option<&Value>`
+--
+error[E0308]: arguments to this method are incorrect
+   --> crates/agent-mcp/src/client.rs:496:14
+    |
+496 |               .notify(
+    |                ^^^^^^
+497 | /                 &OutNotification {
+498 | |                     method: "exit",
+--
+error[E0599]: no method named `wait_child` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:506:25
+    |
+506 |         if self.session.wait_child(Duration::from_secs(2)).await.is_err() {
+    |                         ^^^^^^^^^^ method not found in `Arc<Session>`
+
+error[E0599]: no method named `kill_child` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:507:34
+    |
+507 |             let _ = self.session.kill_child().await;
+    |                                  ^^^^^^^^^^ method not found in `Arc<Session>`
+
+error[E0599]: no method named `wait_child` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:516:25
+    |
+516 |         if self.session.wait_child(Duration::from_secs(2)).await.is_err() {
+    |                         ^^^^^^^^^^ method not found in `Arc<Session>`
+
+error[E0599]: no method named `kill_child` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:517:34
+    |
+517 |             let _ = self.session.kill_child().await;
+    |                                  ^^^^^^^^^^ method not found in `Arc<Session>`
+
+error[E0308]: mismatched types
+   --> crates/agent-mcp/src/client.rs:151:32
+    |
+151 |             protocol_versions: SUPPORTED_PROTOCOL_VERSIONS.to_vec(),
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Vec<String>`, found `Vec<&str>`
+    |
+    = note: expected struct `Vec<std::string::String>`
+--
+error[E0599]: no associated function or constant named `with_config` found for struct `Session` in the current scope
+   --> crates/agent-mcp/src/client.rs:161:49
+    |
+161 |                 Ok(std::sync::Arc::new(Session::with_config(
+    |                                                 ^^^^^^^^^^^ associated function or constant not found in `Session`
+    |
+   ::: crates/agent-mcp/src/session.rs:97:1
+--
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+   --> crates/agent-mcp/src/client.rs:162:21
+    |
+162 |                     SessionConfig::new(cfg.framing, cfg.max_frame_bytes, cfg.notification_capacity),
+    |                     ^^^^^^^^^^^^^^^^^^------------------------------------------------------------- argument #4 of type `Duration` is missing
+    |
+note: associated function defined here
+--
+error[E0560]: struct `SessionConfig` has no field named `request_timeout`
+   --> crates/agent-mcp/src/client.rs:219:13
+    |
+219 |             request_timeout: self.request_timeout,
+    |             ^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+--
+error[E0560]: struct `SessionConfig` has no field named `handshake_timeout`
+   --> crates/agent-mcp/src/client.rs:220:13
+    |
+220 |             handshake_timeout: self.handshake_timeout,
+    |             ^^^^^^^^^^^^^^^^^ `SessionConfig` does not have this field
+    |
+    = note: available fields are: `notify_capacity`, `default_timeout`
+--
+error[E0560]: struct `SessionConfig` has no field named `notification_capacity`
+   --> crates/agent-mcp/src/client.rs:222:13
+    |
+222 |             notification_capacity: self.notification_capacity,
+    |             ^^^^^^^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+--
+error[E0560]: struct `SessionConfig` has no field named `client_info`
+   --> crates/agent-mcp/src/client.rs:223:13
+    |
+223 |             client_info: self.client_info.clone(),
+    |             ^^^^^^^^^^^ `SessionConfig` does not have this field
+    |
+    = note: available fields are: `notify_capacity`, `default_timeout`
+--
+error[E0560]: struct `SessionConfig` has no field named `protocol_versions`
+   --> crates/agent-mcp/src/client.rs:224:13
+    |
+224 |             protocol_versions: self.protocol_versions.clone(),
+    |             ^^^^^^^^^^^^^^^^^ `SessionConfig` does not have this field
+    |
+    = note: available fields are: `notify_capacity`, `default_timeout`
+--
+error[E0560]: struct `SessionConfig` has no field named `capabilities`
+   --> crates/agent-mcp/src/client.rs:225:13
+    |
+225 |             capabilities: self.capabilities.clone(),
+    |             ^^^^^^^^^^^^ `SessionConfig` does not have this field
+    |
+    = note: available fields are: `notify_capacity`, `default_timeout`
+--
+error[E0560]: struct `SessionConfig` has no field named `session_builder`
+   --> crates/agent-mcp/src/client.rs:226:13
+    |
+226 |             session_builder: self.session_builder.clone(),
+    |             ^^^^^^^^^^^^^^^ `SessionConfig` does not have this field
+    |
+    = note: available fields are: `notify_capacity`, `default_timeout`
+--
+error[E0609]: no field `name` on type `std::option::Option<Implementation>`
+   --> crates/agent-mcp/src/client.rs:244:60
+    |
+244 |             .field("server_info", &self.result.server_info.name)
+    |                                                            ^^^^ unknown field
+    |
+help: one of the expressions' fields has a field of the same name
+--
+error[E0599]: no method named `take_notifications` found for struct `Arc<Session>` in the current scope
+   --> crates/agent-mcp/src/client.rs:523:22
+    |
+523 |         self.session.take_notifications()
+    |                      ^^^^^^^^^^^^^^^^^^
+    |
+help: there is a method `subscribe_notifications` with a similar name
+--
+error[E0277]: the trait bound `RequestId: Ord` is not satisfied
+   --> crates/agent-mcp/src/session.rs:428:52
+    |
+428 |         self.pending.lock().expect("pending 锁不中毒").insert(id, tx);
+    |                                                        ^^^^^^ the trait `Ord` is not implemented for `RequestId`
+    |
+note: required by a bound in `BTreeMap::<K, V, A>::insert`
+--
+error[E0277]: the trait bound `RequestId: Ord` is not satisfied
+   --> crates/agent-mcp/src/session.rs:432:52
+    |
+432 |         self.pending.lock().expect("pending 锁不中毒").remove(id);
+    |                                                        ^^^^^^ the trait `Ord` is not implemented for `RequestId`
+    |
+note: required by a bound in `BTreeMap::<K, V, A>::remove`
+--
+error[E0277]: the trait bound `RequestId: Ord` is not satisfied
+   --> crates/agent-mcp/src/session.rs:432:59
+    |
+432 |         self.pending.lock().expect("pending 锁不中毒").remove(id);
+    |                                                        ------ ^^ the trait `Ord` is not implemented for `RequestId`
+    |                                                        |
+    |                                                        required by a bound introduced by this call
+--
+error[E0308]: mismatched types
+   --> crates/agent-mcp/src/session.rs:442:29
+    |
+442 |             let _ = tx.send(err.clone());
+    |                        ---- ^^^^^^^^^^^ expected `ResponsePayload`, found `Error`
+    |                        |
+    |                        arguments to this method are incorrect
+--
+error[E0277]: the trait bound `RequestId: Ord` is not satisfied
+   --> crates/agent-mcp/src/session.rs:452:14
+    |
+452 |             .remove(&resp.id);
+    |              ^^^^^^ the trait `Ord` is not implemented for `RequestId`
+    |
+note: required by a bound in `BTreeMap::<K, V, A>::remove`
+--
+error[E0277]: the trait bound `RequestId: Ord` is not satisfied
+   --> crates/agent-mcp/src/session.rs:452:21
+    |
+452 |             .remove(&resp.id);
+    |              ------ ^^^^^^^^ the trait `Ord` is not implemented for `RequestId`
+    |              |
+    |              required by a bound introduced by this call
+--
+error[E0599]: no associated function or constant named `Closed` found for struct `tokio::sync::broadcast::error::SendError<T>` in the current scope
+   --> crates/agent-mcp/src/session.rs:495:46
+    |
+495 |             Err(broadcast::error::SendError::Closed(_)) => {}
+    |                                              ^^^^^^ associated function or constant not found in `tokio::sync::broadcast::error::SendError<_>`
+
+Some errors have detailed explanations: E0061, E0277, E0308, E0425, E0432, E0560, E0599, E0609.
+--
+error: could not compile `agent-mcp` (lib) due to 39 previous errors
