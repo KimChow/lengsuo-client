@@ -135,6 +135,16 @@ fn decode_record_plain(bytes: &[u8]) -> Result<(CredentialRef, &[u8]), StoreErro
 }
 
 /// 头部字节（magic + 版本 + KDF 参数 + salt + verifier）；同时作为记录 AAD 前缀。
+fn build_header_prefix(params: crypto::KdfParams, salt: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(crypto::HEADER_PREFIX_LEN);
+    out.extend_from_slice(&crypto::MAGIC);
+    out.extend_from_slice(&params.schema_version.to_le_bytes());
+    out.extend_from_slice(&params.iterations.to_le_bytes());
+    out.extend_from_slice(&params.key_len.to_le_bytes());
+    out.extend_from_slice(salt);
+    out
+}
+
 fn build_header(params: crypto::KdfParams, salt: &[u8], verifier: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(crypto::HEADER_PREFIX_LEN + 4 + verifier.len());
     out.extend_from_slice(&crypto::MAGIC);
@@ -155,7 +165,10 @@ pub(crate) fn encode_container(
     records: &[Record<'_>],
     rng: &mut impl rand::RngCore,
 ) -> Result<Vec<u8>, StoreError> {
-    let verifier = crypto::seal(key, crypto::VERIFIER_AAD, rng, crypto::VERIFIER_PLAIN)?;
+    // verifier 的 AAD = 头部前缀（magic..verifier_len 字段），与解码端一致。
+    let mut verifier_aad = build_header_prefix(params, salt);
+    verifier_aad.extend_from_slice(&(crypto::VERIFIER_PLAIN.len() as u32 + 12 + 16).to_le_bytes());
+    let verifier = crypto::seal(key, &verifier_aad, rng, crypto::VERIFIER_PLAIN)?;
     let header = build_header(params, salt, &verifier);
     let mut out = header.clone();
     out.extend_from_slice(&(records.len() as u32).to_le_bytes());
@@ -186,6 +199,8 @@ struct Header {
     salt: Vec<u8>,
     bytes: Vec<u8>,
     verifier: Vec<u8>,
+    /// verifier 密文在 `bytes` 中的起始偏移；其前缀即 verifier 的 AAD。
+    verifier_offset: usize,
 }
 
 // 手工 `Debug`：字节字段（salt/verifier 密文）只报长度，不随测试失败输出进日志。
@@ -215,25 +230,29 @@ fn decode_header(bytes: &[u8]) -> Result<Header, StoreError> {
         iterations,
         key_len,
     };
-    // 版本不识别 → 直接拒绝读取，不尝试解密。
-    if params.schema_version != crypto::SCHEMA_VERSION {
-        return Err(StoreError::UnsupportedVersion {
-            found: params.schema_version,
-            expected: crypto::SCHEMA_VERSION,
-        });
-    }
-    if !params.is_supported() {
-        return Err(StoreError::MalformedContainer("unsupported kdf parameters"));
-    }
+    // 头部任何字段（含版本）都必须先通过认证才可信：版本门与参数门移到
+    // decode_container 的 verifier 认证之后执行（见该函数注释）。
     let salt = take(&mut rest, crypto::SALT_LEN, "salt truncated")?.to_vec();
     let verifier_len = read_u32(&mut rest, "verifier length truncated")? as usize;
+    // verifier_len 字段受 AAD 认证绑定；其真实取值恒为定长（固定明文 ⇒ 55 字节）。
+    // 超乎可能的巨大长度 ⇒ 字节被篡改 ⇒ 认证失败；普通截断（仍 ≤ 4096）保留
+    // MalformedContainer 语义，由下方 take 统一报错。
+    if verifier_len > 4096 {
+        return Err(StoreError::RecordAuthentication);
+    }
+    if verifier_len > rest.len() {
+        return Err(StoreError::MalformedContainer("verifier truncated"));
+    }
     let verifier = take(&mut rest, verifier_len, "verifier truncated")?.to_vec();
     let header_len = bytes.len() - rest.len();
+    // verifier 密文之前的全部头部字节（magic..verifier_len 字段），作为 verifier 的 AAD。
+    let verifier_offset = header_len - verifier.len();
     Ok(Header {
         params,
         salt,
         bytes: bytes[..header_len].to_vec(),
         verifier,
+        verifier_offset,
     })
 }
 
@@ -243,12 +262,34 @@ pub(crate) fn decode_container(
     passphrase: &[u8],
 ) -> Result<(crypto::KdfParams, Vec<OpenedRecord>), StoreError> {
     let header = decode_header(bytes)?;
+    // KDF 参数在认证前不可信：只拦截「无法服务或会触发高开销派生」的取值
+    // （key_len/轮数），不看版本——版本门在认证之后（版本字段本身也被 AAD 绑定）。
+    // v0 iterations=1；上限给足余量，仅为拦截被篡改后的巨轮数。
+    if header.params.key_len != crypto::KEY_LEN as u32
+        || header.params.iterations == 0
+        || header.params.iterations > 16
+    {
+        return Err(StoreError::RecordAuthentication);
+    }
     let key = crypto::derive_key(passphrase, &header.salt, header.params)?;
-    // 先验证口令：verifier 认证失败统一报告为口令错误。
-    crypto::open(&key, crypto::VERIFIER_AAD, &header.verifier).map_err(|err| match err {
+    // 先验证口令：verifier 的 AAD 绑定其前缀（magic..verifier_len 字段），
+    // 头部任一字节被篡改都在此处暴露为口令错误；认证通过后才信任版本与参数。
+    crypto::open(
+        &key,
+        &header.bytes[..header.verifier_offset],
+        &header.verifier,
+    )
+    .map_err(|err| match err {
         StoreError::RecordAuthentication => StoreError::WrongPassphrase,
         other => other,
     })?;
+    // 口令验证通过后，未识别的 schema 版本才按「版本过新」拒绝（fail-closed 语义不变）。
+    if header.params.schema_version != crypto::SCHEMA_VERSION {
+        return Err(StoreError::UnsupportedVersion {
+            found: header.params.schema_version,
+            expected: crypto::SCHEMA_VERSION,
+        });
+    }
 
     let mut rest = &bytes[header.bytes.len()..];
     let count = read_u32(&mut rest, "record count truncated")? as usize;
@@ -475,16 +516,29 @@ mod tests {
     #[test]
     fn unknown_schema_version_refuses_to_decrypt() {
         let salt = [4u8; crypto::SALT_LEN];
-        let mut bytes = encode_container(
-            KdfParams::V0,
+        // 规格演进：版本字段已被 verifier AAD 认证绑定，字节篡改会先撞认证失败；
+        // 版本门只对「认证通过的未识别版本」触发 ⇒ 直接以版本 2 编码（其余参数同 V0）。
+        let bytes = encode_container(
+            KdfParams {
+                schema_version: 2,
+                iterations: 1,
+                key_len: 32,
+            },
             &salt,
-            &key_for(&salt),
+            &crypto::derive_key(
+                b"pass",
+                &salt,
+                KdfParams {
+                    schema_version: 2,
+                    iterations: 1,
+                    key_len: 32,
+                },
+            )
+            .expect("derive"),
             &records_for(&[CredentialRef::env("e", 1)], &["payload"]),
             &mut deterministic_rng(),
         )
         .expect("encode");
-        // 把头部 schema_version 改成 2（magic 之后 4 字节）。
-        bytes[crypto::MAGIC.len()..crypto::MAGIC.len() + 4].copy_from_slice(&2u32.to_le_bytes());
         match decode_container(&bytes, b"pass") {
             Err(StoreError::UnsupportedVersion { found, expected }) => {
                 assert_eq!(found, 2);

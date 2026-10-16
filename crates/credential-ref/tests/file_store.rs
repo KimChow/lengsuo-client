@@ -3,6 +3,9 @@
 //!
 //! 所有用例使用固定/可控时钟与测试专用假口令，不触碰真实凭据。
 
+// 头部偏移常量与读取辅助是布局契约的完整记录，保留备用（与 tests/support 同规则）。
+#![allow(dead_code)]
+
 mod support;
 
 use std::fs;
@@ -68,15 +71,21 @@ fn put_get_roundtrip_and_reopen_keeps_plaintext() {
     let (store, _clock) = store_at(&path, 0);
     let reference = put_env(&store, TARGET, PLAINTEXT);
 
-    assert_eq!(store.get(&reference).expect("get").as_bytes(), PLAINTEXT.as_bytes());
+    assert_eq!(
+        store.get(&reference).expect("get").as_bytes(),
+        PLAINTEXT.as_bytes()
+    );
 
     // 重新打开同一文件：引用元数据与明文都要完整回来。
-    let reopened = FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0))
-        .expect("reopen");
+    let reopened =
+        FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0)).expect("reopen");
     let got = reopened.get(&reference).expect("get after reopen");
     assert_eq!(got.as_bytes(), PLAINTEXT.as_bytes());
     assert_eq!(
-        reopened.list(&Scope::Env(TARGET.into())).expect("list").len(),
+        reopened
+            .list(&Scope::Env(TARGET.into()))
+            .expect("list")
+            .len(),
         1
     );
 }
@@ -119,7 +128,11 @@ fn wrong_passphrase_is_rejected_on_open() {
     assert!(matches!(err, StoreError::WrongPassphrase), "got {err:?}");
     assert_error_clean(&err, &[PLAINTEXT, TARGET, PASSPHRASE, WRONG_PASSPHRASE]);
     // 失败的重开不得改写或清空原文件。
-    assert_eq!(read_bytes(&path), before, "failed open must leave the file byte-identical");
+    assert_eq!(
+        read_bytes(&path),
+        before,
+        "failed open must leave the file byte-identical"
+    );
 
     // 正确口令仍能读回全部记录（证明失败是口令判定，不是库被破坏）。
     let untouched = FileStore::open(&path, PASSPHRASE).expect("right passphrase still works");
@@ -158,7 +171,10 @@ fn tampered_record_byte_fails_authentication() {
     fs::write(&path, &bytes).expect("write tampered");
 
     let err = FileStore::open(&path, PASSPHRASE).expect_err("tampered record must fail");
-    assert!(matches!(err, StoreError::RecordAuthentication), "got {err:?}");
+    assert!(
+        matches!(err, StoreError::RecordAuthentication),
+        "got {err:?}"
+    );
     assert_error_clean(&err, &[PLAINTEXT, TARGET, PASSPHRASE]);
 }
 
@@ -175,8 +191,8 @@ fn tampered_header_byte_breaks_record_binding() {
         let mut bytes = read_bytes(&path);
         bytes[offset] ^= 0x01;
         fs::write(&path, &bytes).expect("write tampered header");
-        let err = FileStore::open(&path, PASSPHRASE)
-            .expect_err("tampered header at {offset} must fail");
+        let err =
+            FileStore::open(&path, PASSPHRASE).expect_err("tampered header at {offset} must fail");
         assert!(
             matches!(
                 err,
@@ -208,8 +224,8 @@ fn every_truncated_prefix_fails_closed() {
     for case in [&full, &multi] {
         for cut in 1..case.len() {
             fs::write(&path, &case[..cut]).expect("write truncated");
-            let err = FileStore::open(&path, PASSPHRASE)
-                .expect_err("truncated file must never open");
+            let err =
+                FileStore::open(&path, PASSPHRASE).expect_err("truncated file must never open");
             assert!(
                 matches!(
                     err,
@@ -233,7 +249,10 @@ fn every_truncated_prefix_fails_closed() {
     // 完好文件仍可读取（证明上面的失败源于截断而非环境）。
     fs::write(&path, &multi).expect("restore");
     let store = FileStore::open(&path, PASSPHRASE).expect("valid file opens");
-    assert_eq!(store.get(&reference).expect("get").as_bytes(), PLAINTEXT.as_bytes());
+    assert_eq!(
+        store.get(&reference).expect("get").as_bytes(),
+        PLAINTEXT.as_bytes()
+    );
 }
 
 #[test]
@@ -241,14 +260,21 @@ fn missing_file_is_empty_store_but_unreadable_file_is_not() {
     let dir = TempDir::new("missing-vs-unreadable");
     let absent = dir.file("absent.bin");
     let store = FileStore::open(&absent, PASSPHRASE).expect("absent file is an empty store");
-    assert!(store.list(&Scope::Env(TARGET.into())).expect("list").is_empty());
+    assert!(store
+        .list(&Scope::Env(TARGET.into()))
+        .expect("list")
+        .is_empty());
 
     // 目录冒充存储文件：IO 读取失败，绝不能被当成空库静默接受。
     let directory = dir.file("not-a-file.bin");
     fs::create_dir(&directory).expect("create dir");
     let err = FileStore::open(&directory, PASSPHRASE).expect_err("unreadable must fail closed");
     assert!(matches!(err, StoreError::Io(_)), "got {err:?}");
-    assert_eq!(err.io_kind().map(|kind| kind == std::io::ErrorKind::NotFound), Some(false));
+    assert_eq!(
+        err.io_kind()
+            .map(|kind| kind == std::io::ErrorKind::NotFound),
+        Some(false)
+    );
     assert_error_clean(&err, &[PLAINTEXT, TARGET, PASSPHRASE]);
     // 路径与系统消息不得出现在任何展示面上。
     let rendered = format!("{err} {err:?}");
@@ -264,19 +290,21 @@ fn unknown_schema_version_refuses_to_decrypt() {
         let (store, _clock) = store_at(&path, 0);
         put_env(&store, TARGET, PLAINTEXT);
     }
+    // 规格演进：版本字段受 verifier AAD 认证绑定 ⇒ 篡改版本与其他头字节一致，
+    // 报认证失败（认证一致的未识别版本被版本门拒绝，由 container 单测承载）。
     for declared in [0u32, 2, 42] {
         let mut bytes = read_bytes(&path);
         // magic 之后 4 字节即 schema_version（小端）。
         bytes[8..12].copy_from_slice(&declared.to_le_bytes());
         fs::write(&path, &bytes).expect("write version");
         let err = FileStore::open(&path, PASSPHRASE).expect_err("unknown version must fail");
-        match err {
-            StoreError::UnsupportedVersion { found, expected } => {
-                assert_eq!(found, declared);
-                assert_eq!(expected, KdfParams::V0.schema_version);
-            }
-            other => panic!("expected UnsupportedVersion for {declared}, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                err,
+                StoreError::WrongPassphrase | StoreError::RecordAuthentication
+            ),
+            "declared {declared} gave {err:?}"
+        );
         assert_error_clean(&err, &[PLAINTEXT, TARGET, PASSPHRASE]);
     }
     // magic 不符同样是结构非法，且不尝试解密。
@@ -284,7 +312,10 @@ fn unknown_schema_version_refuses_to_decrypt() {
     bytes[0] ^= 0xFF;
     fs::write(&path, &bytes).expect("write magic");
     let err = FileStore::open(&path, PASSPHRASE).expect_err("bad magic must fail");
-    assert!(matches!(err, StoreError::MalformedContainer(_)), "got {err:?}");
+    assert!(
+        matches!(err, StoreError::MalformedContainer(_)),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -302,7 +333,11 @@ fn header_records_kdf_parameters_readable_back() {
     assert_eq!(u32_at(8), KdfParams::V0.schema_version);
     assert_eq!(u32_at(12), KdfParams::V0.iterations);
     assert_eq!(u32_at(16), KdfParams::V0.key_len);
-    assert_eq!(KdfParams::V0.iterations, 1, "v0 拉伸轮数为 1（内存硬化留待遗留项）");
+    assert_eq!(
+        KdfParams::V0.iterations,
+        1,
+        "v0 拉伸轮数为 1（内存硬化留待遗留项）"
+    );
     assert_eq!(KdfParams::V0.key_len, 32, "AES-256-GCM 需 32 字节密钥");
 }
 
@@ -324,7 +359,9 @@ fn expired_reference_is_rejected_on_read_and_list() {
     let err = store.get(&reference).expect_err("expired must fail");
     assert!(matches!(err, StoreError::Expired), "got {err:?}");
     assert_error_clean(&err, &[PLAINTEXT, "sess-file"]);
-    assert!(store.list(&Scope::Session("sess-file.into()".into())).is_ok());
+    assert!(store
+        .list(&Scope::Session("sess-file.into()".into()))
+        .is_ok());
     assert!(
         store
             .list(&Scope::Session("sess-file".into()))
@@ -337,7 +374,10 @@ fn expired_reference_is_rejected_on_read_and_list() {
     let survivor = put_env(&store, "env-survivor", "survivor-value");
     let bytes = read_bytes(&path);
     assert!(!windows_contains(&bytes, &2_000u64.to_le_bytes()));
-    assert_eq!(store.get(&survivor).expect("survivor").as_bytes(), b"survivor-value");
+    assert_eq!(
+        store.get(&survivor).expect("survivor").as_bytes(),
+        b"survivor-value"
+    );
 }
 
 #[test]
@@ -348,11 +388,8 @@ fn cross_scope_is_invisible_and_cannot_delete() {
     let reference = put_env(&store, TARGET, PLAINTEXT);
 
     // 同 target 字面量、不同作用域类别：不可见、不可删。
-    let as_session = CredentialRef::with_id(
-        reference.id(),
-        Scope::Session(TARGET.into()),
-        u64::MAX,
-    );
+    let as_session =
+        CredentialRef::with_id(reference.id(), Scope::Session(TARGET.into()), u64::MAX);
     let err = store.get(&as_session).expect_err("cross kind must fail");
     assert!(matches!(err, StoreError::ScopeMismatch), "got {err:?}");
     assert_error_clean(&err, &[PLAINTEXT, TARGET]);
@@ -366,8 +403,14 @@ fn cross_scope_is_invisible_and_cannot_delete() {
     assert!(matches!(store.get(&other), Err(StoreError::ScopeMismatch)));
 
     // 记录仍在，且仍可正常读取（拒绝不得有副作用）。
-    assert_eq!(store.list(&Scope::Env(TARGET.into())).expect("list").len(), 1);
-    assert_eq!(store.get(&reference).expect("still readable").as_bytes(), PLAINTEXT.as_bytes());
+    assert_eq!(
+        store.list(&Scope::Env(TARGET.into())).expect("list").len(),
+        1
+    );
+    assert_eq!(
+        store.get(&reference).expect("still readable").as_bytes(),
+        PLAINTEXT.as_bytes()
+    );
 }
 
 #[test]
@@ -381,10 +424,16 @@ fn delete_persists_and_is_idempotent() {
     assert!(!store.delete(&reference).expect("second delete is no-op"));
 
     // 删除必须落盘：重开后既读不到也列不到。
-    let reopened = FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0))
-        .expect("reopen");
-    assert!(matches!(reopened.get(&reference), Err(StoreError::NotFound)));
-    assert!(reopened.list(&Scope::Env(TARGET.into())).expect("list").is_empty());
+    let reopened =
+        FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0)).expect("reopen");
+    assert!(matches!(
+        reopened.get(&reference),
+        Err(StoreError::NotFound)
+    ));
+    assert!(reopened
+        .list(&Scope::Env(TARGET.into()))
+        .expect("list")
+        .is_empty());
     // 明文不会因删除残留在文件里。
     assert!(!file_contains(&path, PLAINTEXT.as_bytes()));
 }
@@ -395,12 +444,22 @@ fn overwrite_same_id_keeps_single_record_on_disk() {
     let path = dir.file("creds.bin");
     let (store, _clock) = store_at(&path, 0);
     let reference = CredentialRef::env(TARGET, u64::MAX);
-    store.put(&reference, &Plaintext::from("first")).expect("put");
-    store.put(&reference, &Plaintext::from("second")).expect("reput");
+    store
+        .put(&reference, &Plaintext::from("first"))
+        .expect("put");
+    store
+        .put(&reference, &Plaintext::from("second"))
+        .expect("reput");
 
-    let reopened = FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0))
-        .expect("reopen");
-    assert_eq!(reopened.list(&Scope::Env(TARGET.into())).expect("list").len(), 1);
+    let reopened =
+        FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0)).expect("reopen");
+    assert_eq!(
+        reopened
+            .list(&Scope::Env(TARGET.into()))
+            .expect("list")
+            .len(),
+        1
+    );
     assert_eq!(reopened.get(&reference).expect("get").as_bytes(), b"second");
     // 旧明文不得残留在文件里（整库原子重写，不追加）。
     let bytes = read_bytes(&path);
@@ -416,12 +475,22 @@ fn invalid_reference_put_is_rejected_without_touching_file() {
     let before = read_bytes(&path);
 
     let err = store
-        .put(&CredentialRef::env("", u64::MAX), &Plaintext::from(PLAINTEXT))
+        .put(
+            &CredentialRef::env("", u64::MAX),
+            &Plaintext::from(PLAINTEXT),
+        )
         .expect_err("empty target rejected");
     assert!(matches!(err, StoreError::InvalidReference), "got {err:?}");
     assert_error_clean(&err, &[PLAINTEXT]);
-    assert_eq!(read_bytes(&path), before, "rejected put must not rewrite the file");
-    assert_eq!(store.get(&good).expect("still readable").as_bytes(), PLAINTEXT.as_bytes());
+    assert_eq!(
+        read_bytes(&path),
+        before,
+        "rejected put must not rewrite the file"
+    );
+    assert_eq!(
+        store.get(&good).expect("still readable").as_bytes(),
+        PLAINTEXT.as_bytes()
+    );
 }
 
 #[test]
@@ -432,8 +501,12 @@ fn each_write_rotates_salt_so_identical_values_differ_on_disk() {
     for round in 0..3u64 {
         let clock = ManualClock::new(round);
         let store = FileStore::with_clock(&path, PASSPHRASE, clock.clock()).expect("open");
+        // 每轮独立 target：本测试验证「每次写盐都轮换」，不依赖同 target 复写语义。
         store
-            .put(&CredentialRef::env(TARGET, u64::MAX), &Plaintext::from(PLAINTEXT))
+            .put(
+                &CredentialRef::env(format!("{TARGET}-{round}"), u64::MAX),
+                &Plaintext::from(PLAINTEXT),
+            )
             .expect("put");
         let bytes = read_bytes(&path);
         // 头部定长前缀含 16 字节 salt（偏移 20..36）。
@@ -444,9 +517,17 @@ fn each_write_rotates_salt_so_identical_values_differ_on_disk() {
     assert_ne!(snapshots[0], snapshots[1], "salt must rotate per write");
     assert_ne!(snapshots[1], snapshots[2], "salt must rotate per write");
     // 轮换 salt 后旧文件仍可正常读回最新值。
-    let reopened = FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0))
-        .expect("reopen");
-    assert_eq!(reopened.list(&Scope::Env(TARGET.into())).expect("list").len(), 1);
+    let reopened =
+        FileStore::with_clock(&path, PASSPHRASE, credential_ref::fixed_clock(0)).expect("reopen");
+    // 三轮写入的 target 各不相同（-0/-1/-2）；最后一个 target 必须可读回恰 1 条。
+    assert_eq!(
+        reopened
+            .list(&Scope::Env(format!("{TARGET}-2")))
+            .expect("list")
+            .len(),
+        1,
+        "轮换 salt 后最新写入仍可读回"
+    );
 }
 
 #[test]
@@ -462,10 +543,19 @@ fn file_store_debug_is_redacted() {
         PASSPHRASE,
         &reference.id().as_uuid().to_string(),
     ] {
-        assert!(!rendered.contains(needle), "Debug leaks {needle:?}: {rendered}");
+        assert!(
+            !rendered.contains(needle),
+            "Debug leaks {needle:?}: {rendered}"
+        );
     }
-    assert!(rendered.contains("<redacted>"), "Debug not redacted: {rendered}");
-    assert!(rendered.contains("entries"), "Debug should expose only the count");
+    assert!(
+        rendered.contains("<redacted>"),
+        "Debug not redacted: {rendered}"
+    );
+    assert!(
+        rendered.contains("entries"),
+        "Debug should expose only the count"
+    );
 }
 
 #[test]
@@ -473,16 +563,15 @@ fn concurrent_reads_writes_and_deletes_do_not_panic() {
     let dir = TempDir::new("concurrent");
     let path = dir.file("creds.bin");
     let clock = ManualClock::new(0);
-    let store = Arc::new(
-        FileStore::with_clock(&path, PASSPHRASE, clock.clock()).expect("open store"),
-    );
+    let store =
+        Arc::new(FileStore::with_clock(&path, PASSPHRASE, clock.clock()).expect("open store"));
 
     let threads: Vec<_> = (0..6u8)
         .map(|index| {
             let store = Arc::clone(&store);
             std::thread::spawn(move || {
                 for round in 0..12u16 {
-                    let reference = CredentialRef::env(format!("env-{index}-{round}"), u64::MAX);
+                    let reference = CredentialRef::env(format!("env-{index}"), u64::MAX);
                     let value = format!("tok-{index}-{round}");
                     store
                         .put(&reference, &Plaintext::from(value.as_str()))
@@ -491,7 +580,9 @@ fn concurrent_reads_writes_and_deletes_do_not_panic() {
                         store.get(&reference).expect("get").as_bytes(),
                         value.as_bytes()
                     );
-                    let _ = store.list(&Scope::Env(format!("env-{index}"))).expect("list");
+                    let _ = store
+                        .list(&Scope::Env(format!("env-{index}")))
+                        .expect("list");
                     if round % 4 == 0 {
                         assert!(store.delete(&reference).expect("delete"));
                     }

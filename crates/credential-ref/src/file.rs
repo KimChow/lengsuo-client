@@ -1,4 +1,8 @@
 //! 加密落盘实现：口令派生密钥，AES-256-GCM 逐条随机 nonce 密封，原子重写文件。
+//!
+//! 并发规则：任何会改变落盘内容的操作（`put`/`delete`/`create`）都在**持有状态守卫的
+//! 整个期间**完成「改视图 → 快照 → 编码 → 临时文件 → rename」，因此文件内容永远等于
+//! 某一次完整视图，不会发生基于过期快照的覆盖写（丢失更新）。
 
 use std::collections::HashMap;
 use std::fmt;
@@ -114,8 +118,8 @@ impl FileStore {
         {
             let mut state = store.lock();
             state.records.clear();
+            store.flush_locked(&state)?;
         }
-        store.flush()?;
         Ok(store)
     }
 
@@ -149,26 +153,29 @@ impl FileStore {
         Ok(())
     }
 
-    /// 把当前视图写盘（原子重写）：新 salt、逐条新 nonce，过期记录不写回。
-    fn flush(&self) -> Result<(), StoreError> {
+    /// 把 `state` 视图写盘（原子重写）：新 salt、逐条新 nonce，过期记录不写回。
+    ///
+    /// **并发前提：调用方必须全程持有 `state` 守卫**。快照与 rename 处在同一个临界区内，
+    /// 否则线程 A 可以先快照、线程 B 完成写入并重命名，A 再把旧快照盖在 B 的更新之上
+    /// （经典丢失更新：内存视图正确，文件却少记录）。
+    /// 编码与写盘期间持锁会让 `get`/`list` 短暂等待，换取「文件 == 最后一次写入的视图」。
+    fn flush_locked(&self, state: &State) -> Result<(), StoreError> {
         let now = (self.clock)();
-        let snapshot: Vec<(CredentialRef, Plaintext)> = self
-            .lock()
+        let mut snapshot: Vec<&(CredentialRef, Plaintext)> = state
             .records
             .values()
             .filter(|(reference, _)| !reference.is_expired_at(now))
-            .cloned()
             .collect();
         // 记录顺序必须稳定：按 id 排序，保证同一库内容写盘结果与插入顺序无关。
-        let mut snapshot = snapshot;
         snapshot.sort_by_key(|(reference, _)| reference.id().as_uuid().as_u128());
         let records: Vec<Record<'_>> = snapshot
             .iter()
-            .map(|(reference, plaintext)| Record {
-                reference,
-                plaintext: plaintext.as_bytes(),
+            .map(|entry| Record {
+                reference: &entry.0,
+                plaintext: entry.1.as_bytes(),
             })
             .collect();
+        // 锁序固定为 state → rng，反向路径不存在，不会自锁。
         let bytes = {
             let mut guard = self
                 .rng
@@ -213,7 +220,21 @@ fn read_records(
     passphrase: &[u8],
 ) -> Result<Vec<(CredentialRef, Plaintext)>, StoreError> {
     let bytes = fs::read(path)?;
-    let (_params, records) = container::decode_container(&bytes, passphrase)?;
+    let r = container::decode_container(&bytes, passphrase);
+    match &r {
+        Ok((_p, recs)) => eprintln!(
+            "[probe] decode ok bytes={} records={}",
+            bytes.len(),
+            recs.len()
+        ),
+        Err(e) => eprintln!(
+            "[probe] decode err bytes={} err={:?} file={}",
+            bytes.len(),
+            e,
+            path.display()
+        ),
+    }
+    let (_params, records) = r?;
     Ok(records
         .into_iter()
         .map(|record| (record.reference, record.plaintext))
@@ -259,25 +280,25 @@ impl SecretStore for FileStore {
         if !reference.is_valid() {
             return Err(StoreError::InvalidReference);
         }
-        {
-            let mut state = self.lock();
-            state.records.insert(
-                reference.id(),
-                (
-                    reference.clone(),
-                    Plaintext::new(plaintext.as_bytes().to_vec()),
-                ),
-            );
+        // 守卫横跨「改视图 → 快照 → 编码 → rename」，写盘失败也不放锁再回滚，
+        // 保证任何时刻文件都是某一次完整视图，不会落下中间态。
+        let mut state = self.lock();
+        let previous = state.records.insert(
+            reference.id(),
+            (
+                reference.clone(),
+                Plaintext::new(plaintext.as_bytes().to_vec()),
+            ),
+        );
+        if let Err(err) = self.flush_locked(&state) {
+            // 写盘失败：恢复原值（而非直接删除），避免覆盖写失败时丢掉旧记录。
+            match previous {
+                Some(entry) => state.records.insert(reference.id(), entry),
+                None => state.records.remove(&reference.id()),
+            };
+            return Err(err);
         }
-        match self.flush() {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                // 写盘失败：回滚内存视图，避免与文件不一致。
-                let mut state = self.lock();
-                state.records.remove(&reference.id());
-                Err(err)
-            }
-        }
+        Ok(())
     }
 
     fn get(&self, reference: &CredentialRef) -> Result<Plaintext, StoreError> {
@@ -296,21 +317,24 @@ impl SecretStore for FileStore {
     }
 
     fn delete(&self, reference: &CredentialRef) -> Result<bool, StoreError> {
-        let removed = {
-            let mut state = self.lock();
-            match state.records.get(&reference.id()) {
-                Some((stored, _)) if stored.scope().same_scope(reference.scope()) => {
-                    state.records.remove(&reference.id());
-                    true
-                }
-                Some(_) => return Err(StoreError::ScopeMismatch),
-                None => false,
+        let mut state = self.lock();
+        let removed = match state.records.get(&reference.id()) {
+            Some((stored, _)) if stored.scope().same_scope(reference.scope()) => {
+                state.records.remove(&reference.id())
             }
+            Some(_) => return Err(StoreError::ScopeMismatch),
+            None => None,
         };
-        if removed {
-            self.flush()?;
+        let Some(entry) = removed else {
+            return Ok(false);
+        };
+        // 删除同样必须在持有守卫时落盘，否则并发写会基于旧视图重写，把已删记录带回文件。
+        if let Err(err) = self.flush_locked(&state) {
+            // 写盘失败：把刚摘下的记录原样放回，内存视图与文件保持一致。
+            state.records.insert(reference.id(), entry);
+            return Err(err);
         }
-        Ok(removed)
+        Ok(true)
     }
 
     fn list(&self, scope: &Scope) -> Result<Vec<CredentialRef>, StoreError> {

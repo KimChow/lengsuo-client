@@ -32,8 +32,6 @@ pub(crate) const KEY_LEN: usize = 32;
 pub(crate) const HEADER_PREFIX_LEN: usize = 8 + std::mem::size_of::<u32>() * 3 + SALT_LEN;
 /// verifier 明文（固定值，仅用于口令自检，不含用户数据）。
 pub(crate) const VERIFIER_PLAIN: &[u8] = b"lengsuo-cred-store-verifier";
-/// verifier 的 AAD（与记录 AAD 区分，防止密文挪作自检）。
-pub(crate) const VERIFIER_AAD: &[u8] = b"lengsuo-credential-store-verifier";
 
 /// KDF 参数：随文件头落盘，读回时用于校验与将来迁移。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
