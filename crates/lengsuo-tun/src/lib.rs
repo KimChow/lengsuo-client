@@ -21,6 +21,8 @@
 #![forbid(unsafe_code)]
 
 pub mod checksum;
+#[cfg(windows)]
+pub mod device;
 pub mod mtu;
 pub mod packet;
 pub mod session;
