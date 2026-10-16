@@ -10,9 +10,7 @@
 //! - `?`：段内单字符；`{n}`/`{n..m}`/`{n..}` 只在路径尾部限定剩余段数（上界必须有界）；
 //! - 其余字符一律字面量（无转义语言）；大小写敏感；百分号转义只校验合法性、不解码。
 
-use policy_engine::pattern::{
-    more_specific, CompileError, NormalizedUrl, Pattern, Specificity,
-};
+use policy_engine::pattern::{more_specific, CompileError, NormalizedUrl, Pattern, Specificity};
 
 const HTTPS: &str = "https:";
 const HTTP: &str = "http:";
@@ -165,10 +163,7 @@ fn scheme_defaults_to_https_and_does_not_participate_in_matching() {
         parse(&format!("{}example.com/a", HTTP)).as_str(),
         "example.com/a"
     );
-    assert_eq!(
-        parse("HTTPS://example.com/a").as_str(),
-        "example.com/a"
-    );
+    assert_eq!(parse("HTTPS://example.com/a").as_str(), "example.com/a");
     assert_eq!(parse("example.com").as_str(), "example.com/");
     assert_eq!(parse("example.com/").as_str(), "example.com/");
     // 端口属于 host 的一部分：模式需显式写出，不带端口不匹配带端口。
@@ -178,10 +173,7 @@ fn scheme_defaults_to_https_and_does_not_participate_in_matching() {
     assert!(!hit("example.com", "example.com:8443/"));
     assert!(hit("example.com:8443", "example.com:8443/"));
     // IPv6 字面量保留方括号，不参与通配折叠。
-    assert_eq!(
-        parse("[::1]:8443/a").as_str(),
-        "[::1]:8443/a"
-    );
+    assert_eq!(parse("[::1]:8443/a").as_str(), "[::1]:8443/a");
     assert!(hit("[::1]:8443/a", "[::1]:8443/a"));
 }
 
@@ -192,7 +184,12 @@ fn query_and_fragment_are_stripped_so_rules_cannot_be_evaded() {
     assert!(hit("example.com/a", "example.com/a?q=1"));
     assert!(hit("example.com/a", "example.com/a#frag"));
     assert!(hit("example.com/*", "example.com/a?q=1&x=2#f"));
-    assert!(!hit("example.com/b", "example.com/b?x=1"));
+    // 参数改名/换值不能逃逸 `*` 通配（旁证，不参与 query 剥离断言本身）。
+    assert!(hit("example.com/*", "example.com/b?x=1"));
+
+    // 真正的防逃逸测试：字面量规则在剥离 query 后照常命中 —— 追加参数
+    // 不能把已命中的规则洗成未命中（规格 §2.5，与上一条互为对照）。
+    assert!(hit("example.com/b", "example.com/b?x=1"));
     assert_eq!(parse("example.com/?q=1").as_str(), "example.com/");
     assert_eq!(parse("example.com#frag").as_str(), "example.com/");
 }
@@ -286,11 +283,11 @@ fn pattern_compile_rejects_degenerate_and_oversized_input() {
 #[test]
 fn illegal_wildcard_shapes_are_rejected_at_compile_time() {
     for bad in [
-        "example.com/a**b", // `**` 必须独占一段
-        "**x.example.com",  // host 区内混字面量
-        "example.com/{",    // 未闭合
-        "example.com/{1",   // 未闭合
-        "example.com/{-1}", // 负数
+        "example.com/a**b",   // `**` 必须独占一段
+        "**x.example.com",    // host 区内混字面量
+        "example.com/{",      // 未闭合
+        "example.com/{1",     // 未闭合
+        "example.com/{-1}",   // 负数
         "example.com/{1..}x", // 段数限定只允许出现在尾部
         "example.com/*#frag", // 片段不属于比较面
         "example.com/a?q=1",  // 查询串不属于比较面
