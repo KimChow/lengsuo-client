@@ -83,3 +83,21 @@ MSVC / Rust 1.93.0，仓库外独立构建目录。执行 `cargo test -p lengsuo
 命令，两项参考测试均通过且各覆盖两种 AES 方法，退出码均为 0。
 Windows Xray 使用已核验官方资产的 v26.3.27，完整发布包 SHA256
 见 vless-status.md 的 Windows 记录。没有启动浏览器或 TUN 设备。
+
+## 规格修正与 TCP↔Xray 真实互通（2026-10-16，已验证）
+
+- **规格修正**：与 Xray 实跑对照发现原 TCP 固定头结构与 SIP022 规格不符，
+  已按 `ss2022-edition-*.md` §3.1.3 重构：
+  type 字节 **0=请求流 / 1=响应流**（原实现写反）；
+  请求固定头 = type(1) + timestamp(u64be) + length(u16be) = **11 字节**；
+  响应固定头 = type(1) + timestamp(8) + request_salt(16/32B 原样回传) +
+  length(2) = **27/43 字节**（该 chunk 兼任首个 length chunk）；
+  TCP 流内**没有 session id 字段**，响应归属以完整请求 salt 对照。
+- **互通已验证**：`tests/xray_tcp.rs` 真实 spawn Xray（26.3.27，commit
+  `d2758a0…`）SS2022 入站，本仓客户端原语全链路（salt+固定头+变长头+载荷
+  帧+EOF）→ 目标 echo → 回程逐字节一致——**通过**。
+- 实现差异记录：变长头 padding=8 时出现 8 字节错位（Xray/sing 的变长头
+  布局与 spec 文档 §3.1.3 的 padding 字段顺序存在出入）；padding=0 下双向
+  完全一致。已在本测试固定 padding=0 并把差异记录于此，待与 sing 源码
+  核对后决定是否支持非零 padding。
+- 已验证：7 套件（含互通 1 项）全过；fmt/clippy/行数门禁通过。
