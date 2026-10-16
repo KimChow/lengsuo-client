@@ -73,6 +73,22 @@ fn hmac2_blake2s(key: &[u8], in0: &[u8], in1: &[u8]) -> [u8; 32] {
     hmac_blake2s(key, &joined)
 }
 
+pub fn mix_hash_pub(h: [u8; 32], data: &[u8]) -> [u8; 32] {
+    mix_hash(&h, data)
+}
+pub fn kdf2_pub(key: [u8; 32], input: &[u8]) -> ([u8; 32], [u8; 32]) {
+    kdf2(&key, input)
+}
+pub fn kdf3_pub(key: [u8; 32], input: &[u8]) -> ([u8; 32], [u8; 32], [u8; 32]) {
+    kdf3(&key, input)
+}
+pub fn open_aead(key: &[u8; 32], ct: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
+    open(key, ct, aad)
+}
+pub fn seal_aead(key: &[u8; 32], plain: &[u8], aad: &[u8]) -> Vec<u8> {
+    seal(key, plain, aad)
+}
+
 /// `KDF1`。
 /// `KDF2`：返回 (t0, t1)。
 fn kdf2(key: &[u8], input: &[u8]) -> ([u8; 32], [u8; 32]) {
@@ -252,6 +268,10 @@ impl Handshake {
         self.chain_key = initial_chain_key();
         self.hash = initial_hash();
         self.hash = mix_hash(&self.hash, &self.remote_static);
+        println!(
+            "CLIENT hash after remote_static mix: {:02x?}",
+            &self.hash[..4]
+        );
 
         // mixKey(ephemeral_public)
         let (new_ck, _) = kdf2(&self.chain_key, &ephemeral_public);
@@ -266,6 +286,8 @@ impl Handshake {
         }
         let (new_ck, temp_key) = kdf2(&self.chain_key, ss.as_bytes());
         self.chain_key = new_ck;
+        println!("CLIENT static key={:02x?}", &temp_key[..4]);
+        println!("CLIENT static aad={:02x?}", &self.hash[..4]);
         let encrypted_static = seal(
             &temp_key,
             XPublic::from(&self.static_secret).as_bytes(),
@@ -284,7 +306,10 @@ impl Handshake {
         let (new_ck, temp_key2) = kdf2(&self.chain_key, static_ss.as_bytes());
         self.chain_key = new_ck;
         let timestamp = tai64n_now();
+        println!("CLIENT hash before ts seal={:02x?}", &self.hash[..4]);
         let encrypted_timestamp = seal(&temp_key2, &timestamp, &self.hash);
+        self.hash = mix_hash(&self.hash, &encrypted_timestamp); // 参考先于组帧 mix
+        println!("CLIENT ts_ct={:02x?}", &encrypted_timestamp[..8]);
 
         // 组帧：type(1) sender(4) ephemeral(32) static(48) timestamp(28) mac1(16) mac2(16)。
         let mut msg = [0u8; INITIATION_LEN];
@@ -302,6 +327,7 @@ impl Handshake {
         self.local_ephemeral_secret = Some(ephemeral_secret);
         self.sent_index = self.local_index;
         self.state = State::InitiationCreated;
+        println!("CLIENT initiation tail hash: {:02x?}", &self.hash[..4]);
         Ok(msg)
     }
 
@@ -335,10 +361,13 @@ impl Handshake {
             });
         }
         let ephemeral: [u8; 32] = wire[12..44].try_into().expect("32B");
-        let empty_ct: [u8; 48] = wire[44..92].try_into().expect("48B");
+        // Empty 区域 48B 中只有前 16B 是 AEAD tag（Seal 空明文），其余为定长结构体填充零。
+        let empty_ct: [u8; 16] = wire[44..60].try_into().expect("16B");
 
         // 三段 DH：mixHash/mixKey(eph) → DH(eph,eph) → DH(static,eph) → KDF3(psk)。
+        println!("CLIENT hash before resp-eph mix={:02x?}", &self.hash[..4]);
         self.hash = mix_hash(&self.hash, &ephemeral);
+        println!("CLIENT hash after resp-eph mix={:02x?}", &self.hash[..4]);
         let (new_ck, _) = kdf2(&self.chain_key, &ephemeral);
         self.chain_key = new_ck;
 
@@ -351,25 +380,25 @@ impl Handshake {
         self.chain_key = new_ck;
 
         let ss2 = self.static_secret.diffie_hellman(&XPublic::from(ephemeral));
-        let (new_ck, tau, temp_key) = kdf3(&self.chain_key, ss2.as_bytes());
+        let (new_ck, _tau, _temp_key) = kdf3(&self.chain_key, ss2.as_bytes());
         self.chain_key = new_ck;
 
-        if let Some(psk) = &self.preshared_key {
-            let (ck2, tau2, key2) = kdf3(&self.chain_key, psk);
-            self.chain_key = ck2;
-            let _ = (tau, tau2, key2);
-            self.hash = mix_hash(&self.hash, &tau2);
-            open(&key2, &empty_ct, &self.hash).map_err(|_| {
-                self.state = State::Poisoned;
-                Error::AuthFailed
-            })?;
-        } else {
-            self.hash = mix_hash(&self.hash, &tau);
-            open(&temp_key, &empty_ct, &self.hash).map_err(|_| {
-                self.state = State::Poisoned;
-                Error::AuthFailed
-            })?;
-        }
+        // 参考语义：PSK 永远参与 KDF3（None = 全零 PSK）；tau 混入 hash 后
+        // 用 KDF3 的 key(t2) 做 empty AEAD 认证。
+        let psk = self.preshared_key.unwrap_or([0u8; PSK_LEN]);
+        let (ck2, tau2, key2) = kdf3(&self.chain_key, &psk);
+        println!("CLIENT tau2={:02x?}", &tau2[..4]);
+        self.chain_key = ck2;
+        self.hash = mix_hash(&self.hash, &tau2);
+        println!(
+            "CLIENT empty open: key={:02x?} aad={:02x?}",
+            &key2[..4],
+            &self.hash[..4]
+        );
+        open(&key2, &empty_ct, &self.hash).map_err(|_| {
+            self.state = State::Poisoned;
+            Error::AuthFailed
+        })?;
         self.hash = mix_hash(&self.hash, &empty_ct);
 
         // 密钥派生：发起方 KDF2(chainKey, nil) = (send, recv)。
