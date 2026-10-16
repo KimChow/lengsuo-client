@@ -282,7 +282,6 @@ impl Handshake {
         }
         let (new_ck, temp_key) = kdf2(&self.chain_key, ss.as_bytes());
         self.chain_key = new_ck;
-        println!("CLIENT static aad={:02x?}", &self.hash[..4]);
         let encrypted_static = seal(
             &temp_key,
             XPublic::from(&self.static_secret).as_bytes(),
@@ -301,7 +300,6 @@ impl Handshake {
         let (new_ck, temp_key2) = kdf2(&self.chain_key, static_ss.as_bytes());
         self.chain_key = new_ck;
         let timestamp = tai64n_now();
-        println!("CLIENT hash before ts seal={:02x?}", &self.hash[..4]);
         let encrypted_timestamp = seal(&temp_key2, &timestamp, &self.hash);
         self.hash = mix_hash(&self.hash, &encrypted_timestamp); // 参考先于组帧 mix
 
@@ -378,7 +376,6 @@ impl Handshake {
         // 用 KDF3 的 key(t2) 做 empty AEAD 认证。
         let psk = self.preshared_key.unwrap_or([0u8; PSK_LEN]);
         let (ck2, tau2, key2) = kdf3(&self.chain_key, &psk);
-        println!("CLIENT tau2={:02x?}", &tau2[..4]);
         self.chain_key = ck2;
         self.hash = mix_hash(&self.hash, &tau2);
         println!(
