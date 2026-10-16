@@ -9,3 +9,6 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+
+[target."cfg(windows)".dependencies]
+wintun = "0.5.1"
