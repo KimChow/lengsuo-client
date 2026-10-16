@@ -22,6 +22,7 @@ members = [
     "crates/credential-ref",
     "crates/agent-mcp",
     "crates/agent-tasks",
+    "crates/agent-skills",
 ]
 
 [workspace.package]

@@ -77,6 +77,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-skills"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "agent-tasks"
 version = "0.1.0"
 dependencies = [
