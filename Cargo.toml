@@ -23,6 +23,7 @@ members = [
     "crates/agent-mcp",
     "crates/agent-tasks",
     "crates/agent-skills",
+    "crates/agent-prompts",
 ]
 
 [workspace.package]
