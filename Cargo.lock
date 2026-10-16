@@ -360,6 +360,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "credential-ref"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "hkdf",
+ "rand 0.8.8",
+ "serde",
+ "sha2",
+ "thiserror 2.0.21",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -19,6 +19,7 @@ members = [
     "crates/agent-gateway",
     "crates/policy-engine",
     "crates/lengsuo-shell",
+    "crates/credential-ref",
 ]
 
 [workspace.package]
