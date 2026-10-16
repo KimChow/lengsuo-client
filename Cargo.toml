@@ -21,6 +21,7 @@ members = [
     "crates/lengsuo-shell",
     "crates/credential-ref",
     "crates/agent-mcp",
+    "crates/agent-tasks",
 ]
 
 [workspace.package]
