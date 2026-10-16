@@ -174,7 +174,7 @@ fn behavior_hmac_and_crc_semantics_match_vectors() {
             refin: true,
             refout: true,
             xorout: 0xFFFF_FFFF_FFFF_FFFF,
-            check: 0x62_EC_59E3_A116_F9FA,
+            check: 0x62EC_59E3_A116_F9FA,
             residue: 0x0000_0000_0000_0000,
         };
         assert_eq!(Crc64Ecma::new(&ECMA).checksum(&seed_in), c.crc64_ecma);
