@@ -42,8 +42,9 @@ const SERVER_REQUEST_LOG: usize = 64;
 /// 通知广播通道的最小容量（配置为 0 时按 1 处理）。
 const MIN_NOTIFY_CAPACITY: usize = 1;
 
-/// 响应投递通道。
-type Reply = oneshot::Sender<ResponsePayload>;
+/// 响应投递通道。投递 `Ok(负载)`，连接级失败投递 `Err(错误)`，这样超时
+/// 引发的连带失败（poisoned）能原样传给等待方，不会伪装成一条响应。
+type Reply = oneshot::Sender<Result<ResponsePayload, Error>>;
 
 /// 会话参数。
 #[derive(Debug, Clone)]
@@ -79,13 +80,19 @@ struct Inner {
     max_frame_bytes: usize,
     default_timeout: Duration,
     /// 写侧。锁保证一帧的 `write_all + flush` 不被别的请求交叉拆开。
+    /// 会话构造与传输安装分两步，未安装前为 `None`。
     writer: AsyncMutex<Option<ChildStdin>>,
+    /// 是否已安装传输（stdio 子进程管道）。
+    transport: AtomicBool,
     /// 在途请求表。std Mutex：全程不跨 await 持有。
     pending: Mutex<BTreeMap<RequestId, Reply>>,
     /// 致命损坏原因；非 `None` 时连接必须丢弃。
     poison: Mutex<Option<String>>,
     closed: AtomicBool,
     notify_tx: broadcast::Sender<JsonRpcNotification>,
+    /// 会话创建时预留的订阅端：只能被上层取走一次（[`Session::take_notifications`]），
+    /// 取走后由转发任务转成交付通道，保证读循环不被慢消费者阻塞。
+    notify_seed: Mutex<Option<broadcast::Receiver<JsonRpcNotification>>>,
     /// 慢订阅者滞后次数（诊断用；策略是丢弃最旧而不是阻塞读循环）。
     notify_dropped: AtomicU64,
     server_requests: Mutex<Vec<ServerRequest>>,
@@ -94,46 +101,86 @@ struct Inner {
 }
 
 /// 一条已建立 stdio 连接的 MCP 会话（低层，供 [`crate::client`] 使用）。
+///
+/// 会话构造与传输安装分两步（[`Session::with_config`] →
+/// [`Session::attach_stdio`]）：`ClientConfig` 的会话构造钩子
+/// [`crate::client::ClientConfig::session_builder`] 只负责前者，stdio 之外的
+/// 传输（将来 HTTP/SSE）可以自己预装传输后跳过 spawn。
 pub(crate) struct Session {
     inner: Arc<Inner>,
-    child: AsyncMutex<Child>,
+    child: AsyncMutex<Option<Child>>,
     next_id: AtomicI64,
     reader_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Session {
-    /// 由子进程 stdin/stdout 建立会话并启动 reader 任务。
-    pub(crate) fn new(
-        stdin: ChildStdin,
-        stdout: ChildStdout,
-        child: Child,
-        config: SessionConfig,
-    ) -> Arc<Self> {
-        let (notify_tx, _rx) = broadcast::channel(config.notify_capacity.max(MIN_NOTIFY_CAPACITY));
+    /// 建立会话状态但不安装传输：`has_transport()` 为 `false`，任何请求都会
+    /// 以 [`Error::Transport`] fail-closed 拒绝，直到 [`Self::attach_stdio`]。
+    #[must_use]
+    pub(crate) fn with_config(config: SessionConfig) -> Arc<Self> {
+        let (notify_tx, rx) = broadcast::channel(config.notify_capacity.max(MIN_NOTIFY_CAPACITY));
         let inner = Arc::new(Inner {
             framing: config.framing,
             max_frame_bytes: config.max_frame_bytes,
             default_timeout: config.default_timeout,
-            writer: AsyncMutex::new(Some(stdin)),
+            writer: AsyncMutex::new(None),
+            transport: AtomicBool::new(false),
             pending: Mutex::new(BTreeMap::new()),
             poison: Mutex::new(None),
             closed: AtomicBool::new(false),
             notify_tx,
+            notify_seed: Mutex::new(Some(rx)),
             notify_dropped: AtomicU64::new(0),
             server_requests: Mutex::new(Vec::new()),
             unmatched_responses: AtomicU64::new(0),
             ignored_messages: AtomicU64::new(0),
         });
-        let task = tokio::spawn(reader_loop(
-            BufReader::with_capacity(READ_CHUNK_BYTES, stdout),
-            Arc::clone(&inner),
-        ));
         Arc::new(Self {
             inner,
-            child: AsyncMutex::new(child),
+            child: AsyncMutex::new(None),
             next_id: AtomicI64::new(1),
-            reader_task: Mutex::new(Some(task)),
+            reader_task: Mutex::new(None),
         })
+    }
+
+    /// 安装 stdio 传输：接管子进程管道并启动 reader 任务。只能成功一次。
+    ///
+    /// # Errors
+    /// [`Error::Transport`]：该会话已安装过传输（不覆盖，避免旧管道泄漏）。
+    pub(crate) async fn attach_stdio(
+        &self,
+        stdin: ChildStdin,
+        stdout: ChildStdout,
+        child: Child,
+    ) -> Result<(), Error> {
+        {
+            let mut writer = self.inner.writer.lock().await;
+            if writer.is_some() || self.inner.transport.load(Ordering::Acquire) {
+                return Err(Error::Transport {
+                    reason: "会话已安装传输，不能重复安装".to_string(),
+                });
+            }
+            *writer = Some(stdin);
+            *self.child.lock().await = Some(child);
+            self.inner.transport.store(true, Ordering::Release);
+        }
+        let task = tokio::spawn(reader_loop(
+            BufReader::with_capacity(READ_CHUNK_BYTES, stdout),
+            Arc::clone(&self.inner),
+        ));
+        *self.reader_task.lock().expect("reader 锁不中毒") = Some(task);
+        Ok(())
+    }
+
+    /// 是否已安装传输。
+    #[must_use]
+    pub(crate) fn has_transport(&self) -> bool {
+        self.inner.transport.load(Ordering::Acquire)
+    }
+
+    /// 以显式标记 poisoned：上层在握手失败等路径上留下原因文本。
+    pub(crate) fn fail(&self, reason: &str) {
+        self.inner.poison(reason.to_string());
     }
 
     #[must_use]
@@ -439,7 +486,7 @@ impl Inner {
             std::mem::take(&mut *guard).into_values().collect()
         };
         for tx in entries {
-            let _ = tx.send(err.clone());
+            let _ = tx.send(Err(err.clone()));
         }
     }
 
@@ -452,7 +499,7 @@ impl Inner {
             .remove(&resp.id);
         match tx {
             Some(tx) => {
-                let _ = tx.send(resp.payload());
+                let _ = tx.send(resp.payload);
             }
             None => {
                 self.unmatched_responses.fetch_add(1, Ordering::AcqRel);
@@ -488,12 +535,12 @@ impl Inner {
         }
     }
 
-    /// 广播一条通知。无订阅者属正常（返回 0）；订阅者滞后则计数并让它丢最旧。
+    /// 广播一条通知。无订阅者属正常（`send` 返回 `Err` 只代表所有订阅端都已
+    /// 释放）；订阅者滞后由 `Receiver::recv` 侧丢最旧，本端只计数不阻塞读循环。
     fn broadcast_notification(&self, note: JsonRpcNotification) {
-        match self.notify_tx.send(note) {
-            Ok(_receivers) => {}
-            Err(broadcast::error::SendError::Closed(_)) => {}
-        }
+        // 会话尚未建立订阅端（握手阶段）与订阅端已释放都属正常路径：通知不是
+        // 协议状态权威来源，不能因为没人收就判定连接损坏。
+        let _ = self.notify_tx.send(note);
     }
 
     fn record_server_request(&self, req: ServerRequest) {
