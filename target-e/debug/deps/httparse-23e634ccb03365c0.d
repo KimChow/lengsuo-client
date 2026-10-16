@@ -1,0 +1,12 @@
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/target-e/debug/deps/httparse-23e634ccb03365c0.d: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/iter.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/macros.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/mod.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/swar.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/sse42.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/avx2.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/runtime.rs
+
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/target-e/debug/deps/libhttparse-23e634ccb03365c0.rmeta: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/iter.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/macros.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/mod.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/swar.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/sse42.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/avx2.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/runtime.rs
+
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/lib.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/iter.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/macros.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/mod.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/swar.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/sse42.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/avx2.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/httparse-1.10.1/src/simd/runtime.rs:

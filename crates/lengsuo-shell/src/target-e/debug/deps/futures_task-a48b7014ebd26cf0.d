@@ -1,0 +1,11 @@
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/crates/lengsuo-shell/src/target-e/debug/deps/futures_task-a48b7014ebd26cf0.d: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/spawn.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/arc_wake.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/waker.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/waker_ref.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/future_obj.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/noop_waker.rs
+
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/crates/lengsuo-shell/src/target-e/debug/deps/libfutures_task-a48b7014ebd26cf0.rmeta: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/spawn.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/arc_wake.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/waker.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/waker_ref.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/future_obj.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/noop_waker.rs
+
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/lib.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/spawn.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/arc_wake.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/waker.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/waker_ref.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/future_obj.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-task-0.3.34/src/noop_waker.rs:

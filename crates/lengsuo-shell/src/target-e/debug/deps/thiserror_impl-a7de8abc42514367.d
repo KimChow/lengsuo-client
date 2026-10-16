@@ -1,0 +1,17 @@
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/crates/lengsuo-shell/src/target-e/debug/deps/thiserror_impl-a7de8abc42514367.d: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/ast.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/attr.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/expand.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/fallback.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/fmt.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/generics.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/prop.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/scan_expr.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/unraw.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/valid.rs
+
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/crates/lengsuo-shell/src/target-e/debug/deps/libthiserror_impl-a7de8abc42514367.so: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/ast.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/attr.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/expand.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/fallback.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/fmt.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/generics.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/prop.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/scan_expr.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/unraw.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/valid.rs
+
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/lib.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/ast.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/attr.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/expand.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/fallback.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/fmt.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/generics.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/prop.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/scan_expr.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/unraw.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/thiserror-impl-2.0.21/src/valid.rs:
+
+# env-dep:CARGO_PKG_VERSION_PATCH=21

@@ -18,6 +18,7 @@ members = [
     "crates/agent-core",
     "crates/agent-gateway",
     "crates/policy-engine",
+    "crates/lengsuo-shell",
 ]
 
 [workspace.package]
