@@ -11,7 +11,10 @@ pub enum MemoryError {
     CapExceeded { cap: usize, len: usize },
     /// 文件系统错误（路径随错误上报，内容不上报）。
     #[error("记忆文件 IO 错误: {path}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     /// 路径逃逸（越出授权目录）。
     #[error("路径越出授权目录")]
     PathEscape,

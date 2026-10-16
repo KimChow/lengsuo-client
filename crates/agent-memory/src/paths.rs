@@ -13,7 +13,10 @@ pub struct MemoryPaths {
 
 impl MemoryPaths {
     pub fn new(home: impl Into<PathBuf>, workspace: impl Into<PathBuf>) -> Self {
-        Self { home: home.into(), workspace: workspace.into() }
+        Self {
+            home: home.into(),
+            workspace: workspace.into(),
+        }
     }
 
     /// 身份目录：`<home>/identity`。

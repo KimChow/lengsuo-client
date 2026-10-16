@@ -36,11 +36,13 @@ pub const SOUL_FILE: &str = "SOUL.md";
 
 pub(crate) fn read_identity(paths: &MemoryPaths) -> Result<Identity, MemoryError> {
     let dir = paths.identity_dir();
-    let mut identity = Identity::default();
-    identity.user_name = read_trimmed_or_default(&dir.join(USER_NAME_FILE), DEFAULT_USER_NAME)?;
-    identity.ai_name = read_trimmed_or_default(&dir.join(AI_NAME_FILE), DEFAULT_AI_NAME)?;
-    identity.soul = read_or_empty(&dir.join(SOUL_FILE))?;
-    Ok(identity)
+    // 逐字段直接构造（缺省由各自的 default 兜底）：语义与旧写法一致，只是不再
+    // 先 `Identity::default()` 再整体覆写（clippy::field_reassign_with_default）。
+    Ok(Identity {
+        user_name: read_trimmed_or_default(&dir.join(USER_NAME_FILE), DEFAULT_USER_NAME)?,
+        ai_name: read_trimmed_or_default(&dir.join(AI_NAME_FILE), DEFAULT_AI_NAME)?,
+        soul: read_or_empty(&dir.join(SOUL_FILE))?,
+    })
 }
 
 pub(crate) fn write_soul(paths: &MemoryPaths, text: &str) -> Result<(), MemoryError> {
@@ -75,20 +77,32 @@ fn read_trimmed_or_default(path: &Path, default: &str) -> Result<String, MemoryE
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(default.into()),
-        Err(e) => Err(MemoryError::Io { path: path.into(), source: e }),
+        Err(e) => Err(MemoryError::Io {
+            path: path.into(),
+            source: e,
+        }),
     }
 }
 
 fn read_or_empty(path: &Path) -> Result<String, MemoryError> {
     std::fs::read_to_string(path).or_else(|e| match e.kind() {
         std::io::ErrorKind::NotFound => Ok(String::new()),
-        other => Err(MemoryError::Io { path: path.into(), source: std::io::Error::new(other, "read") }),
+        other => Err(MemoryError::Io {
+            path: path.into(),
+            source: std::io::Error::new(other, "read"),
+        }),
     })
 }
 
 pub(crate) fn write_file(path: &Path, text: &str) -> Result<(), MemoryError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| MemoryError::Io { path: parent.into(), source: e })?;
+        std::fs::create_dir_all(parent).map_err(|e| MemoryError::Io {
+            path: parent.into(),
+            source: e,
+        })?;
     }
-    std::fs::write(path, text).map_err(|e| MemoryError::Io { path: path.into(), source: e })
+    std::fs::write(path, text).map_err(|e| MemoryError::Io {
+        path: path.into(),
+        source: e,
+    })
 }
