@@ -41,6 +41,8 @@ pub enum Association {
 /// 不含 Debug，避免目标地址进入日志。
 pub struct Opened {
     pub timestamp: u64,
+    /// 请求方向自己的 salt：服务器用它派生同流响应子密钥（同流双向共用子密钥）。
+    pub request_salt: Vec<u8>,
     pub association: Association,
     /// 请求：变长头携带的首批载荷；响应：固定头声明长度的载荷 chunk。可为空。
     pub payload: Vec<u8>,
@@ -244,6 +246,7 @@ impl Reader {
         self.opened = true;
         Ok(Opened {
             timestamp: header.timestamp,
+            request_salt: salt,
             association,
             payload,
         })
