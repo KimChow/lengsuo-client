@@ -43,3 +43,13 @@ Rust 双端与固定参考端双向互通、异常验证、Windows 浏览器环�
   fmt/clippy/行数门禁通过。
 - 未实现（待实现）：与真实 WireGuard 对端互通（需 wireguard-go/内核对端，
   未验证不宣称）；cookie/mac2 轮换；keepalive/重试计时；服务端响应方。
+
+## 握手闭环验证（2026-10-16 追加）
+
+- 服务端响应方（测试内实现，按参考 ConsumeMessageInitiation/
+  CreateMessageResponse 语义）：消费 initiation、构造 92B response、
+  双方 transport 密钥派生一致——闭环通过。
+- 修正三处（对照参考发现）：发起方 hash 链缺 mixHash(Timestamp 密文)；
+  响应 Empty 区域解析（48B 定长中仅前 16B 是 tag）；PSK 语义统一
+  （None=全零 PSK 永远参与 KDF3，与参考一致）。
+- 已验证：6 套测试全过（含新增 server 闭环 + 篡改拒绝）；fmt/clippy/行数门禁通过。
