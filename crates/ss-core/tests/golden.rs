@@ -8,6 +8,38 @@
 //!   Rust↔Xray 双向验收仍须在构建机单独执行（AGENTS §4）。
 
 use serde::Deserialize;
+
+// 夹具兼容助手：金标 JSON 中部分整数为 "0x.." 十六进制字符串，数值/字符串两兼容。
+mod hexnum {
+    use serde::{Deserialize, Deserializer};
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum V {
+        S(String),
+        U32(u32),
+        U64(u64),
+    }
+    fn parse(s: &str) -> u64 {
+        let t = s.trim();
+        u64::from_str_radix(t.trim_start_matches("0x"), 16)
+            .unwrap_or_else(|_| t.parse().expect("金标数值必须是十进制或 0x 十六进制"))
+    }
+    pub fn u32_hex<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+        match V::deserialize(d)? {
+            V::U32(n) => Ok(n),
+            V::U64(n) => u32::try_from(n).map_err(serde::de::Error::custom),
+            V::S(s) => u32::try_from(parse(&s)).map_err(serde::de::Error::custom),
+        }
+    }
+    pub fn u64_hex<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        match V::deserialize(d)? {
+            V::U32(n) => Ok(n as u64),
+            V::U64(n) => Ok(n),
+            V::S(s) => Ok(parse(&s)),
+        }
+    }
+}
+
 use ss_core::chunk::{read_chunk, write_chunk, write_eof, MAX_CHUNK_PAYLOAD, SIZE_WIRE_LEN};
 use ss_core::crypto::{CipherSuite, NonceCounter, SessionAead};
 use ss_core::kdf::{behavior_seed_hmac, evp_bytes_to_key, hkdf_sha1_subkey};
@@ -64,7 +96,9 @@ struct BehaviorCase {
     password: String,
     key_len: usize,
     hmac_hex: String,
+    #[serde(deserialize_with = "hexnum::u32_hex")]
     crc32: u32,
+    #[serde(deserialize_with = "hexnum::u64_hex")]
     crc64_ecma: u64,
 }
 
@@ -115,7 +149,7 @@ fn nonce_counter_matches_independent_oracle() {
     // 跨字节进位边界（byte0 走满一轮 → byte1 进位）
     let mut m = NonceCounter::new(12);
     for _ in 0..256 {
-        m.next();
+        let _ = m.next();
     }
     assert_eq!(&m.next().expect("nonce")[0..2], &[0u8, 1u8]);
 }
