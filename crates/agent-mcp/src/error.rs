@@ -70,7 +70,10 @@ pub enum Error {
 impl Error {
     /// 构造 [`Error::VersionMismatch`]。
     #[must_use]
-    pub fn version_mismatch(server_offered: impl Into<String>, local_supported: Vec<String>) -> Self {
+    pub fn version_mismatch(
+        server_offered: impl Into<String>,
+        local_supported: Vec<String>,
+    ) -> Self {
         Self::VersionMismatch(Box::new(VersionMismatch {
             server_offered: server_offered.into(),
             local_supported,

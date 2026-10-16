@@ -20,18 +20,12 @@ pub const DEFAULT_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 const MAX_HEADER_BLOCK_BYTES: usize = 64 * 1024;
 
 /// 分帧方式。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Framing {
     /// 一行一个 JSON 消息，`\n` 结尾；忽略空行，容忍尾部 `\r`。
     NewlineDelimited,
     /// `Content-Length: <n>\r\n\r\n<n 字节帧体>`；其余头按规范忽略。
     ContentLength,
-}
-
-impl Default for Framing {
-    fn default() -> Self {
-        Self::NewlineDelimited
-    }
 }
 
 impl Framing {
@@ -110,13 +104,13 @@ impl FrameDecoder {
             return;
         }
         self.buf.extend_from_slice(data);
-        let limit = self
-            .max_frame_bytes
-            .saturating_add(if self.framing == Framing::ContentLength {
-                MAX_HEADER_BLOCK_BYTES
-            } else {
-                0
-            });
+        let limit =
+            self.max_frame_bytes
+                .saturating_add(if self.framing == Framing::ContentLength {
+                    MAX_HEADER_BLOCK_BYTES
+                } else {
+                    0
+                });
         if self.buf.len() > limit {
             self.fail(format!(
                 "未成帧数据 {} 字节超过上限 {limit}，拒绝继续缓冲",
@@ -276,7 +270,7 @@ fn parse_content_length(header_block: &str) -> Result<usize, Error> {
         if line.is_empty() {
             continue;
         }
-  let Some((key, value)) = line.split_once(':') else {
+        let Some((key, value)) = line.split_once(':') else {
             return Err(Error::MalformedFrame {
                 reason: format!("非法头行（缺少冒号）：{line:?}"),
             });

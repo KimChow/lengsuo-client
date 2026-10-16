@@ -85,7 +85,8 @@ fn summarize_data(value: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
-        other => format!("{other:?}"),
+        // 结构化载荷序列化为紧凑 JSON 文本：不泄漏 Rust Debug 形态，保持字节级可复现。
+        other => serde_json::to_string(other).unwrap_or_else(|_| "<unserializable>".into()),
     }
 }
 
@@ -253,10 +254,7 @@ pub fn classify(raw: &Value) -> std::result::Result<Inbound, Error> {
                 method: m,
                 params,
             })),
-            (Some(m), None) => Ok(Inbound::Notification(Notification {
-                method: m,
-                params,
-            })),
+            (Some(m), None) => Ok(Inbound::Notification(Notification { method: m, params })),
             (None, _) => Err(Error::MalformedMessage {
                 reason: "method 字段必须是字符串".to_string(),
             }),
@@ -283,11 +281,10 @@ pub fn classify(raw: &Value) -> std::result::Result<Inbound, Error> {
                 reason: "result 与 error 同时缺失".to_string(),
             }),
             (_, Some(e)) => {
-                let err: JsonRpcErrorObject = serde_json::from_value(e.clone()).map_err(|err| {
-                    Error::MalformedMessage {
+                let err: JsonRpcErrorObject =
+                    serde_json::from_value(e.clone()).map_err(|err| Error::MalformedMessage {
                         reason: format!("error 对象不合法：{err}"),
-                    }
-                })?;
+                    })?;
                 Ok(Inbound::Response(Response {
                     id: id_value(id)?,
                     is_error: true,
@@ -340,11 +337,13 @@ fn id_value(id: &Value) -> std::result::Result<RequestId, Error> {
     check_id(id)?;
     match id {
         Value::String(s) => Ok(RequestId::String(s.clone())),
-        Value::Number(n) => n.as_i64().map(RequestId::Number).ok_or_else(|| {
-            Error::MalformedMessage {
-                reason: format!("id 不是整数：{n}"),
-            }
-        }),
+        Value::Number(n) => {
+            n.as_i64()
+                .map(RequestId::Number)
+                .ok_or_else(|| Error::MalformedMessage {
+                    reason: format!("id 不是整数：{n}"),
+                })
+        }
         other => Err(Error::MalformedMessage {
             reason: format!("id 类型非法：{}", shape(other)),
         }),

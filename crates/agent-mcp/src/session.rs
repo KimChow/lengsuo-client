@@ -25,7 +25,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::{broadcast, oneshot, Mutex as AsyncMutex};
 use tokio::time::Instant;
 
-use crate::codec::{Framing, FrameDecoder};
+use crate::codec::{FrameDecoder, Framing};
 use crate::error::Error;
 use crate::protocol::{
     parse_wire_message, JsonRpcErrorObject, JsonRpcNotification, NotificationEnvelope,
@@ -90,8 +90,9 @@ struct Inner {
     poison: Mutex<Option<String>>,
     closed: AtomicBool,
     notify_tx: broadcast::Sender<JsonRpcNotification>,
-    /// 会话创建时预留的订阅端：只能被上层取走一次（[`Session::take_notifications`]），
-    /// 取走后由转发任务转成交付通道，保证读循环不被慢消费者阻塞。
+    /// 会话创建时预留的订阅端：保留给「一次性取走交付通道」的语义（v0 上层走
+    /// [`Session::subscribe_notifications`]，本端只保证首帧不丢在广播通道里）。
+    #[allow(dead_code)] // v0 出口：将来通知交付任务接管时启用
     notify_seed: Mutex<Option<broadcast::Receiver<JsonRpcNotification>>>,
     /// 慢订阅者滞后次数（诊断用；策略是丢弃最旧而不是阻塞读循环）。
     notify_dropped: AtomicU64,
@@ -103,9 +104,8 @@ struct Inner {
 /// 一条已建立 stdio 连接的 MCP 会话（低层，供 [`crate::client`] 使用）。
 ///
 /// 会话构造与传输安装分两步（[`Session::with_config`] →
-/// [`Session::attach_stdio`]）：`ClientConfig` 的会话构造钩子
-/// [`crate::client::ClientConfig::session_builder`] 只负责前者，stdio 之外的
-/// 传输（将来 HTTP/SSE）可以自己预装传输后跳过 spawn。
+/// [`Session::attach_stdio`]）：前者只建状态，后者接管 stdio 管道并启动 reader。
+/// stdio 之外的传输（将来 HTTP/SSE）可以自己预装传输后跳过 spawn。
 pub(crate) struct Session {
     inner: Arc<Inner>,
     child: AsyncMutex<Option<Child>>,
@@ -236,7 +236,13 @@ impl Session {
 
     /// 取出并清空已记录的服务端请求（v0 只记录并自动拒绝，不处理）。
     pub(crate) fn drain_server_requests(&self) -> Vec<ServerRequest> {
-        std::mem::take(&mut *self.inner.server_requests.lock().expect("server request 锁不中毒"))
+        std::mem::take(
+            &mut *self
+                .inner
+                .server_requests
+                .lock()
+                .expect("server request 锁不中毒"),
+        )
     }
 
     fn alloc_id(&self) -> Result<RequestId, Error> {
@@ -299,7 +305,9 @@ impl Session {
         }
 
         match tokio::time::timeout_at(deadline, rx).await {
-            Ok(Ok(payload)) => Ok(payload),
+            // rx 的 item 已是 `Result<ResponsePayload, Error>`：读侧投递的
+            // 连接级失败（poisoned）原样返回，不伪装成一条响应。
+            Ok(Ok(payload)) => payload,
             Ok(Err(_canceled)) => {
                 // reader 收尾时撤下 sender：连接已结束。
                 self.inner.deregister(&id);
@@ -361,35 +369,44 @@ impl Session {
     /// 等待子进程失败或强杀后仍不退出时返回 [`Error::Transport`]。
     pub(crate) async fn close(&self, kill_after: Duration) -> Result<i32, Error> {
         self.inner.close_writer();
-        let mut child = self.child.lock().await;
-        let status = match tokio::time::timeout(kill_after, child.wait()).await {
-            Ok(status) => status.map_err(|e| Error::Transport {
-                reason: format!("等待子进程退出失败：{e}"),
-            })?,
-            Err(_) => {
-                let _ = child.start_kill();
-                tokio::time::timeout(kill_after, child.wait())
-                    .await
-                    .map_err(|_| Error::Transport {
-                        reason: "子进程在强杀后仍未退出".to_string(),
-                    })?
-                    .map_err(|e| Error::Transport {
-                        reason: format!("等待子进程退出失败：{e}"),
-                    })?
+        let mut guard = self.child.lock().await;
+        let code = match guard.as_mut() {
+            // 未安装传输（或子进程已回收）：没有进程可等，视为已退出。
+            None => Ok(0),
+            Some(child) => match tokio::time::timeout(kill_after, child.wait()).await {
+                Ok(status) => status.map_err(|e| Error::Transport {
+                    reason: format!("等待子进程退出失败：{e}"),
+                }),
+                Err(_) => {
+                    let _ = child.start_kill();
+                    tokio::time::timeout(kill_after, child.wait())
+                        .await
+                        .map_err(|_| Error::Transport {
+                            reason: "子进程在强杀后仍未退出".to_string(),
+                        })?
+                        .map_err(|e| Error::Transport {
+                            reason: format!("等待子进程退出失败：{e}"),
+                        })
+                }
             }
+            .map(|status| status.code().unwrap_or(-1)),
         };
-        drop(child);
+        let _ = guard.take();
+        drop(guard);
         self.finish_shutdown();
-        Ok(status.code().unwrap_or(-1))
+        code
     }
 
     /// 立即强杀子进程并回收（异常清理路径，例如握手失败），停 reader。
     pub(crate) async fn abort(&self) {
         self.inner.close_writer();
         {
-            let mut child = self.child.lock().await;
-            let _ = child.start_kill();
-            let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+            let mut guard = self.child.lock().await;
+            if let Some(child) = guard.as_mut() {
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+            }
+            let _ = guard.take();
         }
         self.finish_shutdown();
     }
@@ -472,7 +489,10 @@ impl Inner {
     }
 
     fn register(&self, id: RequestId, tx: Reply) {
-        self.pending.lock().expect("pending 锁不中毒").insert(id, tx);
+        self.pending
+            .lock()
+            .expect("pending 锁不中毒")
+            .insert(id, tx);
     }
 
     fn deregister(&self, id: &RequestId) {
@@ -499,7 +519,7 @@ impl Inner {
             .remove(&resp.id);
         match tx {
             Some(tx) => {
-                let _ = tx.send(resp.payload);
+                let _ = tx.send(Ok(resp.payload()));
             }
             None => {
                 self.unmatched_responses.fetch_add(1, Ordering::AcqRel);
@@ -616,9 +636,7 @@ async fn newline_loop(reader: &mut BufReader<ChildStdout>, inner: &Arc<Inner>) {
 }
 
 async fn length_prefixed_loop(reader: &mut BufReader<ChildStdout>, inner: &Arc<Inner>) {
-    let mut decoder: FrameDecoder = inner
-        .framing
-        .decoder_with_limit(inner.max_frame_bytes);
+    let mut decoder: FrameDecoder = inner.framing.decoder_with_limit(inner.max_frame_bytes);
     let mut chunk = vec![0_u8; READ_CHUNK_BYTES];
     loop {
         match reader.read(&mut chunk).await {
@@ -685,9 +703,8 @@ fn handle_body(inner: &Arc<Inner>, body: &[u8]) -> bool {
 /// 本端状态一致性，因此丢弃 JoinHandle。
 fn reject_server_request(inner: &Arc<Inner>, req: ServerRequest) -> bool {
     inner.record_server_request(req.clone());
-    let mut err = JsonRpcErrorObject::method_not_found(
-        "client does not handle server-initiated requests",
-    );
+    let mut err =
+        JsonRpcErrorObject::method_not_found("client does not handle server-initiated requests");
     err.data = Some(Value::String(req.method.clone()));
     debug_assert_eq!(err.code, METHOD_NOT_FOUND);
     let body = serde_json::json!({ "jsonrpc": "2.0", "id": req.id, "error": err });

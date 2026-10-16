@@ -125,14 +125,15 @@ impl InitializeResult {
                 reason: format!("capabilities 不合法：{e}"),
             })?,
         };
-        let server_info = match obj.get("serverInfo") {
-            None | Some(Value::Null) => None,
-            Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| {
-                Error::MalformedMessage {
-                    reason: format!("serverInfo 不合法：{e}"),
-                }
-            })?),
-        };
+        let server_info =
+            match obj.get("serverInfo") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| {
+                    Error::MalformedMessage {
+                        reason: format!("serverInfo 不合法：{e}"),
+                    }
+                })?),
+            };
         let server_info = server_info.ok_or(Error::InvalidInitializeResult {
             field: "serverInfo",
         })?;
@@ -376,7 +377,10 @@ mod tests {
             }),
             instructions: None,
         };
-        let supported = SUPPORTED_PROTOCOL_VERSIONS.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        let supported = SUPPORTED_PROTOCOL_VERSIONS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<Vec<_>>();
         let e = r.validate_against(&supported).unwrap_err();
         assert!(matches!(e, Error::VersionMismatch(_)), "{e}");
         assert!(r.validate_against(&["1999-01-01".to_string()]).is_ok());
@@ -433,7 +437,10 @@ mod tests {
         };
         let s = serde_json::to_string(&p).unwrap();
         assert!(s.contains("\"protocolVersion\":\"2025-06-18\""), "{s}");
-        assert!(s.contains("\"clientInfo\":{\"name\":\"c\",\"title\":\"Client\",\"version\":\"1\"}"), "{s}");
+        assert!(
+            s.contains("\"clientInfo\":{\"name\":\"c\",\"title\":\"Client\",\"version\":\"1\"}"),
+            "{s}"
+        );
         // 默认能力为空时仍写出 capabilities（规范必需字段）。
         assert!(s.contains("\"capabilities\":{}"), "{s}");
     }

@@ -54,9 +54,11 @@ impl StdioTransport {
             reason: "子进程未提供 stdout 管道".to_string(),
         })?;
 
-        Ok(Self {
-            session: Session::new(stdin, stdout, child, config.clone()),
-        })
+        // 会话构造与传输安装分两步（裁决：session.rs 为权威 API）：
+        // with_config 只建状态，attach_stdio 接管管道并启动 reader。
+        let session = Session::with_config(config.clone());
+        session.attach_stdio(stdin, stdout, child).await?;
+        Ok(Self { session })
     }
 
     pub(crate) fn session(&self) -> &Arc<Session> {

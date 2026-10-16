@@ -12,8 +12,8 @@ mod wire;
 
 pub use mcp::{
     ClientCapabilities, ContentBlock, Implementation, InitializeParams, InitializeResult,
-    ProgressParams, ServerCapabilities, SUPPORTED_PROTOCOL_VERSIONS, LATEST_PROTOCOL_VERSION, Tool,
-    ToolCallParams, ToolCallResult, ToolsListResult,
+    ProgressParams, ServerCapabilities, Tool, ToolCallParams, ToolCallResult, ToolsListResult,
+    LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
 };
 pub use wire::{
     classify, parse_wire_message, Inbound, JsonRpcErrorObject, JsonRpcNotification, Notification,
