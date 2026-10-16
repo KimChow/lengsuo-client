@@ -23,6 +23,7 @@ const MAX_HEADER_BLOCK_BYTES: usize = 64 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Framing {
     /// 一行一个 JSON 消息，`\n` 结尾；忽略空行，容忍尾部 `\r`。
+    #[default]
     NewlineDelimited,
     /// `Content-Length: <n>\r\n\r\n<n 字节帧体>`；其余头按规范忽略。
     ContentLength,
