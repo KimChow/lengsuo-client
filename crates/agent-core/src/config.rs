@@ -21,6 +21,9 @@ pub struct RuntimeConfig {
     pub approval_timeout_ms: u64,
     pub rpc_timeout_ms: u64,
     pub default_mode: Mode,
+    /// 跨会话记忆开关（product-direction §3：默认关，显式开启）。
+    #[serde(default)]
+    pub memory_enabled: bool,
 }
 
 impl RuntimeConfig {
@@ -30,6 +33,7 @@ impl RuntimeConfig {
             approval_timeout_ms: DEFAULT_APPROVAL_TIMEOUT_MS,
             rpc_timeout_ms: DEFAULT_RPC_TIMEOUT_MS,
             default_mode: Mode::Ask,
+            memory_enabled: false,
         }
     }
 
@@ -45,6 +49,12 @@ impl RuntimeConfig {
             match key.as_str() {
                 "approvalTimeoutMs" => next.approval_timeout_ms = positive_ms(key, value)?,
                 "rpcTimeoutMs" => next.rpc_timeout_ms = positive_ms(key, value)?,
+                "memoryEnabled" => {
+                    let b = value.as_bool().ok_or_else(|| {
+                        CoreError::InvalidConfig(format!("memoryEnabled 非法: {value}"))
+                    })?;
+                    next.memory_enabled = b;
+                }
                 "defaultMode" => {
                     let mode = serde_json::from_value::<Mode>(value.clone()).map_err(|_| {
                         CoreError::InvalidConfig(format!("defaultMode 非法: {value}"))

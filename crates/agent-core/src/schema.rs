@@ -156,6 +156,9 @@ pub struct Session {
     /// 会话内已产生的最大事件 seq（分页回溯锚点，N12）。
     #[serde(default)]
     pub last_seq: u64,
+    /// 三层记忆组装摘要（memory.enabled 时由 create_session 注入；agent-memory-spec §4）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_digest: Option<String>,
 }
 
 impl Session {
