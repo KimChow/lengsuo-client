@@ -1,0 +1,11 @@
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/target-e/debug/deps/futures_core-b713d1370d23eb3e.d: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/future.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/stream.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/mod.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/poll.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/__internal/mod.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/__internal/atomic_waker.rs
+
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/target-e/debug/deps/libfutures_core-b713d1370d23eb3e.rmeta: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/future.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/stream.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/mod.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/poll.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/__internal/mod.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/__internal/atomic_waker.rs
+
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/lib.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/future.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/stream.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/mod.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/poll.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/__internal/mod.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/futures-core-0.3.34/src/task/__internal/atomic_waker.rs:

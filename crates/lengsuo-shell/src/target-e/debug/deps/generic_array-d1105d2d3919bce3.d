@@ -1,0 +1,11 @@
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/crates/lengsuo-shell/src/target-e/debug/deps/generic_array-d1105d2d3919bce3.d: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/hex.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/impls.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/arr.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/functional.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/iter.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/sequence.rs
+
+/home/ubuntu/lengsuo-client-dev/wt-gpui-shell/crates/lengsuo-shell/src/target-e/debug/deps/libgeneric_array-d1105d2d3919bce3.rmeta: /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/lib.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/hex.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/impls.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/arr.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/functional.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/iter.rs /home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/sequence.rs
+
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/lib.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/hex.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/impls.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/arr.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/functional.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/iter.rs:
+/home/ubuntu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/generic-array-0.14.7/src/sequence.rs:

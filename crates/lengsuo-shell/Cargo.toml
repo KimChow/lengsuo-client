@@ -1,0 +1,23 @@
+[package]
+name = "lengsuo-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+# 阶段二占位：引入 GPUI 界面后由此 feature 隔离，阶段一纯逻辑不依赖 gpui。
+ui = []
+
+[dependencies]
+# 只允许：tokio + serde/serde_json + thiserror + tokio-tungstenite（阶段一不引 gpui/hyper）。
+tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "sync", "macros", "rt", "rt-multi-thread"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
