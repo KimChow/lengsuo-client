@@ -117,7 +117,7 @@ fn nonce_counter_matches_independent_oracle() {
     for _ in 0..256 {
         m.next();
     }
-    assert_eq!(&m.next()[0..2], &[0u8, 1u8]);
+    assert_eq!(&m.next().expect("nonce")[0..2], &[0u8, 1u8]);
 }
 
 #[test]
