@@ -268,6 +268,7 @@ impl Handshake {
         self.chain_key = initial_chain_key();
         self.hash = initial_hash();
         self.hash = mix_hash(&self.hash, &self.remote_static);
+        println!("CLIENT hash after remote_static mix: {:02x?}", &self.hash[..4]);
 
         // mixKey(ephemeral_public)
         let (new_ck, _) = kdf2(&self.chain_key, &ephemeral_public);
@@ -319,6 +320,7 @@ impl Handshake {
         self.local_ephemeral_secret = Some(ephemeral_secret);
         self.sent_index = self.local_index;
         self.state = State::InitiationCreated;
+        println!("CLIENT initiation tail hash: {:02x?}", &self.hash[..4]);
         Ok(msg)
     }
 
