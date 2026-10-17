@@ -8,7 +8,7 @@ authors.workspace = true
 [features]
 default = []
 # 阶段二占位：引入 GPUI 界面后由此 feature 隔离，阶段一纯逻辑不依赖 gpui。
-ui = []
+ui = ["dep:gpui"]
 
 [dependencies]
 # 只允许：tokio + serde/serde_json + thiserror + tokio-tungstenite（阶段一不引 gpui/hyper）。
@@ -18,6 +18,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# 阶段二：GPUI 渲染层（feature "ui" 隔离）；纯逻辑层不依赖它。
+gpui = { version = "0.2.2", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }

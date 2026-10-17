@@ -1,5 +1,8 @@
 # ---- Rust ----
 /target/
+/target-e/
+**/target/
+**/target-*/
 **/*.rs.bk
 Cargo.lock.bak
 
