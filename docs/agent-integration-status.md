@@ -60,3 +60,7 @@ Skills/Prompts/Tasks/MCP/凭据/策略未接入运行时。详见 [能力核验�
 记忆安全回归与凭据stderr输出修复已提交；网关现有RPC/WS实现在7项真实回环测试通过后接入。
 网关Unix握手权限已测，Windows ACL未实现；仅Echo provider，不宣称真实模型或工具编排完成。
 历史能力核验矩阵描述eb02d938基线，最新网关实现见agent-gateway-status.md。
+
+本批安全修复与真实网关/壳客户端联调集成后，workspace完整门禁再次通过：
+行数/profile/fmt/clippy/test/build均exit 0；测试合计780 passed / 0 failed / 23 ignored。
+日志agent-next-final-{lines,clippy,tests,build}.log位于研究机仓外，不入库。
