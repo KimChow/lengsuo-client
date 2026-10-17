@@ -172,8 +172,24 @@ pub(crate) async fn roundtrip(
         ("X-Gateway-Token", token),
         ("Content-Type", "application/json"),
     ];
-    let response = http::request(stream, "POST", "/rpc", &headers, body, timeout).await?;
+    let response = http::request(stream, "POST", "/rpc", &headers, body, timeout)
+        .await
+        .map_err(map_timeout)?;
     interpret(&response)
+}
+
+/// 字节层的等待超时归一为协议语义的 [`RpcError::Timeout`]。
+///
+/// `http::request` 用自己的超时包住「写请求 + 读响应」，先于 `GatewayClient` 外层的
+/// 同名超时触发，只会给出 `io::ErrorKind::TimedOut`。按 §2「408/超时」是网关语义而非
+/// 通用传输故障，壳层需要据此区分「网关慢」与「连接坏了」，所以这里显式转换。
+fn map_timeout(e: HttpError) -> RpcError {
+    if let HttpError::Io(io) = &e {
+        if io.kind() == std::io::ErrorKind::TimedOut {
+            return RpcError::Timeout;
+        }
+    }
+    RpcError::Transport(e)
 }
 
 #[cfg(test)]

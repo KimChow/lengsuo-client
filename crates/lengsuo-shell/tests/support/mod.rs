@@ -56,6 +56,8 @@ pub struct EventsBehaviour {
     pub frames: Vec<String>,
     /// 要求请求头携带的 token；`None` 表示不校验。
     pub expected_token: Option<String>,
+    /// 推完 `frames` 后是否由服务端发出 Close（用于断言 `EventError::Closed`）。
+    pub close_after_frames: bool,
 }
 
 /// 已启动的 mock 网关。`Drop`/`shutdown` 时中止所有在途任务。
@@ -152,7 +154,7 @@ impl MockGateway {
 
 /// 绑定 127.0.0.1 随机端口。
 async fn bind() -> TcpListener {
-    TcpListener::bind("127.0.0.1:0".parse().expect("loopback 地址"))
+    TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().expect("loopback 地址"))
         .await
         .expect("mock 网关绑定失败")
 }
@@ -197,6 +199,8 @@ async fn rpc_conn(
 }
 
 /// 处理一条 `/events` WebSocket 连接。
+// 闭包返回类型由 tungstenite 的 `Callback` 签名固定，`ErrorResponse` 的体积不归本 mock 控。
+#[allow(clippy::result_large_err)]
 async fn events_conn(stream: TcpStream, behaviour: EventsBehaviour) {
     let expected = behaviour.expected_token.clone();
     let callback = move |req: &Request, resp: Response| -> Result<Response, ErrorResponse> {
@@ -227,13 +231,19 @@ async fn events_conn(stream: TcpStream, behaviour: EventsBehaviour) {
             return;
         }
     }
-    // 保持连接直到对端关闭，避免提前 EOF 让测试看到假失败。
     let _ = ws.flush().await;
+    if behaviour.close_after_frames {
+        // 服务端主动收口：客户端应看到 Closed，而不是提前 EOF 造成的假失败。
+        let _ = ws.close(None).await;
+        let _ = ws.flush().await;
+        return;
+    }
+    // 保持连接直到对端关闭，避免提前 EOF 让测试看到假失败。
     while ws.next().await.is_some() {}
 }
 
 /// 一条帧文本：`{seq, session_id, kind, payload, ts_ms}`。
-pub fn event_json(seq: u64, session: &str) kind: &str, payload: &str, ts_ms: u64) -> String {
+pub fn event_json(seq: u64, session: &str, kind: &str, payload: &str, ts_ms: u64) -> String {
     format!(
         r#"{{"seq":{seq},"session_id":"{session}","kind":"{kind}","payload":{payload},"ts_ms":{ts_ms}}}"#
     )
@@ -353,10 +363,7 @@ impl Drop for TempHandshakeFile {
 fn temp_dir(tag: &str) -> PathBuf {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     let id = SEQ.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir().join(format!(
-        "lengsuo-shell-{tag}-{}-{id}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("lengsuo-shell-{tag}-{}-{id}", std::process::id()))
 }
 
 /// 指向某个已监听端口的手写握手文件内容。
