@@ -42,3 +42,18 @@ python scripts/run_reference_tests.py --work-dir /绝对仓库外路径 --archiv
 复核还发现默认分支 release/test/build-override 精简配置为空；已通过
 verify_build_profiles.py 先复现失败，再补齐 debug=0/strip，并关闭测试增量。
 不能以默认构建未报错替代此项门禁。
+
+## 2026-10-17 门禁复核
+
+- 本轮基线 `8e161f23f21ac6af7ec1179b1517cbad79c37b46` 格式失败之外，
+  Clippy 还揭示新增 golden.rs 与旧 API/CRC crate 不匹配、VPS 测试的未使用项。
+- 修正黄金用例：nonce 预言机偏移、JSON 十六进制反序列化、CRC-64/XZ API、
+  不含 EOF 标记 fixture 的读取边界，以及后续分块篡改不应使前置合法分块失效。
+- 独立 Python 生成器实际执行；ChaCha20-IETF 测试盐改为其规定的 32 字节，
+  重新计算子密钥与密文，不改生产算法迁就错误 fixture。10 项黄金用例全部通过。
+- 外部隧道手工测试删除未使用依赖/地址并加入 30 秒总超时；本轮未执行公网测试。
+- 固定 Xray 矩阵纳入已有 SS2022 TCP 客户端用例，47 上 7/4/3/4 共18项通过。
+  其中 SS2022 TCP 目前只有 Rust→Xray，反方向仍待加入，不称双向已完整验收。
+- 行数、精简 profiles、fmt、Clippy、workspace tests/build 实际通过。
+  本轮证据位于47 `results/finish-reference-matrix` 和 `results/finish-gates-*.log`。
+- Linux 通过不替代对应提交 Windows CI 或浏览器 TUN 实测。

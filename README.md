@@ -27,3 +27,6 @@ cargo test --workspace --locked
 安全路径及 Windows 浏览器 TUN 尚未完成。配置办法、确定缺陷与验收范围见
 [协议对等差距矩阵](docs/protocol-parity-gap.md)；自动门禁见
 [固定参考互通门禁](docs/reference-validation.md)。
+
+2026-10-17：参考矩阵现含18项，SS2022 TCP反方向及其余协议完整互通仍待验收；
+本次门禁修复和证据见 [参考验证记录](docs/reference-validation.md)。
