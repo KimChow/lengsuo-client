@@ -27,6 +27,7 @@ members = [
     "crates/agent-prompts",
     "crates/agent-tools",
     "crates/agent-tools-exec",
+    "crates/agent-pty",
 ]
 
 [workspace.package]
