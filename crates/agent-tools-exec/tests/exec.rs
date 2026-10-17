@@ -1,6 +1,5 @@
 //! ExecRunner 验收：echo/cwd/退出码/超时/截断/PowerShell 不支持/无注入。
 
-use std::path::Path;
 use std::time::Duration;
 
 use agent_tools_exec::{ExecConfig, ExecRunner, Shell};
@@ -84,7 +83,7 @@ async fn sleep_past_the_timeout_reports_timed_out() {
 async fn timeout_keeps_output_produced_before_the_deadline() {
     let cmd = "echo first; sleep 5";
     let r =
-        with_deadline(runner(1000).run(Shell::Bash, &cmd, None, Some(Duration::from_millis(300))))
+        with_deadline(runner(1000).run(Shell::Bash, cmd, None, Some(Duration::from_millis(300))))
             .await
             .expect("run");
     assert!(r.timed_out);
