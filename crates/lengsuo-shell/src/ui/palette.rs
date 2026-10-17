@@ -60,6 +60,8 @@ const fn mode_hint(mode: SessionMode) -> &'static str {
 }
 
 /// 模式列表（面板顺序 = 由轻到重）。
+// 阶段二 GPUI 渲染层消费；逻辑与测试已先行冻结。
+#[allow(dead_code)]
 pub const MODES: [SessionMode; 5] = [
     SessionMode::Quick,
     SessionMode::Ask,
@@ -167,6 +169,8 @@ pub fn filter_commands(query: &str) -> Vec<&'static PaletteCommand> {
 
 /// 命令表条数（供测试与「首版 ≥8 命令」的验收断言）。
 #[must_use]
+// 阶段二 GPUI 渲染层消费；逻辑与测试已先行冻结。
+#[allow(dead_code)]
 pub fn command_count() -> usize {
     PALETTE_COMMANDS.len()
 }

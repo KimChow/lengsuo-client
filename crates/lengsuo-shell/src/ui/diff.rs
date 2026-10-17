@@ -41,6 +41,8 @@ pub struct Diff {
     pub minimal: bool,
 }
 
+// 阶段二 GPUI 渲染层消费（summary 徽标）；逻辑与测试已先行冻结。
+#[allow(dead_code)]
 impl Diff {
     /// 新增行数。
     #[must_use]
