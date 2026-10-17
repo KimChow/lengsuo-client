@@ -44,7 +44,7 @@ mock 侧改动（仅 `tests/support/mod.rs`）：
 `../target-shell-roundtrip`，经 `continue-20261017/bin/cargo` 的 flock 包装器执行：
 
 ```text
-cargo test   -p lengsuo-shell --locked --offline   29 passed / 0 failed（连跑 3 次一致）
+cargo test   -p lengsuo-shell --locked --offline   29 passed / 0 failed（任务会话记录；主理人另行复核通过）
   src 单元测试 9 + gateway_events 8 + gateway_handshake 3 + gateway_roundtrip 9
 cargo clippy -p lengsuo-shell --all-targets --locked --offline -- -D warnings   Finished，无警告
 cargo fmt    -p lengsuo-shell -- --check   通过
@@ -53,7 +53,7 @@ python scripts/check_line_limit.py   Checked 411 files; hard-limit failures: 0
 
 行数（400 软 / 700 硬）：`gateway_roundtrip.rs` 347、`gateway_events.rs` 269、
 `gateway_handshake.rs` 113、`tests/support/mod.rs` 376、`src/gateway/rpc.rs` 320。
-`check_line_limit.py` 的 4 条 WARN 均属其他 crate 的既有文件，本卡文件无 WARN。
+本卡文件均低于400行软目标；全仓其他文件的WARN不作为本卡完成证据。
 
 ## 明确未做（不声称已具备）
 
