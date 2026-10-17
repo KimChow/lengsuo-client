@@ -103,56 +103,57 @@ impl JsonlEventLog {
 
 impl EventLog for JsonlEventLog {
     fn append(&self, session_id: Uuid, kind: &str, payload: Value) -> Result<Event, CoreError> {
+        // 一个串行临界区完成：seq 分配 → 行序列化与行长校验 → 落盘 → 内存索引提交。
+        // 校验或落盘失败时直接返回，索引与 next_seq 保持原样，因此不会发布幽灵事件，
+        // 也不会把别人的已提交 seq 回退（磁盘与内存始终一致）。
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| CoreError::InvalidConfig("日志索引锁毒化".into()))?;
+        let fresh_session = !guard.sessions.contains_key(&session_id);
+        let state = guard
+            .sessions
+            .entry(session_id)
+            .or_insert_with(|| SessionState {
+                path: self.path_for(session_id),
+                ..Default::default()
+            });
+        let seq = state.next_seq + 1;
+        if state.events.contains_key(&seq) {
+            // 重复 seq 只可能来自外部写入的坏文件；不推进计数器、不落盘。
+            return Err(CoreError::InvalidConfig(format!(
+                "会话 {session_id} seq 重复: {seq}"
+            )));
+        }
         let event = Event {
-            seq: 0,
+            seq,
             session_id,
             kind: kind.to_string(),
             payload,
             ts_ms: now_ms(),
         };
-        let (path, duplicated, stored) = {
-            let mut guard = self
-                .inner
-                .lock()
-                .map_err(|_| CoreError::InvalidConfig("日志索引锁毒化".into()))?;
-            let state = guard
-                .sessions
-                .entry(session_id)
-                .or_insert_with(|| SessionState {
-                    path: self.path_for(session_id),
-                    ..Default::default()
-                });
-            let seq = state.next_seq + 1;
-            state.next_seq = seq;
-            let mut event = event;
-            event.seq = seq;
-            // 重复 seq 只可能来自外部写入的坏文件；先落错误，再决定是否落盘。
-            let duplicated = state.events.insert(seq, event.clone()).map(|prev| prev.seq);
-            (state.path.clone(), duplicated, event)
-        };
-        if let Some(prev) = duplicated {
-            return Err(CoreError::InvalidConfig(format!(
-                "会话 {session_id} seq 重复: {prev}"
-            )));
-        }
-        let line = serde_json::to_string(&stored)?;
+        let line = serde_json::to_string(&event)?;
         if line.len() > MAX_LINE_BYTES {
-            // 该行已占用 seq 但拒绝落盘：回滚索引，保持 seq 连续可用。
-            let mut guard = self
-                .inner
-                .lock()
-                .map_err(|_| CoreError::InvalidConfig("日志索引锁毒化".into()))?;
-            if let Some(state) = guard.sessions.get_mut(&session_id) {
-                state.events.remove(&stored.seq);
-                state.next_seq = stored.seq - 1;
-            }
             return Err(CoreError::LineTooLarge {
                 limit: MAX_LINE_BYTES,
                 actual: line.len(),
             });
         }
-        append_line(&path, session_id, &line)?;
-        Ok(stored)
+        let path = state.path.clone();
+        if let Err(e) = append_line(&path, session_id, &line) {
+            // 落盘失败：本次新建的空会话不留在索引里，视图与磁盘保持一致。
+            if fresh_session {
+                guard.sessions.remove(&session_id);
+            }
+            return Err(e);
+        }
+        let state = guard
+            .sessions
+            .get_mut(&session_id)
+            .expect("落盘成功后索引仍在");
+        state.next_seq = seq;
+        state.events.insert(seq, event.clone());
+        Ok(event)
     }
 
     fn replay(
