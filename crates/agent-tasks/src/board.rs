@@ -72,6 +72,32 @@ impl TaskBoard {
         self.tasks.get(&id).ok_or(TaskError::NotFound)
     }
 
+    /// 会话作用域读取门：仅当任务存在且 `task.session_id == session_id` 时复用 [`get`](Self::get)。
+    /// owner 不匹配与任务不存在都返回同一个 `TaskError::NotFound`，调用方无法区分，
+    /// 因此不泄露他人任务的存在性与内容。
+    /// 上层 Runtime 工具（未来的 task 工具族）必须走本门，而不是 [`get`](Self::get)。
+    pub fn get_for_session(&self, session_id: Uuid, id: Uuid) -> Result<&Task, TaskError> {
+        match self.tasks.get(&id) {
+            Some(task) if task.session_id == session_id => Ok(task),
+            _ => Err(TaskError::NotFound),
+        }
+    }
+
+    /// 会话作用域状态更新门：owner 校验通过才复用 [`update_status`](Self::update_status)
+    /// （状态机、幂等与时间戳单调语义完全一致）；owner 不匹配或任务不存在返回
+    /// `TaskError::NotFound` 且不修改状态与 `updated_at_ms`。
+    pub fn update_status_for_session(
+        &mut self,
+        session_id: Uuid,
+        id: Uuid,
+        to: TaskStatus,
+    ) -> Result<Task, TaskError> {
+        if self.get_for_session(session_id, id).is_err() {
+            return Err(TaskError::NotFound);
+        }
+        self.update_status(id, to)
+    }
+
     /// 状态迁移：同状态幂等返回当前任务；非法迁移报 `InvalidTransition`；
     /// `done`/`cancelled` 为终态，不可再出。
     pub fn update_status(&mut self, id: Uuid, to: TaskStatus) -> Result<Task, TaskError> {
