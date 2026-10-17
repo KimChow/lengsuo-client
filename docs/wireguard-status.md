@@ -1,62 +1,46 @@
 # WireGuard 实现与验收状态
 
-报文格式参考官方 https://www.wireguard.com/protocol/ 。本次仅实现类型及长度解析，
-不是完整 WireGuard 连接，也没有参考端互通证据。
+## 固定参考与实现边界
 
-- 初始化 148 字节、响应 92 字节、Cookie 64 字节，类型为小端且保留位必须为零。
-- 运输报文至少 32 字节，读取小端接收者与计数器，借用密文切片，不宣称已认证。
-- 结构层不要求运输报文总长是 16 的倍数；认证及内层报文检查由后续实现完成。
-- 复用 ss-core::replay 共享窗口，不复制第二套实现；必须认证后才更新窗口。
-- 12 项解析测试涵盖固定字段、全部握手截断、保留位、长度、借用及 Debug 脱敏。
+官方 wireguard-go 完整commit：`2631ce99a06f27120d581611cf125d68bc6aa565`。
+本轮参考工具链：Go1.23.8 linux/amd64。源码只作参考，产品Rust不链接Go/GPL协议实现。
 
-待实现：Noise 握手、密钥协商、MAC/Cookie、AEAD、密钥轮换、计时和 UDP 运行时，
-Rust 双端与固定参考端双向互通、异常验证、Windows 浏览器环境接入及 TUN 验收。
-本次测试不得作为上述待实现能力的完成证据。
+已有：四类消息结构解析、发起方Noise IK握手、MAC1、零/显式PSK、
+ChaCha20-Poly1305运输报文封装/打开、计数器及共享重放窗口。
+消息type/index采用little endian，TAI64N内部采用big endian。
+结构解析不代表认证成功；只有握手/AEAD验证通过后才处理可信数据。
 
-## Transport 数据面封装（2026-10-16 新增）
+## 2026-10-17 已复现与修复
 
-- 已实现 `src/transport.rs`：type 0x04 seal/open——LE32 receiver index +
-  LE64 counter + chacha20poly1305（nonce 为零前缀 + LE64 计数，复用
-  ss-core AEAD 语义）；零长载荷（keepalive）合法；1420 上限写入前拒绝；
-  counter 接入共享重放窗口；任何错误 fail-closed。
-- 已验证：24 项新增测试通过（seal→既有解析器 roundtrip、counter 递增、
-  keepalive、上限、错钥、篡改、重放、乱序、回绕）；fmt/clippy/行数门禁。
-- 未实现（待实现）：noise IK 握手消息构造（references 缺 wireguard-go
-  源码，待参考入库后另开任务）、mac1/mac2 与 cookie、keepalive 计时器、
-  与真实 WG 对端互通（未互通，不宣称兼容）。
+- HMAC-BLAKE2s block从错误32修正为64；长密钥摘要只拷前32字节并保留零填充。
+- KDF3第三输出补入0x03。主会话用Python hashlib/hmac实际生成独立预期，
+  tests/kdf_reference.rs完整比对三项派生输出；不是自家函数生成断言。
+- 测试内响应方此前把MAC1留零，修复为正确MAC1并移除密钥/哈希前缀打印。
+- 旧“RFC4231锁定BLAKE2s HMAC”表述撤销，RFC4231不能充当该算法的向量来源。
 
-## Noise IK 握手客户端（2026-10-16 新增）
+## 已实跑参考进程验证
 
-- 已实现 `src/handshake.rs`（对齐 wireguard-go `device/noise-protocol.go`/
-  `noise-helpers.go`/`tai64n/tai64n.go`，commit `2631ce9`）：
-  initiation 构造（148B：type u32be=1 + sender + 临时公钥 + 加密静态公钥 +
-  加密 TAI64N 时间戳 + MAC1）、response 消费（92B：三段 DH + KDF3(PSK) +
-  empty AEAD 认证 + receiver 回指校验）、transport 收发密钥派生
-  （发起方 KDF2 第一输出）；MAC1 = keyed BLAKE2s-128（key =
-  BLAKE2s-256("mac1----" || 对端静态公钥)）；HKDF-BLAKE2s（KDF1/2/3）与
-  HMAC-BLAKE2s 手写实现（RFC 4231 向量锁定 HMAC 正确性——BLAKE2s 变体的
-  hmac crate 兼容性问题规避）。
-- 新增依赖 `x25519-dalek 2`（static_secrets feature）、`blake2 0.10`——
-  均 MIT/Apache-2.0 双许可。
-- 已验证：4 项新增测试（RFC 7748 §5.2 X25519 标准向量、initiation 组帧 +
-  MAC1 独立重算、响应长度失配拒绝、错对端公钥构造拒绝）与既有 24 项全过；
-  fmt/clippy/行数门禁通过。
-- 未实现（待实现）：与真实 WireGuard 对端互通（需 wireguard-go/内核对端，
-  未验证不宣称）；cookie/mac2 轮换；keepalive/重试计时；服务端响应方。
+`tools/reference/wireguard_go_udp_test.go` 是独立测试适配器，调用固定官方
+Noise/keypair核心，用ChannelTUN与loopback UDP交换报文，不碰系统设备/路由。
+参考侧真实执行ConsumeMessageInitiation/CreateMessageResponse/BeginSymmetricSession、
+官方AEAD与replayFilter；Rust侧实际发送握手、打开响应、收发与验证载荷。
 
-## 握手闭环验证（2026-10-16 追加）
+复现步骤：
 
-- 服务端响应方（测试内实现，按参考 ConsumeMessageInitiation/
-  CreateMessageResponse 语义）：消费 initiation、构造 92B response、
-  双方 transport 密钥派生一致——闭环通过。
-- 修正三处（对照参考发现）：发起方 hash 链缺 mixHash(Timestamp 密文)；
-  响应 Empty 区域解析（48B 定长中仅前 16B 是 tag）；PSK 语义统一
-  （None=全零 PSK 永远参与 KDF3，与参考一致）。
-- 已验证：6 套测试全过（含新增 server 闭环 + 篡改拒绝）；fmt/clippy/行数门禁通过。
+1. 将固定commit的官方源码检出到仓库外副本，确认tracked源码无diff。
+2. 将适配器复制为device/lengsuo_wg_udp_test.go，执行
+   `go test -c -o <参考二进制> ./device`。Go测试程序不进入产品发布包。
+3. 设置 `LENGSUO_WG_REFERENCE_BIN=<参考二进制>`，执行
+   `cargo test -p lengsuo-wireguard --test wireguard_go --locked -- --ignored --nocapture`。
 
-## 线格式字节序修正（2026-10-17，对齐参考实测）
+本轮重新从该固定源码构建，两个进程用例通过（无PSK/显式PSK），
+Rust→Go与Go→Rust载荷一致，重复包被拒绝。独立KDF一项通过，crate全测试与Clippy通过。
+研究机47证据：results/recovery-wg-go-build.log、recovery-wg-real-peer-rebuilt.log、
+recovery-wg-kdf.log、recovery-wg-tests.log、recovery-wg-clippy.log。
 
-- 修正：握手报文 Type/Sender/Receiver 字段为 **little endian**（参考
-  `noise-protocol.go` marshal 用 `binary.LittleEndian`）；此前误用 BE。
-- 已验证：LE 修正后 server 闭环测试（消费 initiation → 构造 response →
-  双方 transport 密钥一致）通过；全 6 套件全绿。
+## 仍未完成
+
+当前参考进程调用真实官方密码学核心，但不是完整wireguard-go设备的常驻网络运行时。
+完整Rust响应方、Cookie/MAC2、keepalive/重试、密钥轮换、IP包填充/路由与设备生命周期、
+完整参考客户端→Rust响应方、Windows设备及浏览器TUN仍待开发和验收。
+不得以两项参考核心测试推导上述能力完成；完整范围见network-development.md。

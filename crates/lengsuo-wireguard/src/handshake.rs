@@ -45,12 +45,14 @@ pub const ZERO_NONCE_LEN: usize = 12;
 
 /// `HMAC1`：单输入 HMAC-BLAKE2s-256。
 fn hmac_blake2s(key: &[u8], data: &[u8]) -> [u8; 32] {
-    const BLOCK: usize = 32;
+    const BLOCK: usize = 64;
     let mut key_block = [0u8; BLOCK];
     if key.len() > BLOCK {
         let mut hasher = Blake2s32::default();
         <Blake2s32 as blake2::Digest>::update(&mut hasher, key);
-        key_block.copy_from_slice(<Blake2s32 as blake2::Digest>::finalize(hasher).as_slice());
+        let hashed = <Blake2s32 as blake2::Digest>::finalize(hasher);
+        // BLAKE2s-256 摘要只有 32 字节：拷进前 32 字节，余下保持零填充。
+        key_block[..32].copy_from_slice(hashed.as_slice());
     } else {
         key_block[..key.len()].copy_from_slice(key);
     }
@@ -103,7 +105,7 @@ fn kdf3(key: &[u8], input: &[u8]) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let prk = hmac_blake2s(key, input);
     let t0 = hmac_blake2s(&prk, &[0x1]);
     let t1 = hmac2_blake2s(&prk, &t0, &[0x2]);
-    let t2 = hmac_blake2s(&prk, &t1);
+    let t2 = hmac2_blake2s(&prk, &t1, &[0x3]);
     (t0, t1, t2)
 }
 
@@ -372,7 +374,10 @@ impl Handshake {
         // MAC1 校验（参考 receive.go 对 initiation/response 都先过 CheckMAC1）：
         // key = BLAKE2s-256("mac1----" || 本端静态公钥)——即"报文接收方自己的公钥"。
         let own_public = XPublic::from(&self.static_secret).to_bytes();
-        if !ct_eq(&mac1(&own_public, &wire[..RESPONSE_LEN - 32]), &wire[60..76]) {
+        if !ct_eq(
+            &mac1(&own_public, &wire[..RESPONSE_LEN - 32]),
+            &wire[60..76],
+        ) {
             self.state = State::Poisoned;
             return Err(Error::AuthFailed);
         }
