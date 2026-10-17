@@ -17,6 +17,7 @@ members = [
     "crates/lengsuo-node",
     "crates/agent-core",
     "crates/agent-gateway",
+    "crates/agent-pty",
 ]
 
 [workspace.package]

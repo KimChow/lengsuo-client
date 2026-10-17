@@ -122,10 +122,19 @@ fn suite_names_and_lengths_match_xray_table() {
     ];
     for (name, key, salt, nonce) in cases {
         let s = CipherSuite::from_name(name).unwrap();
-        assert_eq!((s.key_len(), s.salt_len(), s.nonce_len()), (key, salt, nonce));
+        assert_eq!(
+            (s.key_len(), s.salt_len(), s.nonce_len()),
+            (key, salt, nonce)
+        );
     }
-    assert!(CipherSuite::from_name("aes-128-ctr").is_none(), "非 AEAD 必须拒绝");
-    assert!(CipherSuite::from_name("none").is_none(), "NONE 不支持多用户，不接入");
+    assert!(
+        CipherSuite::from_name("aes-128-ctr").is_none(),
+        "非 AEAD 必须拒绝"
+    );
+    assert!(
+        CipherSuite::from_name("none").is_none(),
+        "NONE 不支持多用户，不接入"
+    );
 }
 
 #[test]
@@ -152,7 +161,12 @@ fn behavior_hmac_and_crc_semantics_match_vectors() {
         let seed_in = behavior_seed_hmac(&master);
         assert_eq!(hex::encode(seed_in), c.hmac_hex, "pwd={}", c.password);
         // 交叉验证 CRC 参数（反射/init/xorout）——将来写 validator 时最易写错处。
-        assert_eq!(crc32fast::hash(&seed_in), c.crc32, "crc32-IEEE pwd={}", c.password);
+        assert_eq!(
+            crc32fast::hash(&seed_in),
+            c.crc32,
+            "crc32-IEEE pwd={}",
+            c.password
+        );
         type Crc64Ecma = crc::Crc<u64, crc::TableSize<256>>;
         const ECMA: crc::SixtyFour = crc::Spec {
             poly: 0x42F0_E1BA_E9ED_C6B9,
