@@ -260,7 +260,7 @@ fn events_carry_session_id_and_start_seq() {
     .session_id(sid)
     .seq_base(41);
     agent.run("hi").expect("跑完");
-    let events = rec.events.borrow();
+    let events = rec.events();
     assert!(events.iter().all(|e| e.session_id == sid));
     assert_eq!(events[0].seq, 42, "seq 从锚点续接");
     assert!(events.iter().all(|e| e.ts_ms > 0));
@@ -319,5 +319,9 @@ fn provider_error_is_returned_as_err() {
     );
     let err = agent.run("任务").expect_err("应上抛");
     assert_eq!(err, "上游模型不可用");
-    assert_eq!(rec.len(), 2, "失败只上报已发生的思考与文本");
+    assert_eq!(
+        rec.len(),
+        0,
+        "provider 首调即失败 ⇒ 无已完成轮次事件可上报（规格：事件=实际发生的步骤）"
+    );
 }
