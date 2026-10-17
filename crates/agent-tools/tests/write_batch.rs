@@ -35,6 +35,7 @@ fn write_新建与覆盖成功_不留临时文件() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn write_覆盖时保留原文件权限位() {
     let sb = Sandbox::new();
@@ -288,6 +289,7 @@ fn rename_同盘成功且不覆盖目标() {
 /// 跨盘 rename：工作区内放一个指向 /dev/shm 的符号链接目录，
 /// rename 到其中即触发 EXDEV，验证退化为「复制 + 删除源」。
 /// 若 /dev/shm 与工作区同盘（无 EXDEV），断言退化为普通 rename 仍然成立。
+#[cfg(unix)]
 #[test]
 fn rename_跨盘退化为复制加删除() {
     let sb = Sandbox::new();

@@ -104,9 +104,14 @@ fn compose_failure_does_not_block_session() {
     let base = workdir_of(&rt);
     let blocker = base.join("not-a-dir");
     std::fs::write(&blocker, b"x").expect("write");
-    // workspace_root 指向一个文件 ⇒ compose 必失败 ⇒ 不得阻断建会话
+    // workspace_root 指向一个文件 ⇒ 不得阻断建会话。
+    // 平台差异：Linux 报 ENOTDIR ⇒ compose Err ⇒ digest None；Windows 报 NotFound，
+    // 按规格 §1「缺失=空内容」⇒ compose Ok ⇒ digest Some(空身份)。两者均合规。
     let s = mk_session(&rt, &blocker);
-    assert!(s.memory_digest.is_none(), "compose 失败 ⇒ digest None");
+    #[cfg(unix)]
+    assert!(s.memory_digest.is_none(), "unix: compose 失败 ⇒ digest None");
+    #[cfg(windows)]
+    assert!(s.memory_digest.is_some(), "windows: NotFound 语义 ⇒ 空身份摘要");
 }
 
 #[test]
