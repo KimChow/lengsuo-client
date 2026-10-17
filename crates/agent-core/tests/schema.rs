@@ -70,8 +70,20 @@ fn session_create_get_roundtrip() {
     assert_eq!(fetched.id, created.id);
     assert_eq!(fetched.created_at_ms, created.created_at_ms);
 
-    let listed = rt.list_sessions(&isolation());
-    assert_eq!(listed.len(), 1);
+    // 完整 Isolation 过滤：env_binding 会把 isolation.env_id 改写为 env-42，
+    // 因此必须用 created.isolation 查询；旧写法用 env-1 查询已不兼容。
+    let listed = rt.list_sessions(&created.isolation);
+    assert_eq!(listed.len(), 1, "同一完整隔离键必须列出自己的会话");
+    assert_eq!(listed[0].id, created.id);
+    let no_env = Isolation {
+        user_id: "u-1".into(),
+        tenant_id: "t-1".into(),
+        env_id: None,
+    };
+    assert!(
+        rt.list_sessions(&no_env).is_empty(),
+        "env_id 不同（None vs env-42）不得列出"
+    );
     let other = Isolation {
         user_id: "u-2".into(),
         tenant_id: "t-1".into(),

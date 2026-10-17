@@ -268,12 +268,14 @@ impl Runtime {
     }
 
     /// 按隔离键列会话（摘要，不带消息体）。
+    ///
+    /// 比较完整 `Isolation`（用户/租户/环境），不用 `key()`：后者是
+    /// `user_id-tenant_id` 拼接且不含 env，分段歧义会串列表。
     pub fn list_sessions(&self, isolation: &Isolation) -> Vec<Session> {
-        let key = isolation.key();
         let guard = self.sessions.lock().expect("会话表锁不得毒化");
         guard
             .values()
-            .filter(|h| h.session.isolation.key() == key)
+            .filter(|h| &h.session.isolation == isolation)
             .map(|h| h.session.clone())
             .collect()
     }
