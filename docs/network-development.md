@@ -97,3 +97,7 @@ ALL-1仅执行最终证据审计，不能代替上述代码开发，也不能把
 ### DNS 显式上游交换（本批验收）
 
 新增独占 UDP socket 的显式上游请求与响应校验，拒绝错误 ID、问题区或来源，具备总超时且不回退系统 DNS。问题名采用严格字节回显匹配（含大小写），不承诺接受上游改写问题区大小写。修复未压缩问题名的长度字节与根标签解析，覆盖原始编码和类型边界。此项只是 DNS 数据交换原语，不代表浏览器 TUN 完整数据通路已通过。
+
+### Hysteria UDP 消息层验收
+
+新增官方 UDPMessage 格式的借用式编解码，覆盖原始地址字节、非最短 varint、边界和截断等 18 项测试。固定参考为 apernet/hysteria `ca8fbd874fd6ca82413948de6dc5924405e103e1` 的 `core/internal/protocol/proxy.go`；协调端另用 Python struct.pack 核对黄金样本。此项不代表 QUIC、HTTP/3 认证、分片重组或真实进程互通已完成；既有 CONNECT-UDP capsule 不计入官方 Hysteria2 兼容范围。

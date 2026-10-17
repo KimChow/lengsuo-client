@@ -10,8 +10,9 @@
 //! 解析返回精确消耗长度，帧之后的字节保留给应用载荷，不吞掉任何数据。
 //!
 //! 尚未实现：QUIC 连接与流、HTTP/3 伪装与 `POST /auth` 认证（含认证 token 的
-//! QUIC TLS transcript 派生）、UDP 中继报文与分片、Salamander 混淆、以及与
-//! apernet/hysteria 的真实互通验收。
+//! QUIC TLS transcript 派生）、UDP 分片重组与中继调度、Salamander 混淆、以及与
+//! apernet/hysteria 的真实互通验收。UDP 中继报文本身的消息层字节编解码见
+//! `udp.rs`（消息层原语，不等于 UDP 中继已实现）。
 //! 本 crate 不能作为可用 Hysteria2 客户端或服务端发布。
 //! 状态与验证记录见 `docs/hysteria-status.md`。
 
@@ -19,6 +20,7 @@ pub mod connect_udp;
 mod frame;
 pub mod padding;
 pub mod tcp;
+pub mod udp;
 pub mod varint;
 
 /// 帧编解码错误。所有失败均 fail-closed：调用方必须丢弃该流，不得在
