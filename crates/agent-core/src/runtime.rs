@@ -203,7 +203,7 @@ impl Runtime {
         if let Some(t) = &bundle.daily_tail {
             out.push_str(&format!("[当日日志尾] {}\n", preview(t, 200)));
         }
-        Ok(preview(&out, 8000))
+        Ok(preview(&self.redact(&out), 8000))
     }
 
     /// 记忆工具执行入口（权限门放行后由宿主调用；每次成功发 memory_update 事件）。
@@ -223,7 +223,7 @@ impl Runtime {
         let arg = |key: &str| -> Result<String, CoreError> {
             args.get(key)
                 .and_then(Value::as_str)
-                .map(str::to_string)
+                .map(|text| self.redact(text))
                 .ok_or_else(|| CoreError::InvalidConfig(format!("缺少参数 {key}")))
         };
         let kind = match name {
@@ -234,6 +234,9 @@ impl Runtime {
                     self.workdir.join(".lengsuo"),
                     &session.workspace_root,
                 );
+                if !enabled {
+                    return Err(agent_memory::MemoryError::Disabled.into());
+                }
                 agent_memory::append_daily(&paths, date, &arg("text")?)?;
                 "daily_append"
             }
