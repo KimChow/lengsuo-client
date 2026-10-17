@@ -25,6 +25,7 @@ members = [
     "crates/agent-tasks",
     "crates/agent-skills",
     "crates/agent-prompts",
+    "crates/agent-tools",
 ]
 
 [workspace.package]
@@ -60,6 +61,8 @@ axum = { version = "0.7", features = ["ws"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 tempfile = "3"
+glob = "0.3"
+trash = "5"
 
 [profile.dev]
 incremental = false
