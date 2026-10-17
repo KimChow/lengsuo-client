@@ -14,7 +14,8 @@
 //! - `query` 未通过 [`super::parse_query`]：[`Error::BadQuery`]，**在发包之前**
 //!   拒绝，绝不把非法载荷送往上游。
 //! - 响应必须通过 [`super::parse_response`]（QR=1、结构完整、单问题、非 TC），
-//!   且头部 ID 与问题区都要与查询逐字段一致才接受。
+//!   且头部 ID 与 qtype/qclass 逐字段精确一致、问题名字按 RFC 1035 2.3.1 的大小写
+//!   不敏感语义一致，才接受回注。
 //! - 不匹配或非法的报文一律丢弃并继续等待合法响应；丢弃次数受 [`MAX_REJECTS`]
 //!   上限约束，整个交换又被单一 `deadline` 覆盖（send 与 recv 都在其内），
 //!   因此非法洪泛既不能无限占用 CPU，也不能把总期限拖长。
@@ -140,13 +141,21 @@ async fn request_and_await(
 
 /// 判断一份数据报是否是 `expected` 查询的合法匹配响应。
 ///
-/// 复用 [`super::parse_response`] 做结构与方向校验（不重新解析 DNS 语义），随后
-/// 只比对查询 ID 与问题区（[`dns::Question`] 实现 `PartialEq`，名字按字节比较）。
+/// 复用 [`super::parse_response`] 做结构与方向校验（不重新解析 DNS 语义），随后比对：
+/// - 查询 ID 必须逐字节相同：ID 是事务标识，漂移一位就说明这份报文不属于本次交换。
+/// - 名字按 [`dns::QuestionName::matches`] 逐标签、ASCII 大小写不敏感比较（RFC 1035
+///   2.3.1）：上游把回显名字规范化为小写是合法行为，按字节比较会把真实响应误判为
+///   非预期，进而让整条交换无谓超时。与 `super::rewrite::match_response` 同源。
+/// - qtype 与 qclass 必须精确相同：它们定义了被回答的是哪个问题，没有等价形式。
+///
 /// 任一不符即视为非预期，交由调用方丢弃并计入拒绝上限。
 fn matches_response(payload: &[u8], expected: &dns::Message) -> bool {
     match dns::parse_response(payload) {
         Ok(response) => {
-            response.header.id == expected.header.id && response.question == expected.question
+            response.header.id == expected.header.id
+                && response.question.name.matches(&expected.question.name)
+                && response.question.qtype == expected.question.qtype
+                && response.question.qclass == expected.question.qclass
         }
         Err(_) => false,
     }

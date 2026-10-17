@@ -49,3 +49,6 @@ pub fn with_raw_type(mut packet: Vec<u8>, raw: [u8; 4]) -> Vec<u8> {
     }
     packet
 }
+
+/// wireguard-go 参考适配器脚手架：假凭据、回环 socket、子进程回收与握手会话。
+pub mod reference;
