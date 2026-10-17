@@ -7,6 +7,7 @@
 //!
 //! 模块分工：
 //! - `packet`：只读头部元数据解析，分片与扩展头一律显式拒绝。
+//! - `dns`：DNS 报文结构解析（RFC 1035）与查询转发重写、响应回注匹配（`dns::rewrite`）。
 //! - `checksum`：TCP/UDP 伪首部与传输段校验和验证。
 //! - `session`：泛型五元组会话表，容量与 TTL 参数化，容量满时 fail-closed 拒绝。
 //! - `mtu`：路径 MTU 判定与 PMTUD（ICMPv4 type 3/code 4、ICMPv6 Packet Too Big）
@@ -23,6 +24,7 @@
 pub mod checksum;
 #[cfg(windows)]
 pub mod device;
+pub mod dns;
 pub mod mtu;
 pub mod packet;
 pub mod session;
