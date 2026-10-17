@@ -149,9 +149,8 @@ pub fn filter_commands(query: &str) -> Vec<&'static PaletteCommand> {
             Some(0)
         } else if subsequence_case_insensitive(q, title) {
             Some(1)
-        } else if subsequence_case_insensitive(q, c.id) {
-            Some(2)
-        } else if matches!(c.kind, PaletteCommandKind::SwitchMode(m) if m.as_str().contains(q.to_lowercase().as_str()))
+        } else if subsequence_case_insensitive(q, c.id)
+            || matches!(c.kind, PaletteCommandKind::SwitchMode(m) if m.as_str().contains(q.to_lowercase().as_str()))
         {
             Some(2)
         } else {
@@ -177,6 +176,8 @@ pub fn command_count() -> usize {
 
 /// 模式切换命令的条数（应为 5）。
 #[must_use]
+// 阶段二渲染层消费。
+#[allow(dead_code)]
 pub fn mode_command_count() -> usize {
     PALETTE_COMMANDS
         .iter()

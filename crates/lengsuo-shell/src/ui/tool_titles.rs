@@ -145,6 +145,8 @@ pub fn tool_title_of(name: &str) -> String {
 
 /// 是否为已登记的工具名（用于测试与「英文名不得外显」的断言）。
 #[must_use]
+// 阶段二渲染层消费（工具卡片降级标题）。
+#[allow(dead_code)]
 pub fn is_known_tool(name: &str) -> bool {
     lookup(name).is_some()
 }
