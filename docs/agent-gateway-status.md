@@ -30,3 +30,9 @@ RPC超时只终止等待；已进入spawn_blocking的同步回合可能继续完
 session:stop沿用现有Runtime停止状态语义，不宣称中断正在阻塞的Provider。
 WS慢客户端有发送超时；底层有界总线丢弃语义不变，客户端可通过seq识别缺口。
 记忆工具/策略/MCP完整编排与GPUI联调仍需另卡，网关不新增未冻结动作伪装接通。
+
+## 实际壳客户端联调
+
+新增shell_client集成测试直接连接真实GatewayHandle而非mock；先复现session_send的content字段不兼容400，
+再兼容现有壳的content、config key/value、approval_id/decision与无session的tool:list。
+8项网关测试全部通过；此处真实客户端与服务端均来自本仓，不代表GPUI窗口已验收。
