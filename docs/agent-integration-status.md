@@ -54,3 +54,9 @@ VMess 最新 main 更新不改 agent 模块；接入后补跑 VMess 测试、全
 agent-gateway 当前无服务端实现；policy-engine 缺完整判定器；MCP 缺 stdio 集成验收；
 Skills/Prompts/Tasks/MCP/凭据/策略未接入运行时。详见 [能力核验矩阵](agent-capability-audit.md)。
 记忆路径与落盘脱敏新增回归测试已复现缺陷，修复验收前不得宣称记忆安全路径完整。
+
+## 后续修复进展
+
+记忆安全回归与凭据stderr输出修复已提交；网关现有RPC/WS实现在7项真实回环测试通过后接入。
+网关Unix握手权限已测，Windows ACL未实现；仅Echo provider，不宣称真实模型或工具编排完成。
+历史能力核验矩阵描述eb02d938基线，最新网关实现见agent-gateway-status.md。
