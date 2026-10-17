@@ -107,7 +107,7 @@ async fn timeout_kills_the_whole_process_group() {
         marker.display()
     );
     let r =
-        with_deadline(runner(1000).run(Shell::Bash, &cmd, None, Some(Duration::from_millis(100))))
+        with_deadline(runner(1000).run(Shell::Bash, cmd, None, Some(Duration::from_millis(100))))
             .await
             .expect("run");
     assert!(r.timed_out);
@@ -121,7 +121,7 @@ async fn timeout_kills_the_whole_process_group() {
 async fn output_is_truncated_at_the_byte_cap() {
     let cmd = "printf 'x%.0s' $(seq 1 3000)";
     let cap = 100;
-    let r = with_deadline(runner(cap).run(Shell::Bash, &cmd, None, None))
+    let r = with_deadline(runner(cap).run(Shell::Bash, cmd, None, None))
         .await
         .expect("deadline");
     assert!(r.truncated);
@@ -133,7 +133,7 @@ async fn output_is_truncated_at_the_byte_cap() {
 async fn truncation_holds_even_across_many_chunks() {
     // head -c 64000 远大于 8 KiB 块：验证不会整体读进内存。
     let cmd = "head -c 64000 /dev/zero | tr '\\0' 'a'";
-    let r = with_deadline(runner(4096).run(Shell::Bash, &cmd, None, None))
+    let r = with_deadline(runner(4096).run(Shell::Bash, cmd, None, None))
         .await
         .expect("deadline");
     assert!(r.truncated);
@@ -179,7 +179,7 @@ async fn shell_not_in_allowed_shells_is_unsupported() {
 async fn command_text_is_passed_as_one_argv_without_host_side_expansion() {
     // 反引号/分号属于用户命令自身的 shell 语义：能生效说明没有被二次包裹。
     let cmd = "echo $(echo nested)";
-    let r = with_deadline(runner(1000).run(Shell::Bash, &cmd, None, None))
+    let r = with_deadline(runner(1000).run(Shell::Bash, cmd, None, None))
         .await
         .expect("deadline");
     assert_eq!(r.stdout.trim(), "nested");
