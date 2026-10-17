@@ -43,3 +43,5 @@ SS2022非零padding的旧文档限制已按实测纠正，均不代表完整协�
 DNS 显式上游 UDP 交换及问题名解析回归已通过研究机 Linux 测试；浏览器 TUN 完整验收仍待完成，详见 [网络开发台账](docs/network-development.md)。
 
 Hysteria2 已具备 UDPMessage 消息层编解码与边界测试；QUIC/HTTP3 运行时和真实互通仍待完成。
+
+SS2022 TCP 新增固定 Xray 客户端到 Rust 接收方的双向载荷互通测试；范围与限制见网络开发台账。

@@ -101,3 +101,7 @@ ALL-1仅执行最终证据审计，不能代替上述代码开发，也不能把
 ### Hysteria UDP 消息层验收
 
 新增官方 UDPMessage 格式的借用式编解码，覆盖原始地址字节、非最短 varint、边界和截断等 18 项测试。固定参考为 apernet/hysteria `ca8fbd874fd6ca82413948de6dc5924405e103e1` 的 `core/internal/protocol/proxy.go`；协调端另用 Python struct.pack 核对黄金样本。此项不代表 QUIC、HTTP/3 认证、分片重组或真实进程互通已完成；既有 CONNECT-UDP capsule 不计入官方 Hysteria2 兼容范围。
+
+### SS2022 TCP 反向互通验收
+
+固定 Xray `d2758a023cd7f4174a5a5fa4ff66e487d4342ba0` 客户端经 SOCKS 入站连接 Rust 接收方，再中继至独立回环 echo；AES-128/256 各验证 1、512、1200 字节请求和回程，覆盖响应头后续 chunk 与关闭写半。测试辅助按职责拆分，修复短载荷切片越界与 SOCKS 响应域名长度读取。该正常载荷互通测试不证明全部恶意输入、重启重放保护或完整生产运行时已验收。
