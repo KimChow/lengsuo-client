@@ -35,3 +35,7 @@ VMess 请求地址编码修复及实际验证范围见 [VMess 状态](docs/vmess
 原语修复不代表完整网络互通。
 Agent 基础模块、三层记忆及运行时 M2 已完成源码集成；GPUI 实体界面仍待实现。
 本批范围、验证与限制见 [Agent 集成状态](docs/agent-integration-status.md)。
+
+网络开发已改为按依赖分批验收，完整范围与启动/交付条件见
+[网络开发任务](docs/network-development.md)。WG已补独立KDF及官方核心进程验证，
+SS2022非零padding的旧文档限制已按实测纠正，均不代表完整协议/浏览器TUN已完成。
