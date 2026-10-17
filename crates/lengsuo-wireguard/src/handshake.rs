@@ -307,8 +307,8 @@ impl Handshake {
         // 组帧：type(1) sender(4) ephemeral(32) static(48) timestamp(28) mac1(16) mac2(16)。
         let mut msg = [0u8; INITIATION_LEN];
         // Type 字段是 u32be（参考 MessageInitiation.Type uint32）。
-        msg[..4].copy_from_slice(&1u32.to_be_bytes());
-        msg[4..8].copy_from_slice(&self.local_index.to_be_bytes());
+        msg[..4].copy_from_slice(&1u32.to_le_bytes());
+        msg[4..8].copy_from_slice(&self.local_index.to_le_bytes());
         msg[8..40].copy_from_slice(&ephemeral_public);
         msg[40..88].copy_from_slice(&encrypted_static); // 32B 静态公钥 + 16B tag
         msg[88..116].copy_from_slice(&encrypted_timestamp); // 12B TAI64N + 16B tag
@@ -340,12 +340,12 @@ impl Handshake {
                 limit: RESPONSE_LEN,
             });
         }
-        if wire[..4] != 2u32.to_be_bytes() {
+        if wire[..4] != 2u32.to_le_bytes() {
             return Err(Error::NotTransport("非 response 报文"));
         }
-        let remote_index = u32::from_be_bytes(wire[4..8].try_into().expect("4B"));
+        let remote_index = u32::from_le_bytes(wire[4..8].try_into().expect("4B"));
         // 对端的 receiver 字段必须等于我方 initiation 的 sender。
-        let echoed = u32::from_be_bytes(wire[8..12].try_into().expect("4B"));
+        let echoed = u32::from_le_bytes(wire[8..12].try_into().expect("4B"));
         if echoed != self.sent_index {
             self.state = State::Poisoned;
             return Err(Error::ReceiverMismatch {

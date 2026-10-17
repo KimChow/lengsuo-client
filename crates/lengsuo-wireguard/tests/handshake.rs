@@ -55,8 +55,8 @@ fn full_handshake_derives_matching_keys() {
     let initiation = client
         .create_initiation([0xAAu8; 32])
         .expect("initiation 可生成");
-    assert_eq!(&initiation[..4], &1u32.to_be_bytes());
-    assert_eq!(&initiation[4..8], &7u32.to_be_bytes());
+    assert_eq!(&initiation[..4], &1u32.to_le_bytes());
+    assert_eq!(&initiation[4..8], &7u32.to_le_bytes());
     // MAC1 独立重算（对端验证语义）。
     let expected_mac = handshake::mac1(&server_public, &initiation[..INIT_SLICE]);
     assert_eq!(&initiation[INIT_SLICE..INIT_SLICE + 16], &expected_mac);
@@ -175,8 +175,8 @@ impl ServerSide {
 
         let server_index = 0x2026u32;
         let mut resp = [0u8; 92];
-        resp[0..4].copy_from_slice(&2u32.to_be_bytes());
-        resp[4..8].copy_from_slice(&server_index.to_be_bytes());
+        resp[0..4].copy_from_slice(&2u32.to_le_bytes());
+        resp[4..8].copy_from_slice(&server_index.to_le_bytes());
         resp[8..12].copy_from_slice(&wire[4..8]); // receiver = client sender
                                                   // 服务端临时密钥：确定性测试种子。
         let server_eph_secret = x25519_dalek::StaticSecret::from([0x77u8; 32]);
