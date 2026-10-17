@@ -121,3 +121,13 @@ Windows Xray 使用已核验官方资产的 v26.3.27，完整发布包 SHA256
   伪装层解决（对照实验见上一节）。
 - `tests/vps_tcp.rs` 已更新为该链路（SS2022_VPS 环境变量触发）。
 - 服务器端配套：Opened 新增 request_salt 字段（服务器派生同流响应子密钥）。
+
+## padding 布局修正与实测（2026-10-17）
+
+- 实测发现：变长头按 spec §3.1.3（addr+padLen+pad+payload）发送时，Xray 会把
+  padding 字节当载荷转发到目标端（回程出现 8 字节错位）。
+- 已按 Xray 实测行为修正测试基准与实现注释：与 Xray 互通时 padding 必须为 0；
+  测试现含多组 padding 场景的逐字节转发核对（含错位现象的回归锁定）。
+- 真实互通：padding 场景矩阵下 Xray 双向互通通过（--ignored 真实 spawn）。
+- 与 sing v0.2.7 源码的对照结论一并记录（sing 文档布局与 Xray 实测存在出入，
+  以 Xray 实测为准——Xray 是本仓的互通目标）。
