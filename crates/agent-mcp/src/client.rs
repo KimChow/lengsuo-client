@@ -41,11 +41,21 @@ pub const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const EXIT_GRACE: Duration = Duration::from_secs(2);
 
 /// 待 spawn 的 MCP server 命令。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct StdioServerCommand {
     program: String,
     args: Vec<String>,
     env: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for StdioServerCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StdioServerCommand")
+            .field("program", &self.program)
+            .field("argument_count", &self.args.len())
+            .field("environment_count", &self.env.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl StdioServerCommand {
