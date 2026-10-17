@@ -186,7 +186,11 @@ mod tests {
 
     #[test]
     fn table_has_new_close_settings_and_five_modes() {
-        assert!(command_count() >= 8, "首版至少 8 条，实际 {}", command_count());
+        assert!(
+            command_count() >= 8,
+            "首版至少 8 条，实际 {}",
+            command_count()
+        );
         assert_eq!(mode_command_count(), 5);
         let kinds: Vec<_> = PALETTE_COMMANDS.iter().map(|c| c.kind).collect();
         assert!(kinds.contains(&PaletteCommandKind::NewSession));

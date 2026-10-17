@@ -221,9 +221,7 @@ mod tests {
         let d = diff("a\nb\nc\n", "a\nb\nc\n");
         assert!(d.minimal);
         assert_eq!(d.lines.len(), 3);
-        assert!(kinds(&d.lines)
-            .iter()
-            .all(|k| *k == DiffKind::Equal));
+        assert!(kinds(&d.lines).iter().all(|k| *k == DiffKind::Equal));
         assert_eq!(d.changed(), 0);
         assert_eq!(d.summary(), "+0 -0");
     }
@@ -267,11 +265,7 @@ mod tests {
             .find(|l| l.kind == DiffKind::Added)
             .expect("应有新增行");
         assert_eq!((added.old_line, added.new_line), (None, Some(2)));
-        let equal = d
-            .lines
-            .iter()
-            .find(|l| l.text == "c")
-            .expect("c 行存在");
+        let equal = d.lines.iter().find(|l| l.text == "c").expect("c 行存在");
         assert_eq!((equal.old_line, equal.new_line), (Some(2), Some(3)));
 
         let d = diff("a\nb\nc\n", "a\nc\n");
@@ -300,7 +294,10 @@ mod tests {
         // 旧：a b c，新：a x c。最小 diff 只应改中间一行。
         let d = diff("a\nb\nc\n", "a\nx\nc\n");
         assert_eq!(d.changed(), 2, "应只有一红一绿：{:?}", text_of(&d.lines));
-        assert_eq!(d.lines.iter().filter(|l| l.kind == DiffKind::Equal).count(), 2);
+        assert_eq!(
+            d.lines.iter().filter(|l| l.kind == DiffKind::Equal).count(),
+            2
+        );
     }
 
     #[test]
@@ -338,7 +335,15 @@ mod tests {
         assert!(!d.minimal, "超规模应标记非最小结果");
         assert_eq!(d.removed(), 3000);
         assert_eq!(d.added(), 3000);
-        assert_eq!(kinds(&d.lines).iter().take(3000).filter(|k| **k == DiffKind::Removed).count(), 3000, "红行应全部在前");
+        assert_eq!(
+            kinds(&d.lines)
+                .iter()
+                .take(3000)
+                .filter(|k| **k == DiffKind::Removed)
+                .count(),
+            3000,
+            "红行应全部在前"
+        );
         assert_eq!(d.lines[3000].new_line, Some(1));
         assert_eq!(d.lines[2999].old_line, Some(3000));
     }

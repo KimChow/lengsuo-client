@@ -175,7 +175,10 @@ mod tests {
     #[test]
     fn fs_search_title_quotes_pattern() {
         let args = json!({ "pattern": "GatewayClient" });
-        assert_eq!(tool_title("fs.search", Some(&args)), "搜索 \"GatewayClient\"");
+        assert_eq!(
+            tool_title("fs.search", Some(&args)),
+            "搜索 \"GatewayClient\""
+        );
     }
 
     #[test]

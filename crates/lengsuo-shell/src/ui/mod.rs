@@ -28,8 +28,11 @@ mod input;
 mod session_view;
 
 #[cfg(feature = "ui")]
+#[cfg(feature = "ui")]
 pub use app::{launch, ShellApp};
 #[cfg(feature = "ui")]
+#[cfg(feature = "ui")]
 pub use input::{input_key_action, InputKey, InputKeyAction};
+#[cfg(feature = "ui")]
 #[cfg(feature = "ui")]
 pub use session_view::SessionStreamView;
