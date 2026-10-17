@@ -64,3 +64,7 @@ Skills/Prompts/Tasks/MCP/凭据/策略未接入运行时。详见 [能力核验�
 本批安全修复与真实网关/壳客户端联调集成后，workspace完整门禁再次通过：
 行数/profile/fmt/clippy/test/build均exit 0；测试合计780 passed / 0 failed / 23 ignored。
 日志agent-next-final-{lines,clippy,tests,build}.log位于研究机仓外，不入库。
+
+MCP真实stdio验收与壳回环测试合流后再次完整门禁通过：810 passed / 0 failed / 23 ignored；
+行数/fmt/clippy/build退出0，证据agent-review-final-*.log。
+宿主接线回到既有WorkBuddy行为基线，不按早期未核对的提案另增架构；策略与GPUI未完成项不混入本次收卡。
