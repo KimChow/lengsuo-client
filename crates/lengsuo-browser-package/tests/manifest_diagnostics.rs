@@ -127,7 +127,7 @@ fn no_panic_on_any_hostile_document() {
             // Anything that parses must still be checked by validate(); the
             // corpus is hostile, so nothing here may quietly look installable.
             assert!(
-                !check_good(&manifest).is_ok() || manifest == good_manifest(),
+                check_good(&manifest).is_err() || manifest == good_manifest(),
                 "hostile corpus entry accepted as compatible: {text:?}"
             );
             let _ = manifest.validate();

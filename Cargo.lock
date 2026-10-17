@@ -860,6 +860,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "lengsuo-browser-installer"
+version = "0.1.0"
+
+[[package]]
+name = "lengsuo-browser-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lengsuo-browser-package"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "lengsuo-browser-signature",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lengsuo-browser-profile"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lengsuo-browser-signature"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lengsuo-browser-state"
+version = "0.1.0"
+
+[[package]]
 name = "lengsuo-environment"
 version = "0.1.0"
 dependencies = [
