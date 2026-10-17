@@ -301,13 +301,10 @@ pub fn assert_request_plaintext_cases() {
             "{} FNV 尾",
             case.name
         );
-        let (target, _) = TargetAddr::decode(&plain[38..]).expect("地址可解");
-        assert_eq!(
-            target,
-            TargetAddr::Domain(case.domain.into(), case.port),
-            "{} 地址还原",
-            case.name
-        );
+        assert_eq!(&plain[38..40], &case.port.to_be_bytes());
+        assert_eq!(plain[40], 2, "VMess 域名类型不是 SOCKS5 的 3");
+        assert_eq!(plain[41] as usize, case.domain.len());
+        assert_eq!(&plain[42..42 + case.domain.len()], case.domain.as_bytes());
     }
 }
 
