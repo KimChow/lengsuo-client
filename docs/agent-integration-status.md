@@ -8,7 +8,7 @@
 以单个集成提交引入最终源码；不引入来源分支中的 Cargo 缓存、构建产物和临时探针历史。
 保留 main 最新 golden 向量、nonce 与 CRC 断言，不回退网络线修复。
 
-已实现的模块包括 agent-core/gateway、policy-engine、credential-ref、agent-mcp、
+已入仓的模块包括 agent-core/gateway、policy-engine、credential-ref、agent-mcp、
 agent-skills、agent-prompts、agent-tasks、agent-memory，以及 lengsuo-shell 的纯逻辑骨架。
 M2 包含默认关闭的 memoryEnabled、会话 memoryDigest 注入、四个记忆工具执行体与 memory_update 事件。
 记忆注入失败告警但不阻断会话；工具执行体测试不代表所有宿主调用链权限验收完成。
@@ -47,3 +47,10 @@ Cargo 使用 --offline，仅使用已有依赖缓存；不提交机器镜像配�
 - 许可证检查尚无自动化覆盖，本次不宣称已由 CI 审核。
 
 VMess 最新 main 更新不改 agent 模块；接入后补跑 VMess 测试、全工作区 clippy/build 与静态门禁。
+
+## 实际能力复核（2026-10-17）
+
+此前全绿仅说明已有测试通过，不能作为全部功能交付的证据。
+agent-gateway 当前无服务端实现；policy-engine 缺完整判定器；MCP 缺 stdio 集成验收；
+Skills/Prompts/Tasks/MCP/凭据/策略未接入运行时。详见 [能力核验矩阵](agent-capability-audit.md)。
+记忆路径与落盘脱敏新增回归测试已复现缺陷，修复验收前不得宣称记忆安全路径完整。
