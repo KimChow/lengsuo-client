@@ -86,7 +86,7 @@ impl TaskBoard {
             });
         }
         task.status = to;
-        task.updated_at_ms = (self.now)();
+        Self::bump(&mut task.updated_at_ms, (self.now)());
         Ok(task.clone())
     }
 
@@ -117,7 +117,7 @@ impl TaskBoard {
             }
         }
         if changed {
-            task.updated_at_ms = (self.now)();
+            Self::bump(&mut task.updated_at_ms, (self.now)());
         }
         Ok(task.clone())
     }
@@ -140,6 +140,12 @@ impl TaskBoard {
     pub fn to_json(&self, id: Uuid) -> Result<Value, TaskError> {
         let task = self.get(id)?;
         serde_json::to_value(task).map_err(|e| TaskError::Json(e.to_string()))
+    }
+
+    /// 刷新更新时间：只前进不回拨（对照 PC26 advanceActivity 的「只前进」原则）。
+    /// 注入时钟回退时取历史最大值，保证 `updated_at_ms` 对该任务单调非递减。
+    fn bump(slot: &mut u64, now_ms: u64) {
+        *slot = (*slot).max(now_ms);
     }
 }
 
