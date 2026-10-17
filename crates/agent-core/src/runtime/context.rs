@@ -8,6 +8,9 @@
 //! - `memory_digest`：`memory.enabled` 关闭时为 `None`，Composer 不留空段。
 //!
 //! 隐私（AGENTS §6）：进入上下文的任何文本先过脱敏器；凭据不进模型输入。
+//!
+//! 记忆新鲜度：开启记忆的每个回合都重新组装摘要，不信任建会话时的 `session`
+//! 快照（见 [`Runtime::turn_memory_digest`]），否则本会话内的显式记忆写入永不生效。
 
 use super::*;
 use agent_prompts::{Composer, PromptMode, PromptVars};
@@ -38,8 +41,14 @@ impl Runtime {
 
     /// 本轮记忆摘要：仅在 `memory.enabled` 时给出（关闭 ⇒ `None`，Composer 不留空段）。
     ///
-    /// 会话上的摘要缺失时（建会话时 compose 失败、或重启回放后的会话）在回合内
-    /// 重新组装一次；仍失败则本次不带记忆并继续跑回合，不影响既有事件语义。
+    /// 新鲜度（memory-freshness 卡）：**每次开启的回合都按现存 MemoryEngine 重组**，
+    /// 不采用建会话时留在 `session.memory_digest` 上的快照——否则本会话内通过既有
+    /// 记忆写工具（`memory.set_user` / `memory.set_project` / `memory.append_daily`）
+    /// 做的显式更新永远进不了模型上下文。会话快照只作为建会话时刻的热态展示用。
+    ///
+    /// 重组失败 ⇒ 本回合**不带任何摘要**（并落一条 `warning` 事件可告警），回合照常
+    /// 跑完；尤其**不回退**到旧会话快照——失败时旧快照可能已过时且含敏感层内容，
+    /// 宁可少注入也不注入陈旧记忆（AGENTS §6 最小上下文）。
     fn turn_memory_digest(&self, session: &Session) -> Option<String> {
         let enabled = self
             .config
@@ -49,12 +58,21 @@ impl Runtime {
         if !enabled {
             return None;
         }
-        if let Some(digest) = &session.memory_digest {
-            return Some(self.redact(digest));
+        match self.compose_memory_digest(&session.workspace_root) {
+            Ok(digest) => Some(self.redact(&digest)),
+            Err(e) => {
+                // 告警本身失败不得改变回合结论（摘要已确定缺席）。
+                let _ = self.emit(
+                    session,
+                    "warning",
+                    serde_json::json!({
+                        "kind": "memory_compose_failed",
+                        "reason": e.to_string(),
+                    }),
+                );
+                None
+            }
         }
-        self.compose_memory_digest(&session.workspace_root)
-            .ok()
-            .map(|digest| self.redact(&digest))
     }
 
     /// 模板变量：身份层 + 工作区 + 日期 + 用户规则（v0 空）+ 已启用记忆摘要。
