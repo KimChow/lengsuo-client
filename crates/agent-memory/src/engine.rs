@@ -7,6 +7,8 @@
 //! - 读失败显式上抛（fail-closed：单层失败即整体 `Err`）；文件缺失表示「该层无内容」，
 //!   不是错误（规格 §1）。
 //! - 写路径顺序固定：闸门 → 越界 → 容量 → 落盘，且落盘只有一次 ⇒ 拒绝时不产生部分写入。
+//! - 越界防护覆盖**全部**记忆路径（用户层/身份层以 `home` 为授权根，项目层以 `workspace`
+//!   为授权根；规格 §2），读侧同样复核——否则 symlink 摆放可绕过写侧校验注入外部内容。
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -58,7 +60,7 @@ impl MemoryEngine {
                 daily_tail: None,
             });
         }
-        let user_memory = read_layer(&self.paths.user_memory_file())?;
+        let user_memory = read_layer(&self.user_memory_file()?)?;
         let project_memory = read_layer(&self.project_memory_file()?)?;
         let today = Local::now().date_naive();
         let daily_tail = read_daily_tail(&self.paths, today, DAILY_TAIL_LINES)?;
@@ -73,8 +75,9 @@ impl MemoryEngine {
     /// 用户记忆覆写（≤4000 字符；disabled ⇒ Err(Disabled)）。
     pub fn set_user_memory(&self, text: &str) -> Result<(), MemoryError> {
         self.ensure_enabled()?;
+        let file = self.user_memory_file()?;
         check_cap(CAP_USER_MEMORY, text)?;
-        write_file(&self.paths.user_memory_file(), text)
+        write_file(&file, text)
     }
 
     /// 项目记忆覆写（≤3000 字符；disabled ⇒ Err(Disabled)）。
@@ -87,26 +90,30 @@ impl MemoryEngine {
 
     /// 身份读路径（规格 §3；不受开关限制，缺省名由 identity 模块兜底）。
     pub fn read_identity(&self) -> Result<Identity, MemoryError> {
+        self.identity_dir()?;
         read_identity(&self.paths)
     }
 
     /// 身份写路径（不受开关限制）。
     pub fn set_soul(&self, text: &str) -> Result<(), MemoryError> {
+        self.identity_dir()?;
         write_soul(&self.paths, text)
     }
 
     pub fn set_user_name(&self, name: &str) -> Result<(), MemoryError> {
+        self.identity_dir()?;
         write_user_name(&self.paths, name)
     }
 
     pub fn set_ai_name(&self, name: &str) -> Result<(), MemoryError> {
+        self.identity_dir()?;
         write_ai_name(&self.paths, name)
     }
 
     /// 清除用户记忆文件（规格 §2 查看/删除能力）。**不受开关限制**——关闭记忆后仍须
     /// 能删除历史残留（隐私优先于开关字面语义）；文件不存在视为已清空（幂等）。
     pub fn clear_user_memory(&self) -> Result<(), MemoryError> {
-        remove_layer(&self.paths.user_memory_file())
+        remove_layer(&self.user_memory_file()?)
     }
 
     /// 清除项目记忆文件（同上；先过 workspace 越界防护）。
@@ -124,6 +131,20 @@ impl MemoryEngine {
         let file = self.paths.project_memory_file();
         MemoryPaths::ensure_within(&self.paths.workspace, &file)?;
         Ok(file)
+    }
+
+    /// 授权 home 内的用户记忆文件路径（规格 §1/§2：用户层固定主目录内）。
+    fn user_memory_file(&self) -> Result<PathBuf, MemoryError> {
+        let file = self.paths.user_memory_file();
+        MemoryPaths::ensure_within(&self.paths.home, &file)?;
+        Ok(file)
+    }
+
+    /// 授权 home 内的身份目录（规格 §2：与用户记忆层同一授权根）。
+    fn identity_dir(&self) -> Result<PathBuf, MemoryError> {
+        let dir = self.paths.identity_dir();
+        MemoryPaths::ensure_within(&self.paths.home, &dir)?;
+        Ok(dir)
     }
 
     /// 记忆三层写闸门：未开启即拒绝，且不触盘。
