@@ -35,9 +35,10 @@
       "crate": "lengsuo-ss2022",
       "targets": [
         "xray_tcp",
+        "xray_tcp_reverse",
         "xray_udp"
       ],
-      "expected_passed": 3
+      "expected_passed": 4
     },
     {
       "crate": "lengsuo-shadowsocks",
