@@ -20,3 +20,6 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+# Client/server wire compatibility tests; shell does not depend on the server.
+lengsuo-shell = { path = "../lengsuo-shell" }

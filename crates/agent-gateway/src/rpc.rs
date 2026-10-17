@@ -72,8 +72,22 @@ fn run(app: &App, action: &str, p: &Value) -> Result<Value, Failure> {
     let rt = &app.runtime;
     Ok(match action {
         "sys:ping" => json!({"pid":std::process::id()}),
-        "config:get" => rt.config_get().to_value(),
-        "config:set" => rt.config_set(p).map_err(core)?.to_value(),
+        "config:get" => {
+            let config = rt.config_get().to_value();
+            if let Some(key) = p.get("key").and_then(Value::as_str) {
+                config.get(key).cloned().ok_or_else(bad)?
+            } else {
+                config
+            }
+        }
+        "config:set" => {
+            if let Some(key) = p.get("key").and_then(Value::as_str) {
+                let value = p.get("value").cloned().ok_or_else(bad)?;
+                rt.config_set(&json!({key:value})).map_err(core)?.to_value()
+            } else {
+                rt.config_set(p).map_err(core)?.to_value()
+            }
+        }
         "session:list" => json!(rt.list_sessions(&app.isolation)),
         "session:create" => {
             // Identity and environment authority are supplied by the host, never the RPC caller.
@@ -116,28 +130,50 @@ fn run(app: &App, action: &str, p: &Value) -> Result<Value, Failure> {
             let receipt = rt
                 .send_text(
                     own(app, p)?,
-                    p.get("text").and_then(Value::as_str).ok_or_else(bad)?,
+                    p.get("text")
+                        .or_else(|| p.get("content"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(bad)?,
                 )
                 .map_err(core)?;
             json!({"sessionId":receipt.session_id,"events":receipt.events,"lastSeq":receipt.last_seq})
         }
         "session:stop" => json!(rt.stop_session(own(app, p)?).map_err(core)?),
         "tool:list" => {
-            let session = rt.get_session(own(app, p)?).map_err(core)?;
+            let mode = if p.get("id").is_some()
+                || p.get("sessionId").is_some()
+                || p.get("session_id").is_some()
+            {
+                rt.get_session(own(app, p)?).map_err(core)?.mode
+            } else {
+                rt.config_get().default_mode
+            };
             let gate = rt.gate();
-            let allowed = gate.whitelist(session.mode);
+            let allowed = gate.whitelist(mode);
             json!(gate.registry().to_value(Some(&allowed)))
         }
         "approval:respond" => {
             let session = own(app, p)?;
-            let approval = id(p, "approvalId")?;
+            let approval = p
+                .get("approvalId")
+                .or_else(|| p.get("approval_id"))
+                .and_then(Value::as_str)
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .ok_or_else(bad)?;
             if !rt.pending_approvals(session).contains(&approval) {
                 return Err((403, "forbidden".into()));
             }
             let result = rt
                 .respond_approval(
                     approval,
-                    p.get("approved").and_then(Value::as_bool).ok_or_else(bad)?,
+                    p.get("approved")
+                        .and_then(Value::as_bool)
+                        .or_else(|| match p.get("decision").and_then(Value::as_str) {
+                            Some("allow") => Some(true),
+                            Some("deny") => Some(false),
+                            _ => None,
+                        })
+                        .ok_or_else(bad)?,
                 )
                 .map_err(core)?;
             json!({"approved":result.approved,"timedOut":result.timed_out})
