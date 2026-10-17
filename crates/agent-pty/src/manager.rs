@@ -74,6 +74,9 @@ impl Default for PtyManager {
     }
 }
 
+/// 句柄+状态成对返回类型（clippy type-complexity 收敛）。
+type HandlePair = (Arc<Mutex<SessionCtl>>, Arc<Mutex<SessionState>>);
+
 impl PtyManager {
     /// 新建空管理器。
     pub fn new() -> Self {
@@ -220,9 +223,10 @@ impl PtyManager {
 
     /// 一次查表取回（句柄, 状态）两个 Arc，避免 `&self` 方法里的重复查找。
     fn handles(
+        // （复杂返回类型别名见文件顶部 HandlePair）
         &self,
         id: u64,
-    ) -> Result<(Arc<Mutex<SessionCtl>>, Arc<Mutex<SessionState>>), PtyError> {
+    ) -> Result<HandlePair, PtyError> {
         let entry = self.entry(id)?;
         Ok((Arc::clone(&entry.ctl), Arc::clone(&entry.state)))
     }

@@ -73,8 +73,10 @@ mod tests {
 
     #[test]
     fn argv_splits_like_shell_words() {
-        let mut c = PtyConfig::default();
-        c.shell = "bash --norc -c \"echo 'hi there'\"".into();
+        let c = PtyConfig {
+            shell: "bash --norc -c \"echo 'hi there'\"".into(),
+            ..PtyConfig::default()
+        };
         assert_eq!(
             c.argv().unwrap(),
             vec![

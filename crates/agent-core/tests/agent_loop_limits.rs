@@ -3,8 +3,7 @@
 mod agent_support;
 
 use agent_support::{
-    call, default_limits, first_payload, kinds, payloads, raw_calls, run_loop, turn, MockExecutor,
-    MockProvider, Recorder,
+    call, default_limits, kinds, raw_calls, run_loop, turn, MockExecutor, MockProvider, Recorder,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;

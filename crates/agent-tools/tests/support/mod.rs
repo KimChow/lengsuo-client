@@ -1,3 +1,6 @@
+//! 合并遗产：跨分支测试支撑（部分 helper 暂未被引用，保留待用）。
+#![allow(dead_code)]
+
 //! 测试公共脚手架：隔离工作区 + 隔离回收站目录。
 //!
 //! 回收站通过 `XDG_DATA_HOME` 重定向到临时目录（`trash` 在 freedesktop 实现里
@@ -55,7 +58,7 @@ impl Sandbox {
 pub fn trash_home() -> &'static Path {
     static TRASH: OnceLock<PathBuf> = OnceLock::new();
     TRASH.get_or_init(|| {
-        let dir = TempDir::new().expect("创建回收站临时目录失败").into_path();
+        let dir = TempDir::new().expect("创建回收站临时目录失败").keep();
         // 测试进程内单点设置：trash 的 freedesktop 实现在删除时才读取该变量。
         std::env::set_var("XDG_DATA_HOME", &dir);
         dir.join("Trash")

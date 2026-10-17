@@ -87,7 +87,7 @@ fn guard_接受工作区内绝对路径与点段() {
         tb.read("./sub/../ok.txt", 1024).unwrap_err(),
         ToolError::Denied(_)
     ));
-    assert!(matches!(tb.exists("./sub/../ok.txt"), false));
+    assert!(!tb.exists("./sub/../ok.txt"));
 }
 
 #[test]

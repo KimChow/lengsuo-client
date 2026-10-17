@@ -3,13 +3,10 @@
 //! Xray SS2022 入站 → 目标端口。链路：本仓原语的线上字节全程经公网传输。
 #[path = "../../lengsuo-trojan/tests/support/mod.rs"]
 mod support;
-use base64::{engine::general_purpose::STANDARD, Engine};
 use lengsuo_ss2022::crypto::{Key, Method};
 use lengsuo_ss2022::tcp::receive::clock_at;
 use lengsuo_ss2022::tcp::{Direction, Reader, SessionReplay, Writer};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::timeout;
 
 /// 测试架构：
 /// 本仓客户端(127.0.0.1:25002 xray 入站) → xray socks 出站(127.0.0.1:31080)
