@@ -147,7 +147,8 @@ impl SessionListState {
     }
 
     /// 应用一条 `session_update` 事件的状态字段（只改 status/updated_at/mode/env_binding，
-    /// 缺失字段保持原值）。会话未知则报错，由上层触发列表全量刷新。
+    /// 缺失字段保持原值）。会话未知则报错，由上层触发列表全量刷新；
+    /// 时间戳严格更旧的事件报错且整行不变（与 [`Self::upsert`] 一致）。
     pub fn apply_update(
         &mut self,
         id: &str,
@@ -162,6 +163,13 @@ impl SessionListState {
             .ok_or_else(|| StateError::UnknownSession(id.to_string()))?;
         if item.status.is_terminal() && status.is_some_and(|s| !s.is_terminal()) {
             return Err(StateError::Sealed(id.to_string()));
+        }
+        // 活跃时间只前进：与 `upsert` 同款回退保护，更旧事件整行不变。
+        if item.updated_at_ms > updated_at_ms {
+            return Err(StateError::InvalidTransition {
+                phase: format!("{:?}", item.status),
+                action: "更旧时间戳的 session_update".to_string(),
+            });
         }
         if let Some(status) = status {
             item.status = status;
