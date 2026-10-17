@@ -140,16 +140,31 @@ fn run(app: &App, action: &str, p: &Value) -> Result<Value, Failure> {
         }
         "session:stop" => json!(rt.stop_session(own(app, p)?).map_err(core)?),
         "tool:list" => {
-            let mode = if p.get("id").is_some()
+            // 有会话时以会话为准（并做归属校验）；无会话沿用 default_mode 兼容行为。
+            let session = if p.get("id").is_some()
                 || p.get("sessionId").is_some()
                 || p.get("session_id").is_some()
             {
-                rt.get_session(own(app, p)?).map_err(core)?.mode
+                Some(rt.get_session(own(app, p)?).map_err(core)?)
             } else {
-                rt.config_get().default_mode
+                None
             };
+            let mode = session
+                .as_ref()
+                .map(|s| s.mode)
+                .unwrap_or_else(|| rt.config_get().default_mode);
             let gate = rt.gate();
-            let allowed = gate.whitelist(mode);
+            let mut allowed = gate.whitelist(mode);
+            // readonly 会话里非只读类别不可见，与 `PermissionGate::check` 的判定一致；
+            // full 只取消该遮挡，不放宽模式白名单。
+            if session.is_some_and(|s| s.permission_mode == PermissionMode::ReadOnly) {
+                let registry = gate.registry();
+                allowed.retain(|name| {
+                    registry
+                        .get(name)
+                        .is_some_and(|t| t.kind.allowed_when_readonly())
+                });
+            }
             json!(gate.registry().to_value(Some(&allowed)))
         }
         "approval:respond" => {
