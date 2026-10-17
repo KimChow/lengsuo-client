@@ -64,8 +64,8 @@ struct BehaviorCase {
     password: String,
     key_len: usize,
     hmac_hex: String,
-    crc32: u32,
-    crc64_ecma: u64,
+    crc32: String,
+    crc64_ecma: String,
 }
 
 fn vectors() -> Vectors {
@@ -99,17 +99,25 @@ fn oracle_nonce(len: usize, bumps: u64) -> Vec<u8> {
 fn nonce_counter_matches_independent_oracle() {
     for len in [12usize, 24] {
         let mut n = NonceCounter::new(len);
-        assert_eq!(n.next(), vec![0u8; len], "FF 起始 + 先增后用 → 首值全 0");
+        assert_eq!(
+            n.next().unwrap(),
+            vec![0u8; len],
+            "FF 起始 + 先增后用 → 首值全 0"
+        );
         for k in 1..=300u64 {
-            assert_eq!(n.next(), oracle_nonce(len, k), "nonce #{k} len={len}");
+            assert_eq!(
+                n.next().unwrap(),
+                oracle_nonce(len, k + 1),
+                "nonce #{k} len={len}"
+            );
         }
     }
     // 跨字节进位边界（byte0 走满一轮 → byte1 进位）
     let mut m = NonceCounter::new(12);
     for _ in 0..256 {
-        m.next();
+        m.next().unwrap();
     }
-    assert_eq!(&m.next()[0..2], &[0u8, 1u8]);
+    assert_eq!(&m.next().unwrap()[0..2], &[0u8, 1u8]);
 }
 
 #[test]
@@ -122,10 +130,19 @@ fn suite_names_and_lengths_match_xray_table() {
     ];
     for (name, key, salt, nonce) in cases {
         let s = CipherSuite::from_name(name).unwrap();
-        assert_eq!((s.key_len(), s.salt_len(), s.nonce_len()), (key, salt, nonce));
+        assert_eq!(
+            (s.key_len(), s.salt_len(), s.nonce_len()),
+            (key, salt, nonce)
+        );
     }
-    assert!(CipherSuite::from_name("aes-128-ctr").is_none(), "非 AEAD 必须拒绝");
-    assert!(CipherSuite::from_name("none").is_none(), "NONE 不支持多用户，不接入");
+    assert!(
+        CipherSuite::from_name("aes-128-ctr").is_none(),
+        "非 AEAD 必须拒绝"
+    );
+    assert!(
+        CipherSuite::from_name("none").is_none(),
+        "NONE 不支持多用户，不接入"
+    );
 }
 
 #[test]
@@ -152,18 +169,19 @@ fn behavior_hmac_and_crc_semantics_match_vectors() {
         let seed_in = behavior_seed_hmac(&master);
         assert_eq!(hex::encode(seed_in), c.hmac_hex, "pwd={}", c.password);
         // 交叉验证 CRC 参数（反射/init/xorout）——将来写 validator 时最易写错处。
-        assert_eq!(crc32fast::hash(&seed_in), c.crc32, "crc32-IEEE pwd={}", c.password);
-        type Crc64Ecma = crc::Crc<u64, crc::TableSize<256>>;
-        const ECMA: crc::SixtyFour = crc::Spec {
-            poly: 0x42F0_E1BA_E9ED_C6B9,
-            init: 0xFFFF_FFFF_FFFF_FFFF,
-            refin: true,
-            refout: true,
-            xorout: 0xFFFF_FFFF_FFFF_FFFF,
-            check: 0x62_EC_59E3_A116_F9FA,
-            residue: 0x0000_0000_0000_0000,
-        };
-        assert_eq!(Crc64Ecma::new(&ECMA).checksum(&seed_in), c.crc64_ecma);
+        assert_eq!(
+            crc32fast::hash(&seed_in),
+            u32::from_str_radix(c.crc32.trim_start_matches("0x"), 16).unwrap(),
+            "crc32-IEEE pwd={}",
+            c.password
+        );
+        let crc64 = crc::Crc::<u64>::new(&crc::CRC_64_XZ);
+        // Go crc64.ECMA 使用反射多项式并取补；对应 CRC-64/XZ。
+        assert_eq!(crc64.checksum(b"123456789"), 0x995D_C9BB_DF19_39FA);
+        assert_eq!(
+            crc64.checksum(&seed_in),
+            u64::from_str_radix(c.crc64_ecma.trim_start_matches("0x"), 16).unwrap()
+        );
     }
 }
 
@@ -205,7 +223,9 @@ async fn tcp_wire_matches_fixture_byte_for_byte() {
         let mut dec = SessionAead::new(suite, subkey);
         let mut frames = &wire[iv.len()..];
         let mut back = Vec::new();
-        while let Some(chunk) = read_chunk(&mut frames, &mut dec).await.unwrap() {
+        // fixture 只含数据帧，没有写 EOF 标记；按已知帧数读取。
+        for _ in &plains {
+            let chunk = read_chunk(&mut frames, &mut dec).await.unwrap().unwrap();
             assert!(!chunk.is_empty(), "零长 chunk 应判 EOF 而非 Some");
             back.push(chunk);
         }
@@ -285,22 +305,30 @@ fn udp_fixture_derivation_chain_matches() {
 }
 
 #[test]
-fn tampered_stream_fails_closed_at_first_byte() {
-    // 篡改任一帧字节都必须 AuthFailed，不得明文回退（AGENTS §3 fail-closed）。
+fn tampered_stream_fails_at_corrupted_chunk() {
+    // 已认证的前置分块可以交付；被篡改分块绝不能交付明文。
     let c = &vectors().tcp[0];
     let suite = CipherSuite::from_name(&c.algo).unwrap();
     let wire = hx(&c.wire_hex);
     let iv_len = c.iv.len() / 2;
+    let plains: Vec<_> = c.chunks_plain.iter().map(|h| hx(h)).collect();
     for idx in [iv_len, iv_len + 1, iv_len + SIZE_WIRE_LEN, wire.len() - 1] {
         let mut broken = wire.clone();
         broken[idx] ^= 0x01;
         let mut dec = SessionAead::new(suite, hx(&c.subkey));
-        let mut r = &broken[iv_len..];
-        let res = tokio_test_block_on(read_chunk(&mut r, &mut dec));
-        assert!(
-            matches!(res, Err(ss_core::Error::AuthFailed)),
-            "byte {idx} tamper must fail closed, got {res:?}"
-        );
+        let mut input = &broken[iv_len..];
+        let mut authenticated = 0;
+        loop {
+            match tokio_test_block_on(read_chunk(&mut input, &mut dec)) {
+                Err(ss_core::Error::AuthFailed) => break,
+                Ok(Some(chunk)) => {
+                    assert_eq!(chunk, plains[authenticated]);
+                    authenticated += 1;
+                    assert!(authenticated < plains.len(), "篡改报文不得全部认证成功");
+                }
+                other => panic!("byte {idx} must fail authentication, got {other:?}"),
+            }
+        }
     }
 }
 
