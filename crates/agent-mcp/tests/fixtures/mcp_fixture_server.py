@@ -32,6 +32,11 @@ import sys
 import threading
 import time
 
+# Test-only lifecycle evidence; never reads production data.
+if os.environ.get("LENGSUO_TEST_PID_FILE"):
+    with open(os.environ["LENGSUO_TEST_PID_FILE"], "w", encoding="ascii") as pid_file:
+        pid_file.write(str(os.getpid()))
+
 FRAMING = (sys.argv[1] if len(sys.argv) > 1 else "line").lower()
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2024-11-05"]
 
@@ -140,7 +145,9 @@ def handle_tools_call(msg_id, params):
 
 
 def handle_hook(msg_id, method, params):
-    if method == "test/slow":
+    if method == "test/oversized":
+        write_raw(encode({"jsonrpc": "2.0", "id": msg_id, "result": "x" * 4096}))
+    elif method == "test/slow":
         ms = (params or {}).get("ms", 50)
         time.sleep(float(ms) / 1000.0)
         respond(msg_id, {"ms": ms})
