@@ -17,6 +17,7 @@ members = [
     "crates/lengsuo-node",
     "crates/agent-core",
     "crates/agent-gateway",
+    "crates/agent-tools-exec",
 ]
 
 [workspace.package]
@@ -52,6 +53,8 @@ axum = { version = "0.7", features = ["ws"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+url = "2"
 
 [profile.dev]
 incremental = false
