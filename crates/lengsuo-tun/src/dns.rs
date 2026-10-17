@@ -20,6 +20,7 @@
 //! 「能否安全地把这条报文交给转发决策」的结构门槛。
 
 pub mod rewrite;
+pub mod upstream;
 
 /// DNS 头部固定 12 字节。
 const HEADER: usize = 12;
@@ -354,6 +355,7 @@ fn read_name(cursor: &mut Cursor<'_>, allow_pointer: bool) -> Result<QuestionNam
                 cursor.position = target;
             }
             0b00 => {
+                cursor.take(1)?; // 消费标签长度或根名字零八位组。
                 let length = usize::from(prefix & LABEL_MASK);
                 if length > MAX_LABEL {
                     return Err(Error::LabelTooLong);
@@ -379,8 +381,8 @@ fn read_name(cursor: &mut Cursor<'_>, allow_pointer: bool) -> Result<QuestionNam
                     return Err(Error::NameTooLong);
                 }
                 let bytes = cursor.take(length)?;
-                name.bytes[name.len..name.len + length].copy_from_slice(bytes);
-                name.bytes[name.len + length] = 0;
+                name.bytes[name.len] = length as u8;
+                name.bytes[name.len + 1..name.len + length + 1].copy_from_slice(bytes);
                 name.len += length + 1;
             }
             _ => return Err(Error::BadLabel),
