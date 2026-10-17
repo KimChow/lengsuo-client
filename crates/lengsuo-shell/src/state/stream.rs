@@ -367,11 +367,11 @@ impl SessionStreamState {
                 }
                 self.messages.push(SessionMessage {
                     role: MessageRole::ToolResult,
-                    content: text,
+                    content: extract_tool_result_text(event, &text),
                     tool: Some(ToolRef {
                         name: field_str(event, "name").unwrap_or_else(|| "unknown".to_string()),
                         args_ref: None,
-                        result_ref: field_str(event, "result_ref"),
+                        result_ref: tool_result_ref(event),
                         ms: field_u64(event, "ms").unwrap_or(0),
                     }),
                     ts_ms: event.ts_ms,
@@ -552,6 +552,23 @@ fn extract_text(event: &GatewayEvent) -> String {
     field_str(event, "text")
         .or_else(|| field_str(event, "content"))
         .unwrap_or_default()
+}
+
+/// `tool_result` 正文：优先 agent-core 真实形态的 `preview`，其次旧形态
+/// `text` / `content`（由 `extract_text` 得出），都没有则为空。
+///
+/// 只取摘要文本：状态层不会因为存在引用而展开或读取全文（AGENTS.md §3）。
+fn extract_tool_result_text(event: &GatewayEvent, fallback: &str) -> String {
+    match field_str(event, "preview") {
+        Some(preview) => preview,
+        None => fallback.to_string(),
+    }
+}
+
+/// `tool_result` 结果引用：优先 agent-core 真实形态的 `resultRef`，其次旧形态
+/// `result_ref`。两者都没有时为 `None`（引用只是句柄，本层不据此读取内容）。
+fn tool_result_ref(event: &GatewayEvent) -> Option<String> {
+    field_str(event, "resultRef").or_else(|| field_str(event, "result_ref"))
 }
 
 /// 从 `payload` 取字符串字段。
