@@ -53,3 +53,10 @@ Rust 双端与固定参考端双向互通、异常验证、Windows 浏览器环�
   响应 Empty 区域解析（48B 定长中仅前 16B 是 tag）；PSK 语义统一
   （None=全零 PSK 永远参与 KDF3，与参考一致）。
 - 已验证：6 套测试全过（含新增 server 闭环 + 篡改拒绝）；fmt/clippy/行数门禁通过。
+
+## 线格式字节序修正（2026-10-17，对齐参考实测）
+
+- 修正：握手报文 Type/Sender/Receiver 字段为 **little endian**（参考
+  `noise-protocol.go` marshal 用 `binary.LittleEndian`）；此前误用 BE。
+- 已验证：LE 修正后 server 闭环测试（消费 initiation → 构造 response →
+  双方 transport 密钥一致）通过；全 6 套件全绿。
