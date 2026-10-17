@@ -163,6 +163,18 @@ pub fn mac1(remote_static: &[u8; 32], message_without_macs: &[u8]) -> [u8; MAC_L
     mac.finalize().into_bytes().into()
 }
 
+/// 常量时间字节比较（MAC 校验不得短路）。
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// TAI64N 时间戳：`@` + 16 字符大写十六进制（8B TAI64 打包秒 + 4B 纳秒），
 /// 对齐 `tai64n.Now()` 的线格式（12 字节载荷）。
 #[must_use]
@@ -268,7 +280,6 @@ impl Handshake {
         self.chain_key = initial_chain_key();
         self.hash = initial_hash();
         self.hash = mix_hash(&self.hash, &self.remote_static);
-        println!("CLIENT hash after remote_static mix: {:02x?}", &self.hash[..4]);
 
         // mixKey(ephemeral_public)
         let (new_ck, _) = kdf2(&self.chain_key, &ephemeral_public);
@@ -306,7 +317,8 @@ impl Handshake {
 
         // 组帧：type(1) sender(4) ephemeral(32) static(48) timestamp(28) mac1(16) mac2(16)。
         let mut msg = [0u8; INITIATION_LEN];
-        // Type 字段是 u32be（参考 MessageInitiation.Type uint32）。
+        // 线上字段一律 little endian（参考 `MessageInitiation.marshal` 用
+        // `binary.LittleEndian`；类型字段占 4 字节，低字节为类型、高三字节保留零）。
         msg[..4].copy_from_slice(&1u32.to_le_bytes());
         msg[4..8].copy_from_slice(&self.local_index.to_le_bytes());
         msg[8..40].copy_from_slice(&ephemeral_public);
@@ -320,13 +332,12 @@ impl Handshake {
         self.local_ephemeral_secret = Some(ephemeral_secret);
         self.sent_index = self.local_index;
         self.state = State::InitiationCreated;
-        println!("CLIENT initiation tail hash: {:02x?}", &self.hash[..4]);
         Ok(msg)
     }
 
     /// `ConsumeMessageResponse`：校验 92B 响应并派生 transport 密钥。
     ///
-    /// 响应帧布局：type(1) sender(4) receiver(4) ephemeral(32) empty(48) mac1(16) mac2(16)。
+    /// 响应帧布局：type(4) sender(4) receiver(4) ephemeral(32) empty(16) mac1(16) mac2(16)。
     /// empty = AEAD(空明文，AAD=当前 hash)。MAC1 校验需对端静态公钥——参考由
     /// cookie generator 持有；本层校验 AEAD（等价安全强度，MAC1 由对端可选验证）。
     pub fn consume_response(&mut self, wire: &[u8]) -> Result<TransportKeys, Error> {
@@ -340,6 +351,7 @@ impl Handshake {
                 limit: RESPONSE_LEN,
             });
         }
+        // 线上字段 little endian（参考 `MessageResponse.unmarshal`）。
         if wire[..4] != 2u32.to_le_bytes() {
             return Err(Error::NotTransport("非 response 报文"));
         }
@@ -356,6 +368,14 @@ impl Handshake {
         let ephemeral: [u8; 32] = wire[12..44].try_into().expect("32B");
         // Empty 区域 48B 中只有前 16B 是 AEAD tag（Seal 空明文），其余为定长结构体填充零。
         let empty_ct: [u8; 16] = wire[44..60].try_into().expect("16B");
+
+        // MAC1 校验（参考 receive.go 对 initiation/response 都先过 CheckMAC1）：
+        // key = BLAKE2s-256("mac1----" || 本端静态公钥)——即"报文接收方自己的公钥"。
+        let own_public = XPublic::from(&self.static_secret).to_bytes();
+        if !ct_eq(&mac1(&own_public, &wire[..RESPONSE_LEN - 32]), &wire[60..76]) {
+            self.state = State::Poisoned;
+            return Err(Error::AuthFailed);
+        }
 
         // 三段 DH：mixHash/mixKey(eph) → DH(eph,eph) → DH(static,eph) → KDF3(psk)。
         self.hash = mix_hash(&self.hash, &ephemeral);
