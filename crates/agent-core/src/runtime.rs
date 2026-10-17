@@ -142,10 +142,24 @@ impl Runtime {
             updated_at_ms: now,
             status: SessionStatus::Idle,
             last_seq: 0,
+            memory_digest: None,
         };
         // 会话绑定环境时，隔离键 env_id 必须与绑定一致（环境隔离边界）。
         if let Some(env) = &session.env_binding {
             session.isolation.env_id = Some(env.clone());
+        }
+        // 三层记忆注入（agent-memory-spec §4）：增强项，失败不阻断建会话。
+        if self.config.lock().expect("配置锁不得毒化").memory_enabled {
+            match self.compose_memory_digest(&session.workspace_root) {
+                Ok(digest) => session.memory_digest = Some(digest),
+                Err(e) => {
+                    self.emit(
+                        &session,
+                        "warning",
+                        json!({ "kind": "memory_compose_failed", "reason": e.to_string() }),
+                    )?;
+                }
+            }
         }
         let id = session.id;
         self.sessions.lock().expect("会话表锁不得毒化").insert(
@@ -160,6 +174,85 @@ impl Runtime {
             json!({ "status": session.status, "title": session.title, "mode": session.mode }),
         )?;
         Ok(session)
+    }
+
+    /// 组装记忆摘要（身份恒有；各层前 200 字符预览；总 ≤8000 字符）。
+    fn compose_memory_digest(&self, workspace_root: &str) -> Result<String, CoreError> {
+        use agent_memory::{MemoryEngine, MemoryPaths};
+        let engine = MemoryEngine::new(
+            MemoryPaths::new(self.workdir.join(".lengsuo"), workspace_root),
+            true,
+        );
+        let bundle = engine
+            .compose()
+            .map_err(|e| CoreError::InvalidConfig(format!("记忆组装失败: {e}")))?;
+        let mut out = String::new();
+        out.push_str(&format!(
+            "[身份] AI={} 用户={}\n",
+            bundle.identity.ai_name, bundle.identity.user_name
+        ));
+        if !bundle.identity.soul.is_empty() {
+            out.push_str(&format!("[人格] {}\n", preview(&bundle.identity.soul, 200)));
+        }
+        if let Some(m) = &bundle.user_memory {
+            out.push_str(&format!("[用户记忆] {}\n", preview(m, 200)));
+        }
+        if let Some(m) = &bundle.project_memory {
+            out.push_str(&format!("[项目记忆] {}\n", preview(m, 200)));
+        }
+        if let Some(t) = &bundle.daily_tail {
+            out.push_str(&format!("[当日日志尾] {}\n", preview(t, 200)));
+        }
+        Ok(preview(&out, 8000))
+    }
+
+    /// 记忆工具执行入口（权限门放行后由宿主调用；每次成功发 memory_update 事件）。
+    pub fn execute_memory_tool(
+        &self,
+        id: Uuid,
+        name: &str,
+        args: &Value,
+    ) -> Result<Value, CoreError> {
+        use agent_memory::{MemoryEngine, MemoryPaths};
+        let enabled = self.config.lock().expect("配置锁不得毒化").memory_enabled;
+        let session = self.get_session(id)?;
+        let engine = MemoryEngine::new(
+            MemoryPaths::new(self.workdir.join(".lengsuo"), &session.workspace_root),
+            enabled,
+        );
+        let arg = |key: &str| -> Result<String, CoreError> {
+            args.get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| CoreError::InvalidConfig(format!("缺少参数 {key}")))
+        };
+        let kind = match name {
+            "memory.append_daily" => {
+                let date = chrono::NaiveDate::parse_from_str(&arg("date")?, "%Y-%m-%d")
+                    .map_err(|_| CoreError::InvalidConfig("date 非法（YYYY-MM-DD）".into()))?;
+                let paths = agent_memory::MemoryPaths::new(
+                    self.workdir.join(".lengsuo"),
+                    &session.workspace_root,
+                );
+                agent_memory::append_daily(&paths, date, &arg("text")?)?;
+                "daily_append"
+            }
+            "memory.set_user" => {
+                engine.set_user_memory(&arg("text")?)?;
+                "user_memory"
+            }
+            "memory.set_project" => {
+                engine.set_project_memory(&arg("text")?)?;
+                "project_memory"
+            }
+            "identity.set_soul" => {
+                engine.set_soul(&arg("text")?)?;
+                "soul"
+            }
+            other => return Err(CoreError::InvalidConfig(format!("未知记忆工具: {other}"))),
+        };
+        self.emit(&session, "memory_update", json!({ "kind": kind }))?;
+        Ok(json!({ "ok": true, "kind": kind }))
     }
 
     /// 取会话快照。
@@ -512,108 +605,17 @@ fn narrow(text: &str, chars: usize) -> String {
     out
 }
 
-/// 运行时构造器。
-#[derive(Default)]
-pub struct RuntimeBuilder {
-    workdir: Option<PathBuf>,
-    provider: Option<Arc<dyn Provider>>,
-    gate: Option<PermissionGate>,
-    config: Option<RuntimeConfig>,
-}
+mod builder;
+pub use builder::RuntimeBuilder;
 
-impl RuntimeBuilder {
-    #[must_use]
-    pub fn workdir(mut self, path: impl AsRef<Path>) -> Self {
-        self.workdir = Some(path.as_ref().to_path_buf());
-        self
+/// 字符级预览截断（≤max 字符，超限加省略标记）。
+fn preview(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let cut: String = text.chars().take(max).collect();
+        format!("{cut}…")
     }
-
-    #[must_use]
-    pub fn provider(mut self, provider: Arc<dyn Provider>) -> Self {
-        self.provider = Some(provider);
-        self
-    }
-
-    #[must_use]
-    pub fn gate(mut self, gate: PermissionGate) -> Self {
-        self.gate = Some(gate);
-        self
-    }
-
-    #[must_use]
-    pub fn config(mut self, config: RuntimeConfig) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /// 组装：事件日志与 blob 目录建在 workdir 下；启动回放恢复 seq 与会话索引。
-    pub fn build(self) -> Result<Runtime, CoreError> {
-        let workdir = self
-            .workdir
-            .unwrap_or_else(|| std::env::temp_dir().join("lengsuo-agent-runtime"));
-        std::fs::create_dir_all(&workdir).map_err(|e| CoreError::Io {
-            path: workdir.clone(),
-            source: e,
-        })?;
-        let log: Arc<dyn EventLog> = Arc::new(JsonlEventLog::open(workdir.join("events"))?);
-        let gate = self
-            .gate
-            .unwrap_or_else(|| PermissionGate::new(ToolRegistry::new()));
-        let provider = self
-            .provider
-            .ok_or_else(|| CoreError::InvalidConfig("Runtime 必须注入 provider".into()))?;
-        let mut sessions: BTreeMap<Uuid, HotSession> = BTreeMap::new();
-        // 启动回放：恢复既有会话的 seq 锚点（消息历史 v0 从事件重建为最小集）。
-        for id in log.sessions() {
-            let last_seq = log.last_seq(id).unwrap_or_default();
-            let title = replay_title(&log, id);
-            sessions.insert(
-                id,
-                HotSession {
-                    session: Session {
-                        id,
-                        title,
-                        workspace_root: workdir.display().to_string(),
-                        mode: Mode::Ask,
-                        permission_mode: PermissionMode::ReadOnly,
-                        env_binding: None,
-                        isolation: Isolation::local_default(),
-                        messages: Vec::new(),
-                        created_at_ms: now_ms(),
-                        updated_at_ms: now_ms(),
-                        status: SessionStatus::Idle,
-                        last_seq,
-                    },
-                },
-            );
-        }
-        Ok(Runtime {
-            workdir: workdir.clone(),
-            sessions: Arc::new(Mutex::new(sessions)),
-            log,
-            blobs: Arc::new(BlobStore::new(workdir.join("blobs"))),
-            hub: Arc::new(EventHub::new()),
-            gate: Arc::new(gate),
-            provider,
-            redactor: Redactor::default_v0(),
-            config: Arc::new(Mutex::new(
-                self.config.unwrap_or_else(RuntimeConfig::default_v0),
-            )),
-        })
-    }
-}
-
-/// 从事件回放里取最近一次标题（重启后 `session:list` 仍能显示标题）。
-fn replay_title(log: &Arc<dyn EventLog>, id: Uuid) -> String {
-    let events = log.replay(id, 0, 500).unwrap_or_default();
-    for event in events.iter().rev() {
-        if event.kind == "session_update" {
-            if let Some(title) = event.payload.get("title").and_then(Value::as_str) {
-                return title.to_string();
-            }
-        }
-    }
-    format!("会话 {id}")
 }
 
 fn now_ms() -> u64 {

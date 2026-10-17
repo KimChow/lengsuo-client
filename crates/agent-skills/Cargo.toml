@@ -1,0 +1,13 @@
+[package]
+name = "agent-skills"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Skills 系统：目录式技能注册表与 SKILL.md 解析（提示词包加载，同步 fs IO）"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
