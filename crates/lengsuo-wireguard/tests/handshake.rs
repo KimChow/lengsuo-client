@@ -55,6 +55,7 @@ fn full_handshake_derives_matching_keys() {
     let initiation = client
         .create_initiation([0xAAu8; 32])
         .expect("initiation 可生成");
+    // 参考 `MessageInitiation.marshal` 用 binary.LittleEndian，线上字段必须小端。
     assert_eq!(&initiation[..4], &1u32.to_le_bytes());
     assert_eq!(&initiation[4..8], &7u32.to_le_bytes());
     // MAC1 独立重算（对端验证语义）。
@@ -175,6 +176,7 @@ impl ServerSide {
 
         let server_index = 0x2026u32;
         let mut resp = [0u8; 92];
+        // 线上字段 little endian（参考 `MessageResponse.marshal`）。
         resp[0..4].copy_from_slice(&2u32.to_le_bytes());
         resp[4..8].copy_from_slice(&server_index.to_le_bytes());
         resp[8..12].copy_from_slice(&wire[4..8]); // receiver = client sender
