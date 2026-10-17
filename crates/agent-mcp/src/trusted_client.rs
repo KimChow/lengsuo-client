@@ -58,7 +58,7 @@ pub enum TrustedClientError {
 
 /// 独占持有 `McpClient` + `TrustGate` 的受控客户端。
 ///
-/// 非 `Sync`（继承 `TrustGate` 的纯数据性质）；一个实例只归一个所有者使用，
+/// 一个实例的可变操作只归一个所有者使用，
 /// 授权变更与调用由 `&mut self` 天然串行。
 #[derive(Debug)]
 pub struct TrustedClient {

@@ -105,7 +105,7 @@ impl EventLog for JsonlEventLog {
     fn append(&self, session_id: Uuid, kind: &str, payload: Value) -> Result<Event, CoreError> {
         // 一个串行临界区完成：seq 分配 → 行序列化与行长校验 → 落盘 → 内存索引提交。
         // 校验或落盘失败时直接返回，索引与 next_seq 保持原样，因此不会发布幽灵事件，
-        // 也不会把别人的已提交 seq 回退（磁盘与内存始终一致）。
+        // 也不会把别人的已提交 seq 回退；部分磁盘写入仍由启动恢复处理。
         let mut guard = self
             .inner
             .lock()
@@ -134,6 +134,9 @@ impl EventLog for JsonlEventLog {
         };
         let line = serde_json::to_string(&event)?;
         if line.len() > MAX_LINE_BYTES {
+            if fresh_session {
+                guard.sessions.remove(&session_id);
+            }
             return Err(CoreError::LineTooLarge {
                 limit: MAX_LINE_BYTES,
                 actual: line.len(),

@@ -22,11 +22,11 @@ use std::path::Path;
 /// 读取 `root` 内的文本文件，最多 `max_bytes` 字节。
 ///
 /// - `root`：宿主提供的授权工作区根目录（不存在则报 `NotFound`）。
-/// - `path`：相对 root 或绝对路径；空路径、含 `NUL`/内部 `..` 分量的路径直接拒绝。
+/// - `path`：相对 root 或绝对路径；空路径与含 `NUL` 的路径直接拒绝；`..` 解析后仍受根边界约束。
 /// - `max_bytes`：上限，必须 `> 0`；实际读取 `max_bytes + 1` 字节探测超限。
 ///
 /// 错误语义：
-/// - `InvalidInput`：`max_bytes == 0`、路径为空或含内部 `..` 分量、超出大小上限。
+/// - `InvalidInput`：`max_bytes == 0`、路径为空、探测上限溢出或超出大小上限。
 /// - `PermissionDenied`：canonical 解析后路径不在 canonical root 内。
 /// - `NotFound`：root 或目标文件不存在。
 /// - `InvalidData`：内容不是有效 UTF-8，或目标不是普通文件。
@@ -47,6 +47,12 @@ pub fn read_workspace_file<P: AsRef<Path>, Q: AsRef<Path>>(
         ));
     }
 
+    let probe_bytes = max_bytes.checked_add(1).ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            "max_bytes cannot represent a bounded probe",
+        )
+    })?;
     let canonical_root = root.canonicalize()?;
     let target = resolve_candidate(&canonical_root, path)?;
     let canonical_target = target.canonicalize()?;
@@ -61,6 +67,10 @@ pub fn read_workspace_file<P: AsRef<Path>, Q: AsRef<Path>>(
         ));
     }
 
+    // Reject FIFOs/devices before open, which may block before handle metadata is available.
+    if !std::fs::metadata(&canonical_target)?.is_file() {
+        return Err(Error::new(ErrorKind::InvalidData, "not a regular file"));
+    }
     let mut file = File::open(&canonical_target)?;
     let meta = file.metadata()?;
     if !meta.is_file() {
@@ -82,14 +92,14 @@ pub fn read_workspace_file<P: AsRef<Path>, Q: AsRef<Path>>(
     // 探测读取：即使 metadata 谎报，也只多读 1 字节即判定超限，不返回部分内容。
     let mut buf = Vec::with_capacity(max_bytes.min(1 << 20) + 1);
     file.by_ref()
-        .take((max_bytes + 1) as u64)
+        .take(probe_bytes as u64)
         .read_to_end(&mut buf)?;
     if buf.len() > max_bytes {
         return Err(Error::new(
             ErrorKind::InvalidInput,
             format!(
                 "file larger than max_bytes {max_bytes} (read {}+ bytes)",
-                max_bytes + 1
+                probe_bytes
             ),
         ));
     }
