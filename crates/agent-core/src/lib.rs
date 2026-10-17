@@ -20,7 +20,7 @@ pub mod tool;
 pub use error::CoreError;
 pub use event_log::{EventLog, JsonlEventLog};
 pub use permission::{Decision, PermissionGate};
-pub use provider::{Provider, ProviderStep};
+pub use provider::{Provider, ProviderStep, TurnContext};
 pub use redact::Redactor;
 pub use runtime::{CreateSession, Runtime, RuntimeBuilder, TurnReceipt};
 pub use schema::{Event, Isolation, Message, Mode, PermissionMode, Role, Session, SCHEMA_VERSION};

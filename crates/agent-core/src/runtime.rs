@@ -21,7 +21,7 @@ use crate::config::RuntimeConfig;
 use crate::error::CoreError;
 use crate::event_log::{EventLog, JsonlEventLog};
 use crate::permission::{Decision, PermissionGate};
-use crate::provider::{Provider, ProviderStep};
+use crate::provider::{Provider, ProviderStep, TurnContext};
 use crate::redact::Redactor;
 use crate::schema::{
     ApprovalOutcome, ApprovalRequest, Event, Isolation, Message, Mode, PermissionMode, Role,
@@ -354,17 +354,25 @@ impl Runtime {
 
     /// 发送一条用户输入，跑一个回合（echo provider 下即回显）。
     pub fn send_text(&self, id: Uuid, text: &str) -> Result<TurnReceipt, CoreError> {
+        // 先取本轮之前的历史快照：送入 Provider 的 history 必然不含本轮输入。
+        let history = self.get_session(id)?.messages;
         self.push_message(id, Role::User, text.to_string(), None)?;
-        self.run_turn(id, text)
+        self.run_turn(id, text, &history)
     }
 
-    fn run_turn(&self, id: Uuid, text: &str) -> Result<TurnReceipt, CoreError> {
+    fn run_turn(
+        &self,
+        id: Uuid,
+        text: &str,
+        history: &[Message],
+    ) -> Result<TurnReceipt, CoreError> {
         let session = self.get_session(id)?;
         if matches!(session.status, SessionStatus::Done | SessionStatus::Failed) {
             return Err(CoreError::SessionClosed(id));
         }
         let mut events = Vec::new();
-        let steps = self.provider.next_steps(id, text)?;
+        let context = self.build_turn_context(&session, history, text);
+        let steps = self.provider.next_steps_with_context(&context)?;
         for step in steps {
             match step {
                 ProviderStep::Thinking(note) => {
@@ -610,6 +618,8 @@ fn narrow(text: &str, chars: usize) -> String {
 
 mod builder;
 pub use builder::RuntimeBuilder;
+
+mod context;
 
 /// 字符级预览截断（≤max 字符，超限加省略标记）。
 fn preview(text: &str, max: usize) -> String {
