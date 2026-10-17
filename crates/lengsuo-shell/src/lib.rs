@@ -20,6 +20,7 @@
 
 pub mod gateway;
 pub mod state;
+pub mod ui;
 
 pub use gateway::{
     action, Envelope, EventError, EventKind, EventSubscription, GatewayClient, GatewayEvent,
