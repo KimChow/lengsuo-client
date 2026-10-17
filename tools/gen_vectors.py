@@ -116,7 +116,7 @@ iv32 = bytes((i * 7 + 3) & 0xFF for i in range(32))
 v["tcp"].append(build_tcp_stream("aes-256-gcm", "secret-password-2026", iv32,
                                  [addr_dom, b"x" * 300], addr_dom))
 # TCP: chacha20-ietf-poly1305
-v["tcp"].append(build_tcp_stream("chacha20-ietf-poly1305", "test", iv16,
+v["tcp"].append(build_tcp_stream("chacha20-ietf-poly1305", "test", iv32,
                                  [addr_v4 + b"A" * 100], addr_v4))
 
 # UDP

@@ -30,6 +30,7 @@
 //!   `OuterHash`（旧版外层 MD5 混淆）不实现，相关方法返回 [`Error::Unsupported`]。
 //! - 设备时间偏移固定 0；参考的 `TimeDiff` 可配置偏移属客户端会话层，原语层不覆盖。
 
+mod address;
 pub mod aead;
 pub mod authid;
 pub mod chunkframe;

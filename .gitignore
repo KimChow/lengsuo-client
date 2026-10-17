@@ -24,3 +24,8 @@ node_modules/
 __pycache__/
 *.py[cod]
 .local-test/
+
+# Isolated Cargo caches and build outputs
+.build/
+**/target-*/
+/.cargo/
