@@ -59,7 +59,9 @@ impl SkillRegistry {
 /// 忽略隐藏项（`.` 前缀）、非目录与顶层散落文件；无 `SKILL.md` 的子目录不算技能。
 /// 排序使同目录内的同名覆盖次序可预期。根目录不存在返回 `NotFound`
 /// （配置写错不静默当空目录）；其它访问故障（权限、路径类型不符）以 `Io` 上抛。
-fn first_level_skill_dirs(root: &Path) -> Result<Vec<PathBuf>, SkillsError> {
+///
+/// `pub(crate)`：`SkillCatalog` 复用同一套扫描语义（不改本 crate 公有 API）。
+pub(crate) fn first_level_skill_dirs(root: &Path) -> Result<Vec<PathBuf>, SkillsError> {
     let mut out = Vec::new();
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,

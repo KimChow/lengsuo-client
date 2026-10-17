@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::SkillsError;
+use crate::policy::SkillPolicy;
 use crate::skill::Skill;
 
 /// 技能入口文件名（目录式管理的固定约定）。
@@ -38,7 +39,23 @@ enum FrontMatter<'a> {
 ///
 /// 有 front-matter ⇒ 取其 `name`/`description`（front-matter 优先于目录名）；
 /// 无 front-matter ⇒ `name` 取目录名、`description` 为空。
+///
+/// 本函数只返回 `Skill`（既有语义不变）；限制元数据（`allowed-tools` 等）走
+/// [`parse_skill_with_policy`]。
 pub fn parse_skill_md(dir: &Path) -> Result<Skill, SkillsError> {
+    Ok(parse_impl(dir)?.0)
+}
+
+/// 解析 `SKILL.md`，同时返回 [`Skill`] 与其限制元数据。
+///
+/// 解析规则与 [`parse_skill_md`] 逐字一致（同一实现），额外带出 [`SkillPolicy`]；
+/// 无 front-matter ⇒ 默认（未声明限制）策略。
+pub fn parse_skill_with_policy(dir: &Path) -> Result<(Skill, SkillPolicy), SkillsError> {
+    parse_impl(dir)
+}
+
+/// 实际解析：返回（技能, 限制元数据）。
+fn parse_impl(dir: &Path) -> Result<(Skill, SkillPolicy), SkillsError> {
     let path = dir.join(SKILL_FILE);
     // 先查大小再读内容：超限文件不整份读进内存。
     let size = match fs::metadata(&path) {
@@ -107,13 +124,21 @@ pub fn parse_skill_md(dir: &Path) -> Result<Skill, SkillsError> {
         .and_then(|fields| fields.get("description"))
         .cloned()
         .unwrap_or_default();
+    // 限制元数据：无 front-matter ⇒ 默认（未声明）策略。
+    let policy = match &fields {
+        Some(fields) => SkillPolicy::from_fields(fields),
+        None => SkillPolicy::default(),
+    };
 
-    Ok(Skill {
-        name,
-        description,
-        body,
-        path,
-    })
+    Ok((
+        Skill {
+            name,
+            description,
+            body,
+            path,
+        },
+        policy,
+    ))
 }
 
 /// 拆出 front-matter 元数据段与正文段（兼容 LF/CRLF）。
