@@ -7,6 +7,7 @@
 pub mod blobs;
 pub mod bus;
 pub mod config;
+pub mod decision;
 pub mod error;
 pub mod event_log;
 pub mod permission;
