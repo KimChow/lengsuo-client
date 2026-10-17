@@ -199,7 +199,7 @@ async fn redirect_loops_are_capped_at_five_hops() {
         .expect_err("重定向环必须失败");
     // 实现以 Io("重定向超过上限") 报告环（reqwest 的 redirect 策略被禁用后自计数）。
     assert!(
-        matches!(err, ExecError::Io(m) if m.contains("重定向")),
+        matches!(&err, ExecError::Io(m) if m.contains("重定向")),
         "实得 {err:?}"
     );
 }
