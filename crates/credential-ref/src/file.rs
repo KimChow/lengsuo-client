@@ -220,21 +220,7 @@ fn read_records(
     passphrase: &[u8],
 ) -> Result<Vec<(CredentialRef, Plaintext)>, StoreError> {
     let bytes = fs::read(path)?;
-    let r = container::decode_container(&bytes, passphrase);
-    match &r {
-        Ok((_p, recs)) => eprintln!(
-            "[probe] decode ok bytes={} records={}",
-            bytes.len(),
-            recs.len()
-        ),
-        Err(e) => eprintln!(
-            "[probe] decode err bytes={} err={:?} file={}",
-            bytes.len(),
-            e,
-            path.display()
-        ),
-    }
-    let (_params, records) = r?;
+    let (_params, records) = container::decode_container(&bytes, passphrase)?;
     Ok(records
         .into_iter()
         .map(|record| (record.reference, record.plaintext))
