@@ -76,19 +76,33 @@ struct SlotState {
 struct Slot {
     state: Mutex<SlotState>,
     changed: Condvar,
+    /// 单调时钟截止点：晚于此刻的应答一律按过期 deny 处理，`wait` 也以此封顶。
+    deadline: Instant,
 }
 
 impl Slot {
-    fn new() -> Self {
+    /// `deadline` 为 `None`（超大超时溢出）时 fail-closed：视为已过期。
+    fn new(deadline: Option<Instant>) -> Self {
         Self {
             state: Mutex::new(SlotState::default()),
             changed: Condvar::new(),
+            deadline: deadline.unwrap_or_else(Instant::now),
         }
     }
 
     /// 已产生的结果（不移除；供应答判重）。
     fn answered(&self) -> bool {
         self.state.lock().map(|s| s.answered).unwrap_or(true)
+    }
+
+    /// 是否已到达截止点（单调时钟，不受系统时间回拨影响）。
+    fn expired(&self) -> bool {
+        Instant::now() >= self.deadline
+    }
+
+    /// 距截止点的剩余时间（已过期为 0）。
+    fn remaining(&self) -> Duration {
+        self.deadline.saturating_duration_since(Instant::now())
     }
 }
 
@@ -210,9 +224,11 @@ impl PermissionGate {
         let summary = self.redactor.summarize_args(args);
         let reason = format!("{tool} 需要用户确认");
         let expires_at_ms = now_ms().saturating_add(self.approval_timeout.as_millis() as u64);
+        // 单调截止点：超大超时无法表示时 fail-closed（立即视为过期）。
+        let deadline = Instant::now().checked_add(self.approval_timeout);
         let entry = Pending {
             session_id: session_id.to_string(),
-            slot: Arc::new(Slot::new()),
+            slot: Arc::new(Slot::new(deadline)),
         };
         if let Ok(mut pending) = self.pending.lock() {
             pending.insert(id, entry);
@@ -253,11 +269,11 @@ impl PermissionGate {
             };
             Arc::clone(&entry.slot)
         };
-        let outcome = ApprovalOutcome {
+        let requested = ApprovalOutcome {
             approved,
             timed_out: false,
         };
-        {
+        let outcome = {
             let mut state = slot
                 .state
                 .lock()
@@ -266,8 +282,18 @@ impl PermissionGate {
                 return Err(CoreError::ApprovalAnswered(id));
             }
             state.answered = true;
-            state.outcome = Some(outcome);
-        }
+            // 晚于截止点的应答不得批准：落为过期 deny，仍占掉一次性应答位。
+            let final_outcome = if slot.expired() {
+                ApprovalOutcome {
+                    approved: false,
+                    timed_out: true,
+                }
+            } else {
+                requested
+            };
+            state.outcome = Some(final_outcome);
+            final_outcome
+        };
         slot.changed.notify_all();
         Ok(outcome)
     }
@@ -284,7 +310,12 @@ impl PermissionGate {
             };
             Arc::clone(&entry.slot)
         };
-        let deadline = Instant::now() + timeout;
+        // 等待上限取「调用方 timeout」与「创建时截止点剩余」的较短值；
+        // 加法溢出时 fail-closed（按已到期处理，立即 deny）。
+        let budget = timeout.min(slot.remaining());
+        let deadline = Instant::now()
+            .checked_add(budget)
+            .unwrap_or_else(Instant::now);
         let mut guard = slot
             .state
             .lock()
