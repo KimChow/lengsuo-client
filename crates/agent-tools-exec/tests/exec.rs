@@ -186,7 +186,7 @@ async fn command_text_is_passed_as_one_argv_without_host_side_expansion() {
 
     // 我们绝不把命令拼进 shell 的 argv：单引号内容原样保留。
     let quoted = "printf '%s' 'a;b c'";
-    let r = with_deadline(runner(1000).run(Shell::Bash, &quoted, None, None))
+    let r = with_deadline(runner(1000).run(Shell::Bash, quoted, None, None))
         .await
         .expect("deadline");
     assert_eq!(r.stdout, "a;b c");
