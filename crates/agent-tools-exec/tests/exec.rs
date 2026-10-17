@@ -107,7 +107,7 @@ async fn timeout_kills_the_whole_process_group() {
         marker.display()
     );
     let r =
-        with_deadline(runner(1000).run(Shell::Bash, cmd, None, Some(Duration::from_millis(100))))
+        with_deadline(runner(1000).run(Shell::Bash, &cmd, None, Some(Duration::from_millis(100))))
             .await
             .expect("run");
     assert!(r.timed_out);
