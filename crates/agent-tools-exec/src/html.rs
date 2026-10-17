@@ -146,7 +146,8 @@ pub fn extract_title(html: &str) -> Option<String> {
     let rest = &lower[content_start..];
     let end = rest.find("</title>")?;
     // 下标只用于切分 ASCII 小写副本，正文一律回到原串取，避免大小写折叠改变字节。
-    let text = collapse_ws(&html[content_start..content_start + end]);
+    // 标题内层标记（如 <em>）先剥除再折叠空白（规格：title_is_extracted_with_inner_markup_removed）。
+    let text = collapse_ws(&to_text(&html[content_start..content_start + end]));
     (!text.is_empty()).then_some(text)
 }
 

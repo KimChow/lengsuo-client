@@ -195,10 +195,11 @@ pub(crate) async fn run(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        // 独立进程组：pgid == 子进程 pid，超时才能力坦杀掉全部后代。
-        .process_group(0)
         // 提前返回也不留孤儿：tokio 在 drop 时 kill 并收割，不产生僵尸。
         .kill_on_drop(true);
+    // 独立进程组：pgid == 子进程 pid，超时才能干净杀掉全部后代（Unix 专有 API）。
+    #[cfg(unix)]
+    cmd.process_group(0);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }

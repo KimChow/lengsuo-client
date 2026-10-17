@@ -25,8 +25,7 @@ async fn with_deadline<T: Send + 'static>(f: impl std::future::Future<Output = T
 async fn echo_captures_stdout_and_exit_zero() {
     let r = with_deadline(runner(1000).run(Shell::Bash, "echo hello", None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert_eq!(r.exit_code, 0);
     assert_eq!(r.stdout.trim(), "hello");
     assert!(r.stderr.is_empty());
@@ -39,8 +38,7 @@ async fn stderr_is_kept_separate_from_stdout() {
     let cmd = "echo out; echo err >&2";
     let r = with_deadline(runner(1000).run(Shell::Bash, cmd, None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert_eq!(r.stdout.trim(), "out");
     assert_eq!(r.stderr.trim(), "err");
 }
@@ -49,8 +47,7 @@ async fn stderr_is_kept_separate_from_stdout() {
 async fn nonzero_exit_code_is_reported() {
     let r = with_deadline(runner(1000).run(Shell::Bash, "exit 7", None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert_eq!(r.exit_code, 7);
     assert!(!r.timed_out);
 }
@@ -61,8 +58,7 @@ async fn cwd_is_applied_to_the_child() {
     let canonical = dir.path().canonicalize().expect("规范化临时目录");
     let r = with_deadline(runner(1000).run(Shell::Bash, "pwd", Some(&canonical), None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert_eq!(r.exit_code, 0, "stderr: {:?}", r.stderr);
     // cwd 用 canonicalize 传入，避免 /tmp 符号链接造成字符串不等。
     assert_eq!(r.stdout.trim(), canonical.to_string_lossy().trim_end());
@@ -77,7 +73,8 @@ async fn sleep_past_the_timeout_reports_timed_out() {
         None,
         Some(Duration::from_millis(100)),
     ))
-    .await;
+    .await
+    .expect("run");
     assert!(r.timed_out, "sleep 5 + 100ms 超时必须置 timed_out");
     assert_eq!(r.exit_code, -1);
     assert!(r.duration_ms < 5_000, "不该等满 5 秒: {}ms", r.duration_ms);
@@ -88,7 +85,8 @@ async fn timeout_keeps_output_produced_before_the_deadline() {
     let cmd = "echo first; sleep 5";
     let r =
         with_deadline(runner(1000).run(Shell::Bash, &cmd, None, Some(Duration::from_millis(300))))
-            .await;
+            .await
+            .expect("run");
     assert!(r.timed_out);
     assert_eq!(
         r.stdout.trim(),
@@ -111,7 +109,8 @@ async fn timeout_kills_the_whole_process_group() {
     );
     let r =
         with_deadline(runner(1000).run(Shell::Bash, &cmd, None, Some(Duration::from_millis(100))))
-            .await;
+            .await
+            .expect("run");
     assert!(r.timed_out);
     assert!(
         !marker.exists(),
@@ -125,8 +124,7 @@ async fn output_is_truncated_at_the_byte_cap() {
     let cap = 100;
     let r = with_deadline(runner(cap).run(Shell::Bash, &cmd, None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert!(r.truncated);
     assert_eq!(r.stdout.len(), cap, "stdout 必须正好截到上限");
     assert!(r.stdout.chars().all(|c| c == 'x'));
@@ -138,8 +136,7 @@ async fn truncation_holds_even_across_many_chunks() {
     let cmd = "head -c 64000 /dev/zero | tr '\\0' 'a'";
     let r = with_deadline(runner(4096).run(Shell::Bash, &cmd, None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert!(r.truncated);
     assert_eq!(r.stdout.len(), 4096);
 }
@@ -148,8 +145,7 @@ async fn truncation_holds_even_across_many_chunks() {
 async fn a_bounded_child_is_not_mistaken_for_truncated() {
     let r = with_deadline(runner(30_000).run(Shell::Bash, "echo short", None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert!(!r.truncated, "小输出不该置 truncated");
 }
 
@@ -186,16 +182,14 @@ async fn command_text_is_passed_as_one_argv_without_host_side_expansion() {
     let cmd = "echo $(echo nested)";
     let r = with_deadline(runner(1000).run(Shell::Bash, &cmd, None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert_eq!(r.stdout.trim(), "nested");
 
     // 我们绝不把命令拼进 shell 的 argv：单引号内容原样保留。
     let quoted = "printf '%s' 'a;b c'";
     let r = with_deadline(runner(1000).run(Shell::Bash, &quoted, None, None))
         .await
-        .expect("deadline")
-        .expect("run");
+        .expect("deadline");
     assert_eq!(r.stdout, "a;b c");
 }
 

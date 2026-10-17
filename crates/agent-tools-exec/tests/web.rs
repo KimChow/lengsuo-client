@@ -45,7 +45,7 @@ impl Drop for TestServer {
     fn drop(&mut self) {
         // listener 随线程退出释放；不阻塞等待，join 只做尽力收尾。
         if let Some(j) = self.joiner.take() {
-            let _ = thread::Builder::new().spawn_blocking(move || {
+            let _ = std::thread::spawn(move || {
                 let _ = j.join();
             });
         }
@@ -176,7 +176,9 @@ async fn follows_one_redirect_and_reports_the_final_url() {
         }
     });
     let from = server.url("/from");
-    let r = guard(fetcher(10_000).fetch_to_markdown(&from)).await;
+    let r = guard(fetcher(10_000).fetch_to_markdown(&from))
+        .await
+        .expect("fetch");
     assert_eq!(
         r.final_url,
         server.url("/to"),
@@ -195,8 +197,9 @@ async fn redirect_loops_are_capped_at_five_hops() {
     let err = guard(fetcher(1000).fetch_to_markdown(&url))
         .await
         .expect_err("重定向环必须失败");
+    // 实现以 Io("重定向超过上限") 报告环（reqwest 的 redirect 策略被禁用后自计数）。
     assert!(
-        matches!(err, ExecError::InvalidUrl(_) | ExecError::HttpStatus { .. }),
+        matches!(err, ExecError::Io(m) if m.contains("重定向")),
         "实得 {err:?}"
     );
 }
@@ -206,8 +209,13 @@ async fn body_is_capped_at_max_bytes() {
     // 不声明 content-length、连接不关：字节流一直往下灌，
     // 只有客户端侧的下载上限能挡住它。
     const TOTAL: usize = 300_000;
-    let server = TestServer::new(move |stream| {
-        let mut stream = stream;
+    // 流式灌数据需要裸 TcpStream，TestServer 的 String handler 装不下 ⇒ 原生监听。
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr").to_string();
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
         let mut buf = [0u8; 1024];
         let _ = stream.read(&mut buf);
         let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\n");
@@ -219,8 +227,12 @@ async fn body_is_capped_at_max_bytes() {
                 Err(_) => break,
             }
         }
+        // 不主动关连接：由客户端下载上限先生效（本测试的前提）。
+        std::thread::sleep(std::time::Duration::from_secs(5));
     });
-    let r = guard(fetcher(64).fetch_to_markdown(&server.url("/"))).await;
+    let r = guard(fetcher(64).fetch_to_markdown(&format!("http://{addr}/")))
+        .await
+        .expect("fetch");
     assert!(
         r.text_markdown.len() <= 64 + 8,
         "正文必须有界，实得 {}",
@@ -238,7 +250,9 @@ async fn plain_text_body_is_passed_through_without_title() {
             body.len()
         )
     });
-    let r = guard(fetcher(1000).fetch_to_markdown(&server.url("/"))).await;
+    let r = guard(fetcher(1000).fetch_to_markdown(&server.url("/")))
+        .await
+        .expect("fetch");
     assert_eq!(r.title, None, "非 HTML 没有标题");
     assert_eq!(r.text_markdown, "just plain text\nsecond line");
 }
