@@ -16,6 +16,7 @@ pub mod runtime;
 pub mod schema;
 pub mod sensitive;
 pub mod tool;
+pub mod workspace_read;
 
 pub use error::CoreError;
 pub use event_log::{EventLog, JsonlEventLog};
