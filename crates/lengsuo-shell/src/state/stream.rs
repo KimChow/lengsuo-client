@@ -298,14 +298,20 @@ impl SessionStreamState {
         Ok(())
     }
 
-    /// 应用一条网关事件。序号断裂返回 [`StateError::SeqGap`] 且**不修改任何状态**，
-    /// 上层据此发起全量重放。
+    /// 应用一条网关事件。**被拒绝的事件不消费 `last_seq`、不留下任何状态痕迹**：
+    /// - 序号断裂返回 [`StateError::SeqGap`]，锚点保持不动，上层据此发起全量重放；
+    /// - 模式/相位不允许、载荷非法（缺 `approval_id`、未知 `mode`、重复挂起审批）、
+    ///   终态之后的事件（[`StateError::Sealed`]）都在 [`Self::route`] 内**先校验后写入**，
+    ///   因此失败时既不改消息/模式/相位/审批，也不推进 `last_seq`。
+    ///
+    /// 由此，同一 `seq` 被无效事件拒掉后，紧随的合法事件仍可成功应用；
+    /// 合法的重复/断序冻结规则本身不变（仍是 `seq != last + 1` 即 `SeqGap`）。
     pub fn apply_event(&mut self, event: GatewayEvent) -> Result<(), StateError> {
         self.check_seq(event.seq)?;
-        let outcome = self.route(&event);
-        // 序号只在成功路由后推进，保证断裂时状态未被污染。
+        // 失败即返回：序号只在成功路由后推进，保证被拒事件零副作用。
+        self.route(&event)?;
         self.last_seq = Some(event.seq);
-        outcome
+        Ok(())
     }
 
     fn check_seq(&self, seq: u64) -> Result<(), StateError> {
