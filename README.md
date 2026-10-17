@@ -30,3 +30,6 @@ cargo test --workspace --locked
 
 2026-10-17：参考矩阵现含18项，SS2022 TCP反方向及其余协议完整互通仍待验收；
 本次门禁修复和证据见 [参考验证记录](docs/reference-validation.md)。
+
+VMess 请求地址编码修复及实际验证范围见 [VMess 状态](docs/vmess-status.md)，
+原语修复不代表完整网络互通。

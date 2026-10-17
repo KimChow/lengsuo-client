@@ -6,7 +6,26 @@
 //! ③ 请求头明文布局与 FNV 尾。与 Xray 运行时的握手互通**未验证**，
 //! 不在本测试范围内（见 docs/vmess-status.md）。
 
+use lengsuo_vmess::request::{Command, HeaderPlanner, KeySource, RequestHeader, SecurityOption};
 use lengsuo_vmess::testvector;
+use ss_core::target::TargetAddr;
+
+/// 固定会话假值下的请求头明文（padding_len=0，杜绝随机项）。
+fn plan(target: &TargetAddr) -> Vec<u8> {
+    let planner = HeaderPlanner::new(KeySource {
+        body_key: [0x11u8; 16],
+        body_iv: [0x22u8; 16],
+        response_header: 0x33,
+    });
+    let header = RequestHeader {
+        target: Some(target.clone()),
+        command: Command::Tcp,
+        security: SecurityOption::Aes128Gcm,
+        option: 0x05,
+        padding_len: 0,
+    };
+    planner.plan_with(&header, &[]).expect("请求头明文可编码")
+}
 
 #[test]
 fn kdf_cases_structural_and_rfc4231_anchor() {
@@ -67,6 +86,46 @@ fn header_plan_then_seal_open_roundtrip() {
     let opened =
         lengsuo_vmess::aead::open_vmess_aead_header(&cmd_key, &auth_id, &wire[16..]).expect("可解");
     assert_eq!(opened, plain, "封装→解封装必须逐字节一致");
+}
+
+/// 请求头明文固定字节向量（逐字节比对，锁定 VMess addrParser 写法）。
+///
+/// 语义来源：`proxy/vmess/encoding/encoding.go` 的 `addrParser` =
+/// `AddressFamilyByte(AddressTypeIPv4=1)` / `AddressFamilyByte(AddressTypeDomain=2)` /
+/// `AddressFamilyByte(AddressTypeIPv6=3)` + **`PortThenAddress()`**，即
+/// `Port(BE16) | AddrType(1) | ADDR`，与 SOCKS5 的 `ATYP | ADDR | Port` 完全不同。
+/// 期望字节由 Python 独立复算（前缀 38B + 地址段 + FNV-1a32 尾），非本实现产物：
+/// 会话假值 `body_iv=0x22*16`、`body_key=0x11*16`、`response_header=0x33`、
+/// `option=0x05`、`security=(0<<4)|AES-128-GCM=0x01`、`reserved=0x00`、`command=TCP=0x01`、
+/// `padding_len=0`。
+#[test]
+fn request_plaintext_ipv4_is_port_then_type1_then_addr() {
+    let expected = hex::decode("012222222222222222222222222222222211111111111111111111111111111111330501000101bb01c0000201787fab36").unwrap();
+    assert_eq!(
+        plan(&TargetAddr::V4([192, 0, 2, 1], 443)),
+        expected,
+        "IPv4 必须写 Port(BE16)|1|ADDR"
+    );
+}
+
+#[test]
+fn request_plaintext_ipv6_is_port_then_type3_then_addr() {
+    let expected = hex::decode("01222222222222222222222222222222221111111111111111111111111111111133050100011f900320202020202020202020202020202020db4beb3c").unwrap();
+    assert_eq!(
+        plan(&TargetAddr::V6([0x20; 16], 8080)),
+        expected,
+        "IPv6 必须写 Port(BE16)|3|ADDR（不是 SOCKS5 的 0x04）"
+    );
+}
+
+#[test]
+fn request_plaintext_domain_is_port_then_type2_len_addr() {
+    let expected = hex::decode("012222222222222222222222222222222211111111111111111111111111111111330501000120fb020f6578616d706c652e696e76616c6964f4f26f05").unwrap();
+    assert_eq!(
+        plan(&TargetAddr::Domain("example.invalid".into(), 8443)),
+        expected,
+        "域名必须写 Port(BE16)|2|Len|DOMAIN"
+    );
 }
 
 /// 错误路径：篡改头部密文必须 fail-closed（AuthFailed）且不 panic。
