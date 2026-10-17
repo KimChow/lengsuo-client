@@ -1,0 +1,17 @@
+[package]
+name = "credential-ref"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "凭据引用化与本地加密存储 v0：明文绝不进入元数据、日志或 Debug 输出"
+
+[dependencies]
+aes-gcm = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { version = "1", features = ["v4", "serde"] }
+rand = "0.8"
+zeroize = "1"

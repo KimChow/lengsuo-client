@@ -33,3 +33,5 @@ cargo test --workspace --locked
 
 VMess 请求地址编码修复及实际验证范围见 [VMess 状态](docs/vmess-status.md)，
 原语修复不代表完整网络互通。
+Agent 基础模块、三层记忆及运行时 M2 已完成源码集成；GPUI 实体界面仍待实现。
+本批范围、验证与限制见 [Agent 集成状态](docs/agent-integration-status.md)。
