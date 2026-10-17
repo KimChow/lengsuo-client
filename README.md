@@ -33,7 +33,8 @@ cargo test --workspace --locked
 
 VMess 请求地址编码修复及实际验证范围见 [VMess 状态](docs/vmess-status.md)，
 原语修复不代表完整网络互通。
-Agent 模块已入仓；能力复核确认网关、策略判定、模块接线和 GPUI 仍有缺口，尚不可作为可运行产品交付。
+Agent 已有本地RPC/WS网关、Provider上下文、Skills加载与MCP信任门面；
+完整工具循环、宿主扩展接线、策略集成和GPUI业务界面仍有缺口，尚不可作为完整产品交付。
 本批范围、验证与限制见 [Agent 集成状态](docs/agent-integration-status.md)。
 
 网络开发已改为按依赖分批验收，完整范围与启动/交付条件见
