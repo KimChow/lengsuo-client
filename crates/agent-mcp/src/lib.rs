@@ -12,8 +12,9 @@
 //! - 超时：每请求可配超时（默认 30s）；超时后连接标记 poisoned，后续请求
 //!   直接 fail-closed，需重建客户端。
 //!
-//! 授权原语 [`trust::TrustGate`] 目前只是独立的内存判定器：
-//! [`client::McpClient`] 与 stdio 调用路径都尚未强制检查它，
+//! 授权原语 [`trust::TrustGate`] 已由受控门面 [`trusted_client::TrustedClient`]
+//! 接上 [`client::McpClient`]（connect 前过门、call_tool 前查 `can_call`）；
+//! 但 [`client::McpClient`] 自身的原始调用路径仍然不检查它，
 //! 因此不能据此宣称 MCP 主链已具备工具权限控制。
 //!
 //! 尚未实现（v0 范围外，见 result.md 遗留）：HTTP/SSE 传输、resources 与
@@ -29,6 +30,7 @@ pub mod protocol;
 mod session;
 mod transport;
 pub mod trust;
+pub mod trusted_client;
 
 pub use client::{ClientConfig, McpClient, NotificationReceiver};
 pub use codec::Framing;
@@ -40,6 +42,7 @@ pub use protocol::{
     SUPPORTED_PROTOCOL_VERSIONS,
 };
 pub use trust::TrustGate;
+pub use trusted_client::{TrustedClient, TrustedClientError};
 
 /// 帧与消息编解码的对外别名，避免与 `std::result::Result` 混淆。
 pub type Result<T> = std::result::Result<T, error::Error>;
