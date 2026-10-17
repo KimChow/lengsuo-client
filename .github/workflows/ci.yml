@@ -22,3 +22,27 @@ jobs:
         run: timeout 120 cargo test --workspace --locked
       - name: Build
         run: cargo build --workspace --locked
+  browser-components:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust tools
+        run: rustup component add rustfmt clippy
+      - name: Browser component lints
+        run: >-
+          cargo clippy --locked --all-targets
+          -p lengsuo-browser-profile -p lengsuo-browser-signature
+          -p lengsuo-browser-package -p lengsuo-browser-lifecycle
+          -p lengsuo-browser-installer -p lengsuo-browser-state
+          -- -D warnings
+      - name: Browser component tests
+        run: >-
+          cargo test --locked
+          -p lengsuo-browser-profile -p lengsuo-browser-signature
+          -p lengsuo-browser-package -p lengsuo-browser-lifecycle
+          -p lengsuo-browser-installer -p lengsuo-browser-state

@@ -25,6 +25,12 @@ members = [
     "crates/agent-tasks",
     "crates/agent-skills",
     "crates/agent-prompts",
+    "crates/lengsuo-browser-state",
+    "crates/lengsuo-browser-installer",
+    "crates/lengsuo-browser-profile",
+    "crates/lengsuo-browser-signature",
+    "crates/lengsuo-browser-package",
+    "crates/lengsuo-browser-lifecycle",
 ]
 
 [workspace.package]
