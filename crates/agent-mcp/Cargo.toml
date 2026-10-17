@@ -1,0 +1,16 @@
+[package]
+name = "agent-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "MCP（Model Context Protocol）客户端：JSON-RPC 2.0 帧、stdio 传输、协议面与超时语义"
+
+[dependencies]
+tokio = { workspace = true, features = ["process"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["process", "rt", "test-util"] }

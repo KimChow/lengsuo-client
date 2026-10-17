@@ -5,12 +5,15 @@
 //! ```text
 //! Version(1)=1 | requestBodyIV(16) | requestBodyKey(16) | responseHeader(1)
 //! | Option(1) | security(1)=paddingLen<<4|sec | 0x00(1) | Command(1)
-//! | 地址(TargetAddr 编码) | padding(0..16 随机) | FNV1a(前面全部)(4)
+//! | 地址(PortThenAddress, 见 [`crate::address`]) | padding(0..16 随机) | FNV1a(前面全部)(4)
 //! ```
 //! - Command == Mux(3) 时**不含地址**（参考 `addrParser.WriteAddressPort` 被跳过）。
 //! - paddingLen 由 `dice.Roll(16)` 生成（0..15），写进 security 高 4 位；
 //!   padding 字节为随机。
 //! - FNV1a 32 位校验覆盖从 Version 到 padding 结束的全部字节。
+//! - 地址段是 VMess 自身的 **Port(BE16) | AddrType(1|2|3) | ADDR**，不是 ss-core
+//!   `TargetAddr::encode_into`/`encode_checked` 的 SOCKS5 `ATYP | ADDR | Port`；
+//!   误用后者是本层此前的协议偏离（已由固定字节向量锁定修正）。
 //!
 //! 范围与限制：Security 只支持 none / AES-128-GCM / ChaCha20-Poly1305 与
 //! autocipher 哨兵（由调用方解析）；legacy（SecurityType_Legacy）与 Mux 命令
@@ -18,6 +21,7 @@
 
 use ss_core::target::TargetAddr;
 
+use crate::address::encoded_addr_len;
 use crate::consts::{
     HEADER_IV_LEN, HEADER_KEY_LEN, SECURITY_AES_128_GCM, SECURITY_AUTOCIPHER,
     SECURITY_CHACHA20_POLY1305, SECURITY_NONE, VMESS_VERSION,
@@ -207,9 +211,8 @@ impl HeaderPlanner {
                 + 16
                 + 1
                 + 1
-                + 4
-                + 2
-                + header.target.as_ref().map_or(0, TargetAddr::encoded_len)
+                + 3
+                + header.target.as_ref().map_or(0, encoded_addr_len)
                 + padding.len()
                 + 4,
         );
@@ -220,7 +223,7 @@ impl HeaderPlanner {
         buffer.push(header.option);
         buffer.extend_from_slice(&[security_byte, 0x00, header.command.to_byte()]);
         if let Some(target) = header.target.as_ref() {
-            target.encode_checked(&mut buffer).map_err(Error::Core)?;
+            crate::address::encode_target_addr(target, &mut buffer)?;
         }
         buffer.extend_from_slice(padding);
         buffer.extend_from_slice(&fnv1a32(&buffer).to_be_bytes());
@@ -289,7 +292,7 @@ mod tests {
         let header = sample_header();
         let padding = [0xAAu8; 4];
         let plain = planner().plan_with(&header, &padding).expect("可编码");
-        // 1 + 16 + 16 + 1 + 1 + 3 + 地址(2+15) + 4 + 4
+        // 1 + 16 + 16 + 1 + 1 + 3 + 地址(2+1+1+15) + 4 + 4
         assert_eq!(plain[0], VMESS_VERSION_BYTE);
         assert_eq!(&plain[1..17], &[0x22u8; 16]);
         assert_eq!(&plain[17..33], &[0x11u8; 16]);
@@ -303,10 +306,20 @@ mod tests {
         let body = &plain[..plain.len() - 4];
         let tail = u32::from_be_bytes(plain[plain.len() - 4..].try_into().unwrap());
         assert_eq!(tail, fnv1a32(body));
-        // 地址段可被 ss-core 解码还原。
-        let (target, used) = TargetAddr::decode(&plain[38..]).expect("可解");
-        assert_eq!(target, TargetAddr::Domain("example.invalid".into(), 443));
-        assert_eq!(38 + used + 4 + 4, plain.len());
+        // 地址段是 PortThenAddress：端口在前、类型 2、再长度与域名。
+        let addr = &plain[38..plain.len() - 4 - padding.len()];
+        assert_eq!(
+            addr,
+            &[
+                0x01, 0xBB, 0x02, 15, b'e', b'x', b'a', b'm', b'p', b'l', b'e', b'.', b'i', b'n',
+                b'v', b'a', b'l', b'i', b'd'
+            ]
+        );
+        assert_eq!(
+            addr.len(),
+            encoded_addr_len(&TargetAddr::Domain("example.invalid".into(), 443))
+        );
+        assert_eq!(38 + addr.len() + padding.len() + 4, plain.len());
     }
 
     #[test]
