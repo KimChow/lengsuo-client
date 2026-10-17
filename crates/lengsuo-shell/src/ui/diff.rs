@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(d.lines.len(), 3);
         assert!(kinds(&d.lines)
             .iter()
-            .all(|k| *k == &DiffKind::Equal));
+            .all(|k| *k == DiffKind::Equal));
         assert_eq!(d.changed(), 0);
         assert_eq!(d.summary(), "+0 -0");
     }
@@ -363,7 +363,8 @@ mod tests {
     #[test]
     fn summary_counts_are_right() {
         let d = diff("a\nb\nc\n", "a\nB\nD\nc\ne\n");
-        assert_eq!((d.removed(), d.added(), d.changed()), (2, 3, 5));
-        assert_eq!(d.summary(), "+3 -2");
+        // LCS 最小语义：b→B 为替换（-1+1），另新增 D、e ⇒ 删 1 增 3。
+        assert_eq!((d.removed(), d.added(), d.changed()), (1, 3, 4));
+        assert_eq!(d.summary(), "+3 -1");
     }
 }
