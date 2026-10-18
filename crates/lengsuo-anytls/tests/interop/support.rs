@@ -185,6 +185,10 @@ impl Process {
     }
 
     /// 启动 anytls-client：Socks5 入口绑定 127.0.0.1，指向给定 anytls 服务端。
+    /// v0.0.13 客户端**无条件** TLS 出站（cmd/client/main.go: `tls.Client`），且
+    /// 没有 `-tls` / `-disable-certificate-validation` 这类开关；示例客户端固定
+    /// `InsecureSkipVerify: true`，即官方参考客户端本身不校验服务端证书。
+    /// 可传标志只有 -l/-s/-p/-sni/-m/-dr。
     pub fn client(binary: &Path, socks: &str, upstream: &str, log: &Path) -> Self {
         let args = vec![
             "-l".to_owned(),
@@ -195,9 +199,6 @@ impl Process {
             PASSWORD.to_owned(),
             "-sni".to_owned(),
             SERVER_NAME.to_owned(),
-            "-tls".to_owned(),
-            socks.to_owned(),
-            "-disable-certificate-validation".to_owned(),
         ];
         Self::start(binary, "anytls-client", &args, log)
     }
