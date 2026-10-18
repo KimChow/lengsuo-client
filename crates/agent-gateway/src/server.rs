@@ -125,6 +125,7 @@ impl Drop for GatewayHandle {
         remove_handshake(&self.path, &self.token);
     }
 }
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn write_handshake(path: &Path, port: u16, token: &str) -> std::io::Result<()> {
     #[cfg(not(unix))]
     return Err(std::io::Error::new(

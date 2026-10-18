@@ -12,8 +12,7 @@
 //! 不会二次关闭。适配器句柄在 `Device` 析构时由 wintun 绑定释放。
 
 use super::{
-    DeviceConfig, Error, LibraryHandle, Result, LIBRARY_ENV, LIBRARY_FILE, MAX_PACKET_BYTES,
-    POLL_INTERVAL,
+    DeviceConfig, Error, Result, LIBRARY_ENV, LIBRARY_FILE, MAX_PACKET_BYTES, POLL_INTERVAL,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
