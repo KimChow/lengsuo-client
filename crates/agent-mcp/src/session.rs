@@ -13,6 +13,13 @@
 //!   忽略，不 poison —— 分帧仍然对齐，流没有损坏。
 //! - **对端 EOF / 主动关闭**：标记 closed，在途请求失败，不再接受新请求，
 //!   但原因文本记录为生命周期结束，与“损坏”区分。
+//!
+//! 子模块划分（本文件保留共享状态 [`Inner`] 与会话句柄 [`Session`] 的定义）：
+//! - [`config`]：会话参数；
+//! - [`core`]：构造、传输安装与只读访问；
+//! - [`request`]：请求/通知/服务端回复路径；
+//! - [`lifecycle`]：关闭、中止与 `Drop`；
+//! - [`reader`]：stdout 读循环。
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
@@ -33,6 +40,16 @@ use crate::protocol::{
     METHOD_NOT_FOUND,
 };
 
+mod config;
+mod core;
+mod lifecycle;
+mod reader;
+mod request;
+
+pub(crate) use config::SessionConfig;
+
+use reader::reader_loop;
+
 /// 单次从 stdout 读取的块大小。
 const READ_CHUNK_BYTES: usize = 16 * 1024;
 
@@ -45,34 +62,6 @@ const MIN_NOTIFY_CAPACITY: usize = 1;
 /// 响应投递通道。投递 `Ok(负载)`，连接级失败投递 `Err(错误)`，这样超时
 /// 引发的连带失败（poisoned）能原样传给等待方，不会伪装成一条响应。
 type Reply = oneshot::Sender<Result<ResponsePayload, Error>>;
-
-/// 会话参数。
-#[derive(Debug, Clone)]
-pub(crate) struct SessionConfig {
-    pub(crate) framing: Framing,
-    pub(crate) max_frame_bytes: usize,
-    pub(crate) notify_capacity: usize,
-    pub(crate) default_timeout: Duration,
-}
-
-impl SessionConfig {
-    /// 每请求默认超时（30s）。
-    pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-
-    pub(crate) fn new(
-        framing: Framing,
-        max_frame_bytes: usize,
-        notify_capacity: usize,
-        default_timeout: Duration,
-    ) -> Self {
-        Self {
-            framing,
-            max_frame_bytes,
-            notify_capacity: notify_capacity.max(MIN_NOTIFY_CAPACITY),
-            default_timeout,
-        }
-    }
-}
 
 /// 会话共享状态（reader 任务与各请求方共用）。
 struct Inner {
@@ -111,340 +100,6 @@ pub(crate) struct Session {
     child: AsyncMutex<Option<Child>>,
     next_id: AtomicI64,
     reader_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-}
-
-impl Session {
-    /// 建立会话状态但不安装传输：`has_transport()` 为 `false`，任何请求都会
-    /// 以 [`Error::Transport`] fail-closed 拒绝，直到 [`Self::attach_stdio`]。
-    #[must_use]
-    pub(crate) fn with_config(config: SessionConfig) -> Arc<Self> {
-        let (notify_tx, rx) = broadcast::channel(config.notify_capacity.max(MIN_NOTIFY_CAPACITY));
-        let inner = Arc::new(Inner {
-            framing: config.framing,
-            max_frame_bytes: config.max_frame_bytes,
-            default_timeout: config.default_timeout,
-            writer: AsyncMutex::new(None),
-            transport: AtomicBool::new(false),
-            pending: Mutex::new(BTreeMap::new()),
-            poison: Mutex::new(None),
-            closed: AtomicBool::new(false),
-            notify_tx,
-            notify_seed: Mutex::new(Some(rx)),
-            notify_dropped: AtomicU64::new(0),
-            server_requests: Mutex::new(Vec::new()),
-            unmatched_responses: AtomicU64::new(0),
-            ignored_messages: AtomicU64::new(0),
-        });
-        Arc::new(Self {
-            inner,
-            child: AsyncMutex::new(None),
-            next_id: AtomicI64::new(1),
-            reader_task: Mutex::new(None),
-        })
-    }
-
-    /// 安装 stdio 传输：接管子进程管道并启动 reader 任务。只能成功一次。
-    ///
-    /// # Errors
-    /// [`Error::Transport`]：该会话已安装过传输（不覆盖，避免旧管道泄漏）。
-    pub(crate) async fn attach_stdio(
-        &self,
-        stdin: ChildStdin,
-        stdout: ChildStdout,
-        child: Child,
-    ) -> Result<(), Error> {
-        {
-            let mut writer = self.inner.writer.lock().await;
-            if writer.is_some() || self.inner.transport.load(Ordering::Acquire) {
-                return Err(Error::Transport {
-                    reason: "会话已安装传输，不能重复安装".to_string(),
-                });
-            }
-            *writer = Some(stdin);
-            *self.child.lock().await = Some(child);
-            self.inner.transport.store(true, Ordering::Release);
-        }
-        let task = tokio::spawn(reader_loop(
-            BufReader::with_capacity(READ_CHUNK_BYTES, stdout),
-            Arc::clone(&self.inner),
-        ));
-        *self.reader_task.lock().expect("reader 锁不中毒") = Some(task);
-        Ok(())
-    }
-
-    /// 是否已安装传输。
-    #[must_use]
-    pub(crate) fn has_transport(&self) -> bool {
-        self.inner.transport.load(Ordering::Acquire)
-    }
-
-    /// 以显式标记 poisoned：上层在握手失败等路径上留下原因文本。
-    pub(crate) fn fail(&self, reason: &str) {
-        self.inner.poison(reason.to_string());
-    }
-
-    #[must_use]
-    pub(crate) fn framing(&self) -> Framing {
-        self.inner.framing
-    }
-
-    #[must_use]
-    pub(crate) fn default_timeout(&self) -> Duration {
-        self.inner.default_timeout
-    }
-
-    /// 连接是否被标记 poisoned。
-    #[must_use]
-    pub(crate) fn is_poisoned(&self) -> bool {
-        self.inner.poison_reason().is_some()
-    }
-
-    /// poisoned 原因（若有）。
-    #[must_use]
-    pub(crate) fn poison_reason(&self) -> Option<String> {
-        self.inner.poison_reason()
-    }
-
-    /// 会话是否已结束（EOF 或主动关闭）。
-    #[must_use]
-    pub(crate) fn is_closed(&self) -> bool {
-        self.inner.closed.load(Ordering::Acquire)
-    }
-
-    /// 无法匹配到在途请求的响应数量（迟到响应或陌生 id）。
-    #[must_use]
-    pub(crate) fn unmatched_responses(&self) -> u64 {
-        self.inner.unmatched_responses.load(Ordering::Acquire)
-    }
-
-    /// 被忽略的畸形消息数量（不损坏流，仅计数）。
-    #[must_use]
-    pub(crate) fn ignored_messages(&self) -> u64 {
-        self.inner.ignored_messages.load(Ordering::Acquire)
-    }
-
-    /// 因订阅者滞后而被丢弃的通知数量。
-    #[must_use]
-    pub(crate) fn notify_dropped(&self) -> u64 {
-        self.inner.notify_dropped.load(Ordering::Acquire)
-    }
-
-    /// 订阅服务端主动通知。每个订阅端独立；滞后时该端丢最旧（读循环不阻塞）。
-    pub(crate) fn subscribe_notifications(&self) -> broadcast::Receiver<JsonRpcNotification> {
-        self.inner.notify_tx.subscribe()
-    }
-
-    /// 取出并清空已记录的服务端请求（v0 只记录并自动拒绝，不处理）。
-    pub(crate) fn drain_server_requests(&self) -> Vec<ServerRequest> {
-        std::mem::take(
-            &mut *self
-                .inner
-                .server_requests
-                .lock()
-                .expect("server request 锁不中毒"),
-        )
-    }
-
-    fn alloc_id(&self) -> Result<RequestId, Error> {
-        match self.next_id.fetch_add(1, Ordering::Relaxed) {
-            // 取尽：回退并永久钉在 MAX，后续调用持续 fail-closed
-            // （与 ss-core nonce 取尽同一语义：不可逆，不静默复用）。
-            i64::MAX => {
-                self.next_id.store(i64::MAX, Ordering::Relaxed);
-                Err(Error::InvalidConfig {
-                    reason: "请求 id 已取尽，必须重建会话".to_string(),
-                })
-            }
-            n => Ok(RequestId::Number(n)),
-        }
-    }
-
-    /// 发送请求并等待响应，返回 `result` 值；对端 `error` 分支映射为
-    /// [`Error::JsonRpc`]。`timeout` 为 `None` 时使用会话默认值。
-    ///
-    /// # Errors
-    /// 见 [`Error`]：超时（并 poison 连接）、传输中断、帧损坏、对端 JSON-RPC 错误。
-    pub(crate) async fn request(
-        &self,
-        method: &str,
-        params: Option<Value>,
-        timeout: Option<Duration>,
-    ) -> Result<Value, Error> {
-        let payload = self.request_payload(method, params, timeout).await?;
-        match payload {
-            ResponsePayload::Result(v) => Ok(v),
-            ResponsePayload::Error(e) => Err(e.to_error()),
-        }
-    }
-
-    /// 发送请求并等待响应负载（保留 `error` 分支原样，供需要细粒度处理的调用方）。
-    #[allow(dead_code)] // v0 出口：将来 sampling/进度等需要区分 result/error 形状时使用
-    pub(crate) async fn request_payload(
-        &self,
-        method: &str,
-        params: Option<Value>,
-        timeout: Option<Duration>,
-    ) -> Result<ResponsePayload, Error> {
-        let timeout = timeout.unwrap_or(self.inner.default_timeout);
-        let start = Instant::now();
-        let deadline = start + timeout;
-        self.inner.ensure_usable()?;
-        let id = self.alloc_id()?;
-        let (tx, rx) = oneshot::channel();
-        self.inner.register(id.clone(), tx);
-
-        let envelope = RequestEnvelope {
-            jsonrpc: "2.0",
-            id: id.clone(),
-            method: method.to_string(),
-            params,
-        };
-        if let Err(e) = self.inner.send_frame(&envelope).await {
-            self.inner.deregister(&id);
-            return Err(e);
-        }
-
-        match tokio::time::timeout_at(deadline, rx).await {
-            // rx 的 item 已是 `Result<ResponsePayload, Error>`：读侧投递的
-            // 连接级失败（poisoned）原样返回，不伪装成一条响应。
-            Ok(Ok(payload)) => payload,
-            Ok(Err(_canceled)) => {
-                // reader 收尾时撤下 sender：连接已结束。
-                self.inner.deregister(&id);
-                Err(self.inner.failure_reason())
-            }
-            Err(_elapsed) => {
-                self.inner.deregister(&id);
-                let elapsed_ms = (Instant::now() - start).as_millis() as u64;
-                self.inner
-                    .poison(format!("method={method} 等待响应超过 {timeout:?}"));
-                // fail-closed：同会话其余在途请求一并失败，不复用半可信连接。
-                self.inner.fail_all(&Error::Poisoned {
-                    reason: format!("同会话内 method={method} 超时"),
-                });
-                Err(Error::Timeout { elapsed_ms })
-            }
-        }
-    }
-
-    /// 发送通知（无 id、无响应）。
-    ///
-    /// # Errors
-    /// 写侧失败或连接不可用。
-    pub(crate) async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), Error> {
-        self.inner.ensure_usable()?;
-        let envelope = NotificationEnvelope {
-            jsonrpc: "2.0",
-            method: method.to_string(),
-            params,
-        };
-        self.inner.send_frame(&envelope).await
-    }
-
-    /// 回复服务端发起的请求（v0 提供出口，便于将来实现 sampling）。
-    ///
-    /// # Errors
-    /// 写侧失败或连接不可用。
-    #[allow(dead_code)] // 同上：v0 reader 自动拒绝，此出口留给后续实现
-    pub(crate) async fn respond_to_server(
-        &self,
-        id: RequestId,
-        payload: ResponsePayload,
-    ) -> Result<(), Error> {
-        let body = match payload {
-            ResponsePayload::Result(v) => serde_json::json!({
-                "jsonrpc": "2.0", "id": id, "result": v
-            }),
-            ResponsePayload::Error(e) => serde_json::json!({
-                "jsonrpc": "2.0", "id": id, "error": e
-            }),
-        };
-        self.inner.send_frame(&body).await
-    }
-
-    /// 正常关闭：关闭写侧（让服务端得到 stdin EOF），等待子进程退出；
-    /// `kill_after` 到点仍未退出则强杀后再等一次。
-    ///
-    /// # Errors
-    /// 等待子进程失败或强杀后仍不退出时返回 [`Error::Transport`]。
-    pub(crate) async fn close(&self, kill_after: Duration) -> Result<i32, Error> {
-        self.inner.close_writer();
-        let mut guard = self.child.lock().await;
-        let code = match guard.as_mut() {
-            // 未安装传输（或子进程已回收）：没有进程可等，视为已退出。
-            None => Ok(0),
-            Some(child) => match tokio::time::timeout(kill_after, child.wait()).await {
-                Ok(status) => status.map_err(|e| Error::Transport {
-                    reason: format!("等待子进程退出失败：{e}"),
-                }),
-                Err(_) => {
-                    let _ = child.start_kill();
-                    tokio::time::timeout(kill_after, child.wait())
-                        .await
-                        .map_err(|_| Error::Transport {
-                            reason: "子进程在强杀后仍未退出".to_string(),
-                        })?
-                        .map_err(|e| Error::Transport {
-                            reason: format!("等待子进程退出失败：{e}"),
-                        })
-                }
-            }
-            .map(|status| status.code().unwrap_or(-1)),
-        };
-        let _ = guard.take();
-        drop(guard);
-        self.finish_shutdown();
-        code
-    }
-
-    /// 立即强杀子进程并回收（异常清理路径，例如握手失败），停 reader。
-    pub(crate) async fn abort(&self) {
-        self.inner.close_writer();
-        {
-            let mut guard = self.child.lock().await;
-            if let Some(child) = guard.as_mut() {
-                let _ = child.start_kill();
-                let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
-            }
-            let _ = guard.take();
-        }
-        self.finish_shutdown();
-    }
-
-    /// 标记 poisoned 并清理连接（超时后重建前调用）。
-    #[allow(dead_code)] // 保留给上层显式丢弃语义；当前由 request 超时内部完成
-    pub(crate) async fn hard_kill(&self, reason: String) {
-        self.inner.poison(reason);
-        self.abort().await;
-    }
-
-    /// 连接生命周期收尾：标记 closed、撤下在途请求、停 reader 任务。
-    fn finish_shutdown(&self) {
-        self.inner.closed.store(true, Ordering::Release);
-        if let Some(task) = self.reader_task.lock().expect("reader 锁不中毒").take() {
-            task.abort();
-        }
-    }
-
-    /// `Drop` 前半程：停 reader、关写侧（不阻塞当前线程）。子进程由
-    /// `kill_on_drop` 回收。
-    pub(crate) fn finalize_drop(&self) -> Result<(), Error> {
-        self.inner.close_writer();
-        if let Ok(mut guard) = self.reader_task.try_lock() {
-            if let Some(task) = guard.take() {
-                task.abort();
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        // 先停 reader，再关闭写侧；不阻塞当前线程。子进程由 transport 的
-        // `kill_on_drop` 负责，测试通过显式 shutdown/abort 验证无残留。
-        let _ = self.finalize_drop();
-    }
 }
 
 impl Inner {
@@ -574,6 +229,3 @@ impl Inner {
         guard.push(req);
     }
 }
-
-mod reader;
-use reader::reader_loop;
