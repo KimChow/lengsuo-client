@@ -10,3 +10,13 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 serde = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+
+# tests/ 下为子目录形态（main.rs + 主题模块），Cargo 默认只认 tests/*.rs，
+# 必须显式声明 [[test]] 否则整套集成测试静默不编译不运行。
+[[test]]
+name = "engine_tests"
+path = "tests/engine_tests/main.rs"
+
+[[test]]
+name = "daily_tests"
+path = "tests/daily_tests/main.rs"
