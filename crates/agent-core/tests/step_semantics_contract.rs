@@ -4,10 +4,10 @@
 //! 禁止 in-memory tool loop（金标：opencode `AGENTS.md:183,186`，
 //! `packages/core/src/session/runner/llm.ts:191-198` + `step.ts:107,281`）。
 //!
-//! 现状 `Runtime::run_turn`（`src/runtime/turns.rs:22-69`）是一次调用返回
-//! `Vec<ProviderStep>` 的内存批消费——凡断言"reload 开新步"的契约在现实现上
-//! **注定失败**，按约定标 `#[ignore]` 并在规格 §2 差距表登记；实现落地后去掉
-//! ignore 即成为验收。`[激活]` 项锚定现状必须守住的下限，不得回退。
+//! 现状 `Runtime::run_turn`（`src/runtime/turns.rs`）已是**步驱循环**：一步一次
+//! 逻辑调用，工具步结算后重读会话历史开新步。`[激活]` 项锚定必须守住的下限，
+//! 不得回退；仍标 `#[ignore]` 的条目为实现与契约冲突项（见各自 ignore 说明），
+//! 待主控人裁决。
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -177,6 +177,9 @@ fn tool_result_reloaded_into_next_provider_history() {
     let p = ScriptedProvider::new(vec![
         tool_step("fs.write", json!({"path": "a.txt"})),
         text_step("写完了"),
+        // 工具步终结后运行时会自行 reload 开新步，首回合因此耗尽前两条脚本；
+        // 这里补一条，保证第二次 send_text 仍有脚本可出。
+        text_step("继续完成"),
     ]);
     let rt = runtime(p.clone());
     let s = craft_session(&rt);
@@ -215,9 +218,8 @@ fn tool_result_reloaded_into_next_provider_history() {
 
 /// C2（差距 R1/R3，规格 §5）：含工具步终结后，运行时必须 **reload 历史自动开新步**
 /// ——一次 `send_text` 在脚本 `[工具步, 文本步]` 下应看到 2 次调用，且第 2 次的
-/// 历史已含本步 `ToolResult`。现状 run_turn 单次调用摊批、工具后不再调模型 ⇒ 失败。
+/// 历史已含本步 `ToolResult`。
 #[test]
-#[ignore = "run_turn 尚为 in-memory batch（§2 R1/R3）：工具后 reload 开新步未实现"]
 fn tool_call_ends_step_and_reloads_for_new_step() {
     let p = ScriptedProvider::new(vec![
         tool_step("fs.read", json!({"path": "a.txt"})),
@@ -241,9 +243,8 @@ fn tool_call_ends_step_and_reloads_for_new_step() {
 
 /// C3（差距 R1，规格 §5）：禁止 in-memory tool loop——provider 一次调用返回
 /// `[ToolCall, Text, Finished]` 时，`text` 事件必须出现在**下一次** LLM 调用之后
-/// （即本步在工具处终结），而不是同批在内存里消费完。现状同批发出 ⇒ 失败。
+/// （即本步在工具处终结），而不是同批在内存里消费完。
 #[test]
-#[ignore = "next_steps 批量返回被内存 for 逐条消费（§2 R1）：步内禁止续批未实现"]
 fn no_in_memory_text_after_tool_call() {
     let p = ScriptedProvider::new(vec![
         vec![
@@ -284,7 +285,7 @@ fn no_in_memory_text_after_tool_call() {
 /// `step_start → tool_use → step_end → step_start → text → step_end → done{steps}`；
 /// `done` 只属于回合收敛，不冒充步末。现状无 `step_start/step_end` kind ⇒ 失败。
 #[test]
-#[ignore = "EventKind 无 step_start/step_end（§2 R4）：步边界事件词汇未落地"]
+#[ignore = "待裁决：步边界事件需新增 EventKind（step_start/step_end），而事件名 8 类已冻结且 lengsuo-shell 严格解析未知 kind（动它超出本卡红线）；且单步回合的 kind 序列锚点 C1b 已冻结——激活 C4 必破 C1b，二者不可并存"]
 fn step_boundary_events_present() {
     let p = ScriptedProvider::new(vec![
         tool_step("fs.read", json!({"path": "c.txt"})),
@@ -325,7 +326,7 @@ fn step_boundary_events_present() {
 /// 且脚本全带工具时，存在第 3 次调用且其工具面为空、无第 3 次执行、final_text 非空。
 /// 现状 loop.rs:218-233 到限直接 break ⇒ 失败。
 #[test]
-#[ignore = "熔断为硬停非末步缴械（§2 R5/R7）：MAX_STEPS 末步提示词未实现"]
+#[ignore = "待裁决：末步缴械属 AgentLoop（loop.rs）范围，非本卡 run_turn 范围；且与既有 agent_loop_limits 的 max_steps_breaks_the_loop / custom_limits_break_earlier 冲突——末步会多一次 provider 调用（30→31）并耗尽脚本，断言零改动下无法并存"]
 fn max_steps_final_step_disables_tools() {
     use agent_core::schema::Event;
     use agent_core::{AgentLoop, LoopLimits, LoopStatus, PlanGate};

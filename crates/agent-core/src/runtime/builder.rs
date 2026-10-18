@@ -58,6 +58,7 @@ impl RuntimeBuilder {
             sessions.insert(
                 id,
                 HotSession {
+                    drain: Arc::new(Mutex::new(())),
                     session: Session {
                         memory_digest: None,
                         id,
