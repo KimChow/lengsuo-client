@@ -1,0 +1,18 @@
+[package]
+name = "agent-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "文件工具能力层：workspace 安全闸、分页读取、原子写、组回滚、回收站删除与限量搜索（同步 IO，不依赖 tokio）"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+regex = { workspace = true }
+glob = { workspace = true }
+trash = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

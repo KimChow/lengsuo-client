@@ -25,6 +25,9 @@ members = [
     "crates/agent-tasks",
     "crates/agent-skills",
     "crates/agent-prompts",
+    "crates/agent-tools",
+    "crates/agent-tools-exec",
+    "crates/agent-pty",
     "crates/lengsuo-browser-state",
     "crates/lengsuo-browser-installer",
     "crates/lengsuo-browser-profile",
@@ -65,6 +68,10 @@ regex = "1"
 axum = { version = "0.7", features = ["ws"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+glob = "0.3"
+trash = "5"
+url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 tempfile = "3"
 
 [profile.dev]
