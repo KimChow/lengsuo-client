@@ -25,6 +25,7 @@ members = [
     "crates/agent-tasks",
     "crates/agent-skills",
     "crates/agent-prompts",
+    "crates/agent-execpolicy",
     "crates/lengsuo-browser-state",
     "crates/lengsuo-browser-installer",
     "crates/lengsuo-browser-profile",

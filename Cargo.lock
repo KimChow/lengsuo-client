@@ -53,6 +53,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-execpolicy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "agent-gateway"
 version = "0.1.0"
 dependencies = [
