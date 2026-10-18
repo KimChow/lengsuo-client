@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "ACP（Agent Client Protocol）协议类型层：JSON-RPC 消息分类、核心方法类型、control 信封与行分隔帧编解码（零 IO）"
+description = "ACP（Agent Client Protocol）协议层：JSON-RPC 消息分类、核心方法类型、control 信封、行分隔帧编解码与同步线程模型的 stdio 传输/请求-响应路由"
 
 [dependencies]
 serde = { workspace = true }
