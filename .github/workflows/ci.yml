@@ -22,6 +22,19 @@ jobs:
         run: timeout 120 cargo test --workspace --locked
       - name: Build
         run: cargo build --workspace --locked
+  domain-gates:
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: [agent, network]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust tools
+        run: rustup component add rustfmt clippy
+      - name: Domain gate (${{ matrix.domain }})
+        run: python3 scripts/run_domain_gate.py ${{ matrix.domain }}
   browser-components:
     strategy:
       fail-fast: false
