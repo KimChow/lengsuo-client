@@ -1,4 +1,4 @@
-//! 权限精简（permission-slim）：execpolicy 资源级门 + 沙箱优先门（wb A22-1）。
+//! 权限精简（permission-slim）：execpolicy 资源级门 + 沙箱优先门（参考端 A22-1）。
 //!
 //! 覆盖黄金向量与设计文档 §3/§4：
 //! - `.ssh/id_rsa` 读 → deny（即使 saved allow）；`.cargo/registry` → allow；未知域名 → ask；

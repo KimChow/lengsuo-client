@@ -1,4 +1,4 @@
-//! serde 金向量测试：每种消息 1 个 round-trip + 1 个按 wb 文档抄录/还原的
+//! serde 金向量测试：每种消息 1 个 round-trip + 1 个按 参考端文档抄录/还原的
 //! 真实样例 JSON 反序列化。
 //!
 //! 样例 JSON 的出处：
@@ -60,7 +60,7 @@ fn initialize_round_trip_and_doc_sample() {
 
     // 样例：18 册 §2 客户端→agent 面（B.authenticate 同族 initialize），
     // 字段名取文档关键词（client_info/capabilities），形态按 JSON-RPC 组装。
-    let sample = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"reference-platform-desktop","version":"1.0.0"},"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":true}}}}"#;
+    let sample = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"ref-client-desktop","version":"1.0.0"},"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":true}}}}"#;
     let msg = decode_message(sample.as_bytes()).expect("样例解码");
     let Message::Request(req) = msg else {
         panic!("应为 Request，得到 {msg:?}");
@@ -70,7 +70,7 @@ fn initialize_round_trip_and_doc_sample() {
     assert_eq!(parsed.protocol_version, 1);
     assert_eq!(
         parsed.client_info.as_ref().map(|i| i.name.as_str()),
-        Some("reference-platform-desktop")
+        Some("ref-client-desktop")
     );
 
     let result = InitializeResult {

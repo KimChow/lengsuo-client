@@ -1,7 +1,7 @@
-# wb 资产 · 主守则（安全规则三层 + 工具管线规则 + 任务纪律，模板原文级）
+# 参考端 资产 · 主守则（安全规则三层 + 工具管线规则 + 任务纪律，模板原文级）
 
-> 来源：wb pc-devguide 18《Agent运行时深挖》§5-§10、05《交互模式与Agent运行时》§3/§7 相关规则、21《工具宇宙与Fragments全文收编》§4。
-> 体例：忠实转写（条目编号沿用出处册），除 wb 文档记载外不加任何内容。
+> 来源：参考端 pc-devguide 18《Agent运行时深挖》§5-§10、05《交互模式与Agent运行时》§3/§7 相关规则、21《工具宇宙与Fragments全文收编》§4。
+> 体例：忠实转写（条目编号沿用出处册），除 参考端文档记载外不加任何内容。
 
 ## 1. content_policy 七条（18 册 §10.1，永不绕过）
 
@@ -96,7 +96,7 @@
 
 ## 9. 自动化工具协议（18 册 §8，`<automations>` 原文，35 行最长的行为段）
 
-- **存储**：SQLite `$HOME/{{dataFolderName}}/reference-platform.db`——定义在 `automations` 表、运行时状态（last/next run）在 `automation_runtime_state` 表、执行历史在 `automation_runs` 表；
+- **存储**：SQLite `$HOME/{{dataFolderName}}/ref-client.db`——定义在 `automations` 表、运行时状态（last/next run）在 `automation_runtime_state` 表、执行历史在 `automation_runs` 表；
 - 管理**只能**走 `automation_update` 工具：`mode="view"` 查看、`mode="delete"` + id 删除；
 - **CRITICAL 绝对规则**：**永远不得用 `rm`/`rm -rf`/`sqlite3`/shell/任何文件系统操作删自动化**——"This rule is absolute"；
 - **创建时机**：显式要求；或请求暗示周期性——找时间频率线索（every day/daily/each morning/weekly/每天/每周/每日/定期/定时…）**即使用户没说"automation"这个词**；拿不准时：任务 + 周期时间模式 → 建自动化；一次性提醒（"明天下午 3 点提醒我开会"）→ scheduleType="once" + scheduledAt ISO 8601；

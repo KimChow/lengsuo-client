@@ -13,7 +13,7 @@ use crate::session::{self, SessionCtl, SessionState};
 /// 会话句柄与状态的一对共享引用。
 type SessionHandles = (Arc<Mutex<SessionCtl>>, Arc<Mutex<SessionState>>);
 
-/// 会话面板条目（对照 参照平台 的 `sidecar:list` 进程面板）。
+/// 会话面板条目（对照 参考客户端 的 `sidecar:list` 进程面板）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionInfo {
     /// 终端会话 id。

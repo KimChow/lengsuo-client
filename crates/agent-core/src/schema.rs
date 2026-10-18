@@ -74,7 +74,7 @@ pub enum SessionStatus {
     Failed,
 }
 
-/// 消息角色四类（参照平台基线：历史重放不重跑工具）。
+/// 消息角色四类（参考客户端 基线：历史重放不重跑工具）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -179,7 +179,7 @@ impl Session {
     }
 }
 
-/// 事件种类（参照平台基线 §5 + `session_update`）。
+/// 事件种类（参考客户端 基线 §5 + `session_update`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {

@@ -1,12 +1,12 @@
 //! 受限令牌下的进程启动与输出捕获（windows-sys FFI，仅 `cfg(windows)` 编译）。
 //!
-//! 照抄 codex `windows-sandbox-rs/src/process.rs:104-203` 的调用形状：
+//! 自研 `windows-sandbox-rs/src/process.rs:104-203` 的调用形状：
 //! `lpApplicationName = null`（可执行文件由命令行首项解析）、`bInheritHandles = TRUE`、
 //! `CREATE_UNICODE_ENVIRONMENT`、stdout/stderr 走匿名管道 + 读线程 + `WaitForSingleObject`。
 //!
-//! 与 codex 的差异（本期取最小版）：
-//! - **不建 Job Object**（design §3.7：codex 基础路径亦未依赖它）；进程树/资源限额留 TODO(§6)；
-//! - 不做 `ProcThreadAttributeList` handle 白名单与 `lpDesktop` 设置——后者 codex 是为
+//! 与 参考实现 的差异（本期取最小版）：
+//! - **不建 Job Object**（design §3.7：参考实现 基础路径亦未依赖它）；进程树/资源限额留 TODO(§6)；
+//! - 不做 `ProcThreadAttributeList` handle 白名单与 `lpDesktop` 设置——后者 参考实现 是为
 //!   PowerShell 在受限令牌下 `STATUS_DLL_INIT_FAILED` 而加；若本机冒烟遇到再补（见卡报告）。
 //!
 //! ⚠ **待本机验证**（design §7）：`CreateProcessAsUserW` 对「从自身令牌派生的受限令牌」
@@ -29,7 +29,7 @@ use windows_sys::Win32::System::Threading::{
 use super::construct::{build_command_line, build_env_block, to_utf16_nul};
 use crate::types::{CommandSpec, ExecOutcome, ExecStatus, SandboxError, SandboxType};
 
-/// 读管道缓冲大小（与 codex `process.rs:350` 一致）。
+/// 读管道缓冲大小（与 参考实现 `process.rs:350` 一致）。
 const READ_CHUNK: usize = 8192;
 
 fn last_error(what: &str) -> SandboxError {

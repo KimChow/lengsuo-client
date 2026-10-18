@@ -1,7 +1,7 @@
-# wb 资产 · 工具全集目录（模式工具清单 / 工具宇宙 78 项 / 内置 MCP 54 工具）
+# 参考端 资产 · 工具全集目录（模式工具清单 / 工具宇宙 78 项 / 内置 MCP 54 工具）
 
-> 来源：wb pc-devguide 05《交互模式与Agent运行时》§2/§4、21《工具宇宙与Fragments全文收编》§1-§2、24《模式指令全文与内置MCP全表》§2。
-> 体例：忠实转写（表格照录出处册，工具名/大小写保持原文）；除 wb 文档记载外不加任何内容。
+> 来源：参考端 pc-devguide 05《交互模式与Agent运行时》§2/§4、21《工具宇宙与Fragments全文收编》§1-§2、24《模式指令全文与内置MCP全表》§2。
+> 体例：忠实转写（表格照录出处册，工具名/大小写保持原文）；除 参考端文档记载外不加任何内容。
 > 口径注意：05 册记 craft 30 件为旧口径；21 册从原始安装包修正为 craft **40** / plan **42**，两口径并存记录于此。
 
 ## 1. 模式矩阵与工具面（05 册 §2，实测 interactionmode 配置）
@@ -24,7 +24,7 @@ frontmatter 即"模式=工具白名单"的机器可读载体（`name/description
 
 | 模式 | 工具清单 |
 |---|---|
-| craft（40） | Read Write Edit Glob Grep Bash PowerShell TaskCreate TaskGet TaskUpdate TaskList TaskStop TaskOutput WebFetch WebSearch Skill AskUserQuestion **Defer(LSP) Defer(ImageGen) Defer(VideoGen) Defer(AudioTranscribe)** Agent **Defer(TeamCreate) Defer(TeamDelete)** SendMessage **A2AGetAgentCard A2ASendMessage A2AGetTask A2ACancelTask** ToolSearch DeferExecuteTool widget_guidelines show_widget present_files **Defer(LibraryUpload)** automation_update Defer(conversation_search) Defer(reference-platform_sites_deploy) ListMcpResources ReadMcpResource |
+| craft（40） | Read Write Edit Glob Grep Bash PowerShell TaskCreate TaskGet TaskUpdate TaskList TaskStop TaskOutput WebFetch WebSearch Skill AskUserQuestion **Defer(LSP) Defer(ImageGen) Defer(VideoGen) Defer(AudioTranscribe)** Agent **Defer(TeamCreate) Defer(TeamDelete)** SendMessage **A2AGetAgentCard A2ASendMessage A2AGetTask A2ACancelTask** ToolSearch DeferExecuteTool widget_guidelines show_widget present_files **Defer(LibraryUpload)** automation_update Defer(conversation_search) Defer(ref-client_sites_deploy) ListMcpResources ReadMcpResource |
 | plan（42） | = craft + **EnterPlanMode ExitPlanMode** |
 | expert（6 片段） | 同 craft 工具集（interaction.md 同表） |
 | ask | agent-loop(空) / current-mode / interaction / mode-behavior / result-presentation / tool-use |
@@ -59,7 +59,7 @@ Read.Write.Edit.Glob.Grep.Bash.PowerShell.AskUserQuestion.TaskCreate.TaskGet.Tas
 | widget_guidelines / show_widget | 内联可视化（SVG/HTML/图表，diagram/mockup/interactive/chart/art 五类） |
 | automation_update | 一次性/周期自动化（rrule） |
 | Defer(conversation_search) | 搜历史会话 |
-| Defer(reference-platform_sites_deploy) | 一键发布 |
+| Defer(ref-client_sites_deploy) | 一键发布 |
 
 **Defer 模式 R05-2（token 优化核心，05 册 §4）**：不常驻上下文的工具先 `ToolSearch` 发现再 `DeferExecuteTool` 调用；MCP 侧同构（defer_loading）。
 
@@ -80,11 +80,11 @@ Read.Write.Edit.Glob.Grep.Bash.PowerShell.AskUserQuestion.TaskCreate.TaskGet.Tas
 
 **规则 A21-1**：fragments 的 per-mode 白名单是"可见子集"，78 表是"全宇宙"——ardot/WeChat/Cron 等由插件与特定模式启用。复刻时状态映射表就是**工具→人话标题**的权威来源。
 
-## 5. 内置 MCP 服务器全表（24 册 §2，REFERENCE_PLATFORM_BUNDLED_MCP_SERVERS，6 服务器 54 工具）
+## 5. 内置 MCP 服务器全表（24 册 §2，BUNDLED_MCP_SERVERS，6 服务器 54 工具）
 
 | 服务器 | 工具（全量） |
 |---|---|
-| **connector-proxy**（18） | connect_cloud_service, connect_open_platform, reference-platform_sites_deploy, reference-platform_sites_unpublish, reference-platform_cloud_service, reference-platform_update_app_preview_entry, search_and_install_skills, skill_management, domain_search, automation_update, conversation_search, pick_location, **agent_mail_upload_attachment, agent_mail_download_attachment**, search_plugins, suggest_plugin_install, list_installed_plugins, uninstall_plugin, reconnect_plugin |
+| **connector-proxy**（18） | connect_cloud_service, connect_open_platform, ref-client_sites_deploy, ref-client_sites_unpublish, ref-client_cloud_service, ref-client_update_app_preview_entry, search_and_install_skills, skill_management, domain_search, automation_update, conversation_search, pick_location, **agent_mail_upload_attachment, agent_mail_download_attachment**, search_plugins, suggest_plugin_install, list_installed_plugins, uninstall_plugin, reconnect_plugin |
 | **miora**（8） | miora_write_canvas, miora_open_canvas, miora_text_to_image, miora_edit_image, miora_text_to_video, miora_frame_to_video, miora_reference_to_video, miora_query_task |
 | **sheetagent**（9） | resolve_local_excel, get_cell_ranges, set_cell_range, read_table, run_command, search_data, calculate_single_formula, calculate_formulas, fill_formula |
 | **weixinpay**（4） | weixinpay_register, weixinpay_feedback, weixinpay_retry_pay, weixinpay_pay |

@@ -1,4 +1,4 @@
-//! agent-tasks：会话内任务看板（对照 参照平台 task 工具族 TaskCreate/Get/Update/List）。
+//! agent-tasks：会话内任务看板（对照 参考客户端 task 工具族 TaskCreate/Get/Update/List）。
 //!
 //! 只包含纯域逻辑（任务模型、状态机、看板与 JSON 契约），不依赖 tokio 或任何 IO 框架；
 //! 会话存储与工具接入由上层（agent-core / agent-gateway）负责。

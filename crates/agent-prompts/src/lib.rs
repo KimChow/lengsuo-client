@@ -8,7 +8,7 @@
 //! [`Composer::build`] 按模式取模板并渲染；`plan` 复用 `craft` 模板再追加
 //! [`Composer::plan_gate`] 门禁片段，`expert` 在 `craft` 之上追加专家协作段。
 //!
-//! 另有 wb（参照平台 逆向文档）提示词与工具描述资产：`assets/*.md` 忠实转写件
+//! 另有 参考端（参考客户端 调研资料）提示词与工具描述资产：`assets/*.md` 忠实转写件
 //! 经 `include_str!` 编译期嵌入，由 [`ASSETS`] / [`asset`] 只读访问，
 //! 每项带来源册名标注；不参与渲染，不引入 IO。
 //!
@@ -35,6 +35,6 @@ mod compose;
 mod model;
 mod template;
 
-pub use assets::{asset, WbAsset, ASSETS};
+pub use assets::{asset, PromptAsset, ASSETS};
 pub use compose::Composer;
 pub use model::{PromptMode, PromptTemplate, PromptVars, Segment};

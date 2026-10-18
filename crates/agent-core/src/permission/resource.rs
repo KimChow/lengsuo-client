@@ -1,9 +1,9 @@
 //! 资源级门（权限精简设计 §3）：工具调用 → `AccessRequest[]` → execpolicy 两阶段汇总。
 //!
-//! 层序（设计 §7：用层序排列消化 execpolicy「首个命中」与 opencode findLast 的差异）：
+//! 层序（设计 §7：用层序排列消化 execpolicy「首个命中」与 ref-session findLast 的差异）：
 //! `[saved…, configured(项目/会话)… , 内置安全基线]`，前层覆盖后层——首个产生命中的层生效。
 //!
-//! 两阶段（照 opencode：deny 先查、allow 后汇总）：
+//! 两阶段（照 ref-session：deny 先查、allow 后汇总）：
 //! - phase1 `configured_deny`：只看配置层 + 内置基线（saved 不参与），
 //!   任一请求的首个命中为 deny ⇒ 整体 deny（`.ssh/**` 即使用户 saved allow 也拦）。
 //! - phase2 `all_allowed`：在完整层序上判，全部请求的首个命中都是 allow ⇒ Allow。

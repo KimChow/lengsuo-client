@@ -12,7 +12,7 @@ pub const DEFAULT_ROWS: u16 = 24;
 ///
 /// `shell` 是**命令行**而非单个可执行路径：按 `shell-words` 规则分词为 argv，
 /// 因此 `"bash -c 'echo hi'"`、`"/bin/zsh --login"` 都能表达。
-/// 冻结规格里这个字段叫 `shell`，但集成终端（对照 参照平台）实际要的是
+/// 冻结规格里这个字段叫 `shell`，但集成终端（对照 参考客户端）实际要的是
 /// “在 PTY 里跑什么”，只允许单个路径会丢掉 `-c`/`--login` 这类形态。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtyConfig {

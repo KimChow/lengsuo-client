@@ -1,8 +1,8 @@
 //! Windows 沙箱实现：受限令牌（[`SandboxType::WindowsRestrictedToken`]）路。
 //!
-//! 令牌构造参数**照抄** codex `windows-sandbox-rs/src/token.rs:455-525`
+//! 令牌构造参数**照抄** 参考实现 `windows-sandbox-rs/src/token.rs:455-525`
 //! （flags 与 SID 顺序即语义），进程启动照抄 `process.rs:104-203`，
-//! deny ACE 照抄 `acl.rs:1005-1016`。只取受限令牌主线——不搬 codex 的 helper service /
+//! deny ACE 照抄 `acl.rs:1005-1016`。只取受限令牌主线——不搬 参考实现 的 helper service /
 //! elevated / AppContainer / WFP 全家桶（21,604 行）。
 //!
 //! ## 编译分工（关键）
@@ -13,18 +13,18 @@
 //!
 //! ## 待本机验证（design §7，卡内如实标注）
 //! - `CreateProcessAsUserW` 对「从自身令牌派生的受限令牌」是否需要 `SE_ASSIGNPRIMARYTOKEN_NAME`：
-//!   文档要求该特权，但同 logon 会话下普通用户实践可用（codex 基础的 RestrictedToken 级未提权）。
+//!   文档要求该特权，但同 logon 会话下普通用户实践可用（参考实现 基础的 RestrictedToken 级未提权）。
 //!   若本机冒烟失败，退化路径为 `CreateProcessWithTokenW`（需 `SE_IMPERSONATE`）。
 //! - deny ACE 对本机用户 SID 的实际拦截效果（`type %USERPROFILE%\.ssh\id_rsa` 应报拒绝访问）。
 //!
 //! ## TODO（design §6，本期明确不做）
-//! - **网络阻断**（`NetworkMode::Blocked`）：需 WFP/LocalProxy（codex `wfp.rs`）或 MXC；
+//! - **网络阻断**（`NetworkMode::Blocked`）：需 WFP/LocalProxy（参考实现 `wfp.rs`）或 MXC；
 //!   当前 fail-closed：`Err(NeedsApproval)`，绝不静默放行（见 [`construct::resolve_backend`]）。
 //! - **deny-read 递归 walker**：只 deny 目录本身 + 已知凭据路径；深层渗透留审批。
-//! - **进程树终止 / 资源限额（Job Object）**：本期不建 Job Object（codex 基础路径亦未依赖它）。
+//! - **进程树终止 / 资源限额（Job Object）**：本期不建 Job Object（参考实现 基础路径亦未依赖它）。
 //! - **WindowsMxc**：依赖微软 mxc 仓，枚举值已预留。
 //! - **AppContainer capabilities**：`CreateRestrictedToken` 的 entries 留空（仅 logon + Everyone）。
-//! - **Elevated 专用 sandbox 账户**：codex `elevated/` 16 个模块，不做；LOA 令牌对当前用户已够。
+//! - **Elevated 专用 sandbox 账户**：参考实现 `elevated/` 16 个模块，不做；LOA 令牌对当前用户已够。
 
 pub mod construct;
 
@@ -84,7 +84,7 @@ pub fn restricted_token_available() -> bool {
 
 /// 平台沙箱探测（design §4）：**干跑**真建一次受限令牌再销毁；成功 → `Some(WindowsRestrictedToken)`。
 ///
-/// 上层配置开关（codex `windows_sandbox_enabled`）由调用方在 [`construct::platform_sandbox_plan`]
+/// 上层配置开关（参考实现 `windows_sandbox_enabled`）由调用方在 [`construct::platform_sandbox_plan`]
 /// 处传入；本 crate 不持有配置，故此处恒视为启用。
 #[cfg(windows)]
 pub fn get_platform_sandbox() -> Option<SandboxType> {

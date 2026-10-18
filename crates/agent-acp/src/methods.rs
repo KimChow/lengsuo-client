@@ -15,7 +15,7 @@ use serde_json::Value;
 /// 对端实现信息（名称 + 版本），initialize 双向交换。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Implementation {
-    /// 实现名（如 `reference-platform-desktop`）。
+    /// 实现名（如 `ref-client-desktop`）。
     pub name: String,
     /// 语义化版本串。
     #[serde(default, skip_serializing_if = "Option::is_none")]

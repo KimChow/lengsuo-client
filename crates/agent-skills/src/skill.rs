@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-/// 一个技能 = 一个提示词包（对照 参照平台 的 Skill 工具）。
+/// 一个技能 = 一个提示词包（对照 参考客户端 的 Skill 工具）。
 ///
 /// `body` 是 `SKILL.md` 去掉 front-matter 后的正文全文；调用方把它整段注入
 /// system 消息，本 crate 不做截断、改写或压缩。

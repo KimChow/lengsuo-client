@@ -1,12 +1,12 @@
 //! Windows 沙箱的**纯构造层**：不依赖 `windows-sys`、不依赖 `target_os`，
 //! 因此可在 Linux（47）上直接单测。FFI 侧（`token`/`acl`/`process`）只消费本模块的产物。
 //!
-//! 与 codex 的对应关系（参数级照抄）：
+//! 与 参考实现 的对应关系（参数级照抄）：
 //! - [`quote_windows_arg`] / [`build_command_line`] ← `windows-sandbox-rs/src/winutil.rs:76-121`
 //!   （CRT / `CommandLineToArgvW` 规则：空格、引号、反斜杠）；
 //! - [`build_env_block`] ← `windows-sandbox-rs/src/process.rs:53-63`（`K=V\0…\0` 双层 NUL）；
 //! - [`platform_sandbox_plan`] / [`resolve_backend`] / [`deny_acl_targets`] 为 design §3/§4 的纯决策，
-//!   与 codex 的 `sandboxing/src/manager.rs` 降级链同构。
+//!   与 参考实现 的 `sandboxing/src/manager.rs` 降级链同构。
 
 use std::path::{Path, PathBuf};
 
@@ -37,7 +37,7 @@ pub fn env_key_allowed(key: &str) -> bool {
 
 /// 按 `CommandLineToArgvW` / CRT 规则引用单个参数。
 ///
-/// 规则（照抄 codex `winutil.rs:76-112`，与 Rust `std::process::Command` 在 Windows 上的行为一致）：
+/// 规则（自研 `winutil.rs:76-112`，与 Rust `std::process::Command` 在 Windows 上的行为一致）：
 /// - 空串，或含空格 / 制表 / 换行 / 回车 / 双引号的参数需要加引号；
 /// - 参数内**末尾连续反斜杠**要加倍（否则会转义收尾引号）；
 /// - 双引号前的连续反斜杠要加倍再加一个（`2n+1`），用于转义该引号。
@@ -80,7 +80,7 @@ pub fn quote_windows_arg(arg: &str) -> String {
 /// 拼 `CreateProcess` 系 API 的命令行：`argv[0]`（program）逐项引用后以单空格连接。
 ///
 /// 注意：`CreateProcessAsUserW` 的 `lpApplicationName` 传 null，可执行文件由本串首项解析
-/// （与 codex `process.rs:168` 同款）。
+/// （与 参考实现 `process.rs:168` 同款）。
 pub fn build_command_line(program: &Path, args: &[String]) -> String {
     let mut parts: Vec<String> = Vec::with_capacity(args.len() + 1);
     parts.push(quote_windows_arg(&program.to_string_lossy()));
@@ -88,7 +88,7 @@ pub fn build_command_line(program: &Path, args: &[String]) -> String {
     parts.join(" ")
 }
 
-/// UTF-16 + NUL 终止（`to_wide`，照抄 codex `winutil.rs:32-36`）。
+/// UTF-16 + NUL 终止（`to_wide`，自研 `winutil.rs:32-36`）。
 pub fn to_utf16_nul(s: &str) -> Vec<u16> {
     let mut v: Vec<u16> = s.encode_utf16().collect();
     v.push(0);
@@ -96,7 +96,7 @@ pub fn to_utf16_nul(s: &str) -> Vec<u16> {
 }
 
 /// 构造 `CREATE_UNICODE_ENVIRONMENT` 环境块：每条 `K=V` 后跟一个 NUL，末尾再补一个 NUL
-/// （照抄 codex `process.rs:53-63`）。空表退化为单个 NUL——调用方不得借此继承父环境。
+/// （自研 `process.rs:53-63`）。空表退化为单个 NUL——调用方不得借此继承父环境。
 pub fn build_env_block(entries: &[(String, String)]) -> Vec<u16> {
     let mut block: Vec<u16> = Vec::new();
     for (key, value) in entries {

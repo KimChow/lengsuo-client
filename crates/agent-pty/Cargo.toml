@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "异步伪终端会话管理：PTY 创建/写入/resize/kill、输出流与历史回放（对照 参照平台 集成终端）"
+description = "异步伪终端会话管理：PTY 创建/写入/resize/kill、输出流与历史回放（对照 参考客户端 集成终端）"
 
 [dependencies]
 portable-pty = "0.8"

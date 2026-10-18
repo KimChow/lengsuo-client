@@ -1,6 +1,6 @@
 //! agent-acp — ACP（Agent Client Protocol）协议层：P1 纯类型层 + P2 传输与路由。
 //!
-//! 依据 wb 逆向文档（18 册 §2、19 册 §2、27 册 §2）：桌面客户端与 CLI agent
+//! 依据 参考端 调研资料（18 册 §2、19 册 §2、27 册 §2）：桌面客户端与 CLI agent
 //! 之间走标准 ACP（`@agentclientprotocol/sdk 0.25.0` 形态），**JSON-RPC 2.0 over
 //! stdio**，方法名为斜杠族（`session/new`、`session/prompt`、`tasks/list`…），
 //! 另有一层厂商私有 `control_request`/`control_notification` 信封

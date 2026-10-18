@@ -6,7 +6,7 @@ use crate::types::{AccessKind, Decision, Matcher, Rule};
 
 /// 一组规则。逐条匹配、首个命中生效；无命中 Ask（fail-closed）。
 ///
-/// 规则文件形态（照 wb tsbx_rules.json）：顶层 `file` / `process` / `network`
+/// 规则文件形态（照 参考端 tsbx_rules.json）：顶层 `file` / `process` / `network`
 /// 三段，每段是 `Rule` 数组；缺段视为空数组。
 ///
 /// `Default` = [`Policy::security_baseline`]（安全基线即默认策略）；

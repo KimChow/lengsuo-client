@@ -2,11 +2,11 @@
 //!
 //! 本卡交付：确定性 profile 内容与单元测试断言。
 //! TODO(seccomp-apply): 将 profile 编译为 BPF，经 fd 传给 `bwrap --seccomp <fd>`
-//! （参照 codex `linux-sandbox/src/seccomp.rs` 的 in-process 应用）——**尚未应用，不得声称已生效**。
+//! （参照 参考实现 `linux-sandbox/src/seccomp.rs` 的 in-process 应用）——**尚未应用，不得声称已生效**。
 
 use serde_json::{json, Value};
 
-/// profile 默认动作：违反即返回 EPERM（与 codex 的软失败策略一致，不杀进程）。
+/// profile 默认动作：违反即返回 EPERM（与 参考实现 的软失败策略一致，不杀进程）。
 pub const DEFAULT_ACTION: &str = "SCMP_ACT_ERRNO";
 
 /// 允许的系统调用（排序去重后写入 profile；仅覆盖典型 sh/git/cargo 链路所需最小集）。

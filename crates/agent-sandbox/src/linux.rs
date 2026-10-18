@@ -250,7 +250,7 @@ fn run_unsandboxed(spec: CommandSpec) -> Result<ExecOutcome, SandboxError> {
 
 /// bwrap 沙箱执行。
 /// TODO(seccomp-apply): 把 `seccomp::linux_seccomp_profile()` 编译为 BPF 并经 fd 传给
-/// `--seccomp <fd>`（参照 codex linux-sandbox/src/seccomp.rs）。当前仅 bwrap 命名空间/绑定层
+/// `--seccomp <fd>`（参照 参考实现 linux-sandbox/src/seccomp.rs）。当前仅 bwrap 命名空间/绑定层
 /// 生效，seccomp profile 只以构造+断言存在——**未应用，不得声称已生效**。
 fn run_bwrap(spec: CommandSpec) -> Result<ExecOutcome, SandboxError> {
     let bwrap = find_system_bwrap_in_path()

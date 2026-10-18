@@ -1,6 +1,6 @@
 # agent-tasks
 
-会话内任务看板，对照 参照平台 的 task 工具族（`TaskCreate/TaskGet/TaskUpdate/TaskList`）。
+会话内任务看板，对照 参考客户端 的 task 工具族（`TaskCreate/TaskGet/TaskUpdate/TaskList`）。
 纯域逻辑：不依赖 tokio，不做任何 IO，不落盘；持久化与会话存储由上层
 （`agent-core` 运行时 / `agent-gateway` 工具接入）负责。规格源：worktree 根 `TASKS-SPEC.md`。
 
@@ -46,7 +46,7 @@ pending -> in_progress -> done
 
 ## ≥3 步提示
 
-参照平台基线为「≥3 步任务才提示 AI 使用任务系统」。该判断属于工具层/提示词层，
+参考客户端 基线为「≥3 步任务才提示 AI 使用任务系统」。该判断属于工具层/提示词层，
 本 crate 只提供任务事实（`list_by_session` 计数等），不内置提示策略。
 
 ## 依赖与边界

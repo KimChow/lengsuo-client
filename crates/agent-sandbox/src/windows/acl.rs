@@ -1,6 +1,6 @@
 //! 凭据目录的 deny-read ACL（windows-sys FFI，仅 `cfg(windows)` 编译）。
 //!
-//! 照抄 codex `windows-sandbox-rs/src/acl.rs:1005-1016` 的思路：
+//! 自研 `windows-sandbox-rs/src/acl.rs:1005-1016` 的思路：
 //! `SetEntriesInAclW` 把新建的 deny ACE 排在 allow ACE **之前**，满足 Windows
 //! 「deny 优先」的判定顺序；ACE 带 `CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE`，
 //! 覆盖此后在该目录下新建的对象。
@@ -9,11 +9,11 @@
 //! 本期没有专用 sandbox 账户（design §1：不做 Elevated），deny ACE 的受托者是**当前用户 SID**
 //! 本身，而受限令牌仍保留该 SID。因此这条 ACE 对**用户自己的普通进程同样生效**——
 //! 加过之后，交互式用户自己也读不了 `%USERPROFILE%\.ssh`，且本卡**不做撤销**
-//! （codex 的 deny_read_state.rs 有生命周期管理，我们只取最小版）。
+//! （参考实现 的 deny_read_state.rs 有生命周期管理，我们只取最小版）。
 //! 这是 design §3.6「token_user; DENY; FILE_GENERIC_READ」的直接后果，已列入报告遗留项；
 //! 正式启用前需要专用账户/Elevated 或「退出时撤销」的 journal。
 //!
-//! TODO(design §6)：不做递归 walker（codex `deny_read_walker.rs` 全套约 50KB），
+//! TODO(design §6)：不做递归 walker（参考实现 `deny_read_walker.rs` 全套约 50KB），
 //! 只 deny 目录本身；深层渗透留人工审批。
 
 use std::ffi::c_void;
@@ -32,9 +32,9 @@ use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
 use super::construct::to_utf16_nul;
 use crate::types::SandboxError;
 
-/// deny 掩码：`FILE_GENERIC_READ | GENERIC_READ`（codex `acl.rs:847` 的 `DenyAceKind::Read`）。
+/// deny 掩码：`FILE_GENERIC_READ | GENERIC_READ`（参考实现 `acl.rs:847` 的 `DenyAceKind::Read`）。
 ///
-/// design §3.6 只写 `FILE_GENERIC_READ`；codex 另加 `GENERIC_READ` 以覆盖泛型读取请求，照抄 codex。
+/// design §3.6 只写 `FILE_GENERIC_READ`；参考实现 另加 `GENERIC_READ` 以覆盖泛型读取请求，自研。
 const DENY_READ_MASK: u32 = FILE_GENERIC_READ | GENERIC_READ;
 
 fn win32_error(what: &str, code: u32) -> SandboxError {
@@ -94,7 +94,7 @@ pub fn add_deny_read_ace(path: &Path, sid: PSID) -> Result<bool, SandboxError> {
         return Err(win32_error("SetEntriesInAclW(deny read)", code));
     }
 
-    // 近似幂等：ACE 数未变说明同一条 deny 已在（不做逐条扫描，避免搬 codex 的 1.1k 行 acl.rs）。
+    // 近似幂等：ACE 数未变说明同一条 deny 已在（不做逐条扫描，避免搬 参考实现 的 1.1k 行 acl.rs）。
     let changed = unsafe { (*new_dacl).AceCount != (*old_dacl).AceCount };
     let result = if changed {
         let code = unsafe {

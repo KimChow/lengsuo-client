@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "工具调用策略判定层：Policy/Rule/Decision 纯逻辑，零平台依赖（对照 codex execpolicy）"
+description = "工具调用策略判定层：Policy/Rule/Decision 纯逻辑，零平台依赖（对照 参考实现 execpolicy）"
 
 [dependencies]
 serde = { workspace = true }

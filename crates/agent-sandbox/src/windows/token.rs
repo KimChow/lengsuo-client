@@ -1,6 +1,6 @@
 //! 受限令牌构造（windows-sys FFI，仅 `cfg(windows)` 编译）。
 //!
-//! 构造参数**照抄** codex `windows-sandbox-rs/src/token.rs:455-525`：
+//! 构造参数**照抄** 参考实现 `windows-sandbox-rs/src/token.rs:455-525`：
 //! `flags = DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`，
 //! `entries = [caps…, extra_restricting…, logon, Everyone]`（顺序即语义），
 //! 后处理 `set_default_dacl(logon_sid)` + `enable_single_privilege("SeChangeNotifyPrivilege")`。
@@ -28,11 +28,11 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 use super::construct::to_utf16_nul;
 use crate::types::SandboxError;
 
-/// `CreateRestrictedToken` 的 SID 顺序即语义（codex token.rs:481）。
+/// `CreateRestrictedToken` 的 SID 顺序即语义（参考实现 token.rs:481）。
 /// TODO(design §6)：caps 与 extra_restricting 本期为空，未来按
 /// `[caps…, extra_restricting…, logon, Everyone]` 插入。
 const SE_GROUP_LOGON_ID: u32 = 0xC000_0000;
-/// `GENERIC_ALL`（codex token.rs:45；windows-sys 未导出该名）。
+/// `GENERIC_ALL`（参考实现 token.rs:45；windows-sys 未导出该名）。
 const GENERIC_ALL: u32 = 0x1000_0000;
 /// SID 固定头长度：Revision(1) + SubAuthorityCount(1) + IdentifierAuthority(6)。
 const SID_HEADER_LEN: usize = 8;
@@ -171,7 +171,7 @@ fn world_sid_bytes() -> Result<Vec<u8>, SandboxError> {
 
 /// Logon SID 字节（`TokenGroups` 中带 `SE_GROUP_LOGON_ID` 属性的组）。
 ///
-/// 必须保留进 entries：否则桌面/管道全断（design §3.2）。codex 在缺失时还会回退查
+/// 必须保留进 entries：否则桌面/管道全断（design §3.2）。参考实现 在缺失时还会回退查
 /// `TokenLinkedToken`——本 crate 不做提权账户，直接报错（fail-closed）。
 pub fn logon_sid_bytes(token: HANDLE) -> Result<Vec<u8>, SandboxError> {
     let buffer = query_token_info(token, TokenGroups)?;
@@ -238,7 +238,7 @@ struct TokenDefaultDaclInfo {
     default_dacl: *mut ACL,
 }
 
-/// 新对象的默认 DACL 只授权 logon SID（照抄 codex token.rs:56-112），
+/// 新对象的默认 DACL 只授权 logon SID（自研 token.rs:56-112），
 /// 防止继承过宽的父 DACL；附加 `S-1-3-4`（OWNER RIGHTS）只给 `READ_CONTROL`，
 /// 抑制对象所有者的隐式 `WRITE_DAC`。
 unsafe fn set_default_dacl(token: HANDLE, logon_sid: PSID) -> Result<(), SandboxError> {
@@ -278,7 +278,7 @@ unsafe fn set_default_dacl(token: HANDLE, logon_sid: PSID) -> Result<(), Sandbox
     result
 }
 
-/// 打开单个特权（照抄 codex token.rs:339-368）。
+/// 打开单个特权（自研 token.rs:339-368）。
 ///
 /// `AdjustTokenPrivileges` 成功返回后仍须查 `GetLastError`——它可能只调整了部分特权。
 unsafe fn enable_single_privilege(token: HANDLE, name: &str) -> Result<(), SandboxError> {

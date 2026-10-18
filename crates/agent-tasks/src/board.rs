@@ -12,7 +12,7 @@ use crate::task::{Task, TaskStatus};
 /// 可注入时钟（Unix 毫秒）；确定性测试用固定值，避免时间抖动。
 pub type NowMs = fn() -> u64;
 
-/// 会话内任务看板。纯内存，不落盘；持久化由上层会话存储负责（对照 参照平台
+/// 会话内任务看板。纯内存，不落盘；持久化由上层会话存储负责（对照 参考客户端
 /// 「任务存内存 + 会话存储」）。
 #[derive(Debug, Clone)]
 pub struct TaskBoard {

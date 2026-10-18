@@ -1,7 +1,7 @@
 //! agent-sandbox：agent 沙箱体系的执行分发层（D4）。
 //!
 //! 平台抽象（`SandboxType` / `SandboxablePreference` / `get_platform_sandbox` / 降级链）
-//! 语义对照 codex（`codex-rs/protocol/src/sandbox.rs`、`codex-rs/sandboxing/src/manager.rs`）。
+//! 语义对照 参考实现（`参考实现-rs/protocol/src/sandbox.rs`、`参考实现-rs/sandboxing/src/manager.rs`）。
 //! Linux（bwrap + seccomp profile 构造）与 Windows（受限令牌）为完整实现；
 //! macOS 为编译通过的 TODO 骨架。
 //!

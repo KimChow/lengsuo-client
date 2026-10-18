@@ -1,22 +1,22 @@
-//! wb 资产加载测试：每项资产可编译期加载、非空、带来源标注、关键章节存在；
+//! 参考端 资产加载测试：每项资产可编译期加载、非空、带来源标注、关键章节存在；
 //! 目录表 ASSETS 与 asset() 查询一致，标识唯一，正文行数不超红线。
 
 mod common;
 
-use agent_prompts::{asset, WbAsset, ASSETS};
+use agent_prompts::{asset, PromptAsset, ASSETS};
 use common::has_all;
 
 /// 单项资产正文行数上限（任务红线：每个资产文件不超过 400 行）。
 const MAX_ASSET_LINES: usize = 400;
 
 /// 每项资产的必备关键章节（与 assets/*.md 的 `## ` 标题一一对应）。
-fn required_sections(asset: &WbAsset) -> &'static [&'static str] {
+fn required_sections(asset: &PromptAsset) -> &'static [&'static str] {
     match asset.name {
         "system-prompt-quick" => &[
             "## 1. quick 模板全文",
             "## 2. quick 的双保险机制",
             "## 3. quick 模式片段清单",
-            "You are 参照平台 in Quick Answer mode.",
+            "You are 参考客户端 in Quick Answer mode.",
         ],
         "prompt-architecture" => &[
             "## 1. 分层组装模型",
@@ -57,7 +57,7 @@ fn all_assets_load_nonempty() {
         assert!(!a.content.trim().is_empty(), "{} 正文为空", a.name);
         assert!(!a.title.trim().is_empty(), "{} 标题为空", a.name);
         assert!(
-            a.content.starts_with("# wb 资产 · "),
+            a.content.starts_with("# 参考端 资产 · "),
             "{} 正文缺少资产标题头",
             a.name
         );
@@ -72,16 +72,16 @@ fn all_assets_load_nonempty() {
 
 #[test]
 fn every_asset_carries_source_annotation() {
-    // 来源标注必须指向 wb pc-devguide 册名（《》包裹的书名）以保可追溯。
+    // 来源标注必须指向 参考端 pc-devguide 册名（《》包裹的书名）以保可追溯。
     for a in ASSETS {
         assert!(
-            a.source.starts_with("wb pc-devguide ") && a.source.contains('《'),
-            "{} 来源标注缺少 wb pc-devguide 册名：{}",
+            a.source.starts_with("参考端 pc-devguide ") && a.source.contains('《'),
+            "{} 来源标注缺少 参考端 pc-devguide 册名：{}",
             a.name,
             a.source
         );
         assert!(
-            a.content.contains("> 来源：wb pc-devguide"),
+            a.content.contains("> 来源：参考端 pc-devguide"),
             "{} 正文头部缺少来源行",
             a.name
         );

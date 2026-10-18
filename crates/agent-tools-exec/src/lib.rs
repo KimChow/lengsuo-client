@@ -1,6 +1,6 @@
 //! agent-tools-exec：执行与网络工具（波次 1 卡 2/6）。
 //!
-//! 对照 参照平台 的 Bash/PowerShell/WebFetch 能力，提供两件事：
+//! 对照 参考客户端 的 Bash/PowerShell/WebFetch 能力，提供两件事：
 //! - [`ExecRunner`]：在受控 shell 中运行一条命令，带超时（杀整个进程组）与字节截断；
 //! - [`WebFetcher`]：只走 http/https 的小额度抓取，把 HTML 收成纯文本。
 //!

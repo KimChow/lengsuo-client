@@ -1,7 +1,7 @@
-# wb 资产 · LLM 工具描述原文（Bash schema / Agent / TaskOutput / Minimal how-to / 斜杠命令）
+# 参考端 资产 · LLM 工具描述原文（Bash schema / Agent / TaskOutput / Minimal how-to / 斜杠命令）
 
-> 来源：wb pc-devguide 22《Bash工具完整规格与权限链》§1/§4-§5、19《Agent会话运行时与工具面深挖》§7、24《模式指令全文与内置MCP全表》§1、18《Agent运行时深挖》§5。
-> 体例：忠实转写；英文原文逐字照录于引用块，中文要点为出处册原文的表格式收录。除 wb 文档记载外不加任何内容。
+> 来源：参考端 pc-devguide 22《Bash工具完整规格与权限链》§1/§4-§5、19《Agent会话运行时与工具面深挖》§7、24《模式指令全文与内置MCP全表》§1、18《Agent运行时深挖》§5。
+> 体例：忠实转写；英文原文逐字照录于引用块，中文要点为出处册原文的表格式收录。除 参考端文档记载外不加任何内容。
 > 诚实边界（22 册文首）：lite 变体的 `command` 字段描述是精简版（"The command to execute"）；**完整版长描述在 5.7.7 的 `lazy-headless/` 121 个 chunk 里，随旧安装包已消失**。标准工具描述如需完整原文，需另取得全量版安装包。
 
 ## 1. Bash 工具 Zod schema（22 册 §1，描述原文逐字段）

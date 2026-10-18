@@ -1,11 +1,11 @@
-//! 跨平台沙箱类型层：平台枚举、偏好、命令规格、执行结果与错误（语义照抄 codex `protocol/src/sandbox.rs` 与
+//! 跨平台沙箱类型层：平台枚举、偏好、命令规格、执行结果与错误（语义自研 `protocol/src/sandbox.rs` 与
 //! `sandboxing/src/manager.rs`，命名按 D4 拍板冻结）。
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// 标识某条命令最终选择的沙箱实现（对照 codex `SandboxType`）。
+/// 标识某条命令最终选择的沙箱实现（对照 参考实现 `SandboxType`）。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SandboxType {
@@ -35,7 +35,7 @@ impl SandboxType {
     }
 }
 
-/// 沙箱偏好（对照 codex `SandboxablePreference`）：
+/// 沙箱偏好（对照 参考实现 `SandboxablePreference`）：
 /// `Auto` = 能沙箱则沙箱，否则按策略降级；`Require` = 沙箱不可用则拒绝（fail-closed）；
 /// `Forbid` = 明确不沙箱执行。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-//! 工具调用的策略判定层（对照 codex 的 execpolicy crate）。
+//! 工具调用的策略判定层（对照 参考实现 的 execpolicy crate）。
 //!
 //! 职责边界：
 //! - 纯逻辑、零平台依赖：不触碰文件系统、进程或网络，只对上层提交的
@@ -8,7 +8,7 @@
 //! 判定语义：按类别取规则段，逐条匹配，**首个命中生效**；无命中返回
 //! [`Decision::Ask`]（fail-closed 倾向：拿不准就问）。
 //!
-//! 规则文件形态（照 wb tsbx_rules.json，[`Policy::from_json_str`]）：顶层
+//! 规则文件形态（照 参考端 tsbx_rules.json，[`Policy::from_json_str`]）：顶层
 //! `file` / `process` / `network` 三段，每条规则 = `pattern` + `match`
 //! （`glob` 或 `prefix`）+ `decision`（`allow`/`deny`/`ask`）+ 可选 `reason`。
 //! 缺段视为空数组；未知字段报错（拼写错误不静默吞掉）。

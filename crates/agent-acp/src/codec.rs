@@ -1,6 +1,6 @@
 //! 帧编解码：newline-delimited JSON（18 册实证 "JSON over stdio"）。
 //!
-//! wb 文档只给出 `JSON over stdio`，未提 `Content-Length` 头帧，故 P1 采用
+//! 参考端文档只给出 `JSON over stdio`，未提 `Content-Length` 头帧，故 P1 采用
 //! **行分隔 JSON**：一行一条 wire 消息，`\n` 结尾（容忍尾部 `\r`，忽略空行）。
 //! 全部纯函数 + 增量状态机 [`LineDecoder`]，不碰 socket/进程——传输接线是 P2。
 //!

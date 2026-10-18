@@ -7,7 +7,7 @@ use crate::types::{
 /// 平台沙箱探测：macOS 理论上有 seatbelt，但本卡未实现 → 返回 None（fail-closed）。
 pub fn get_platform_sandbox() -> Option<SandboxType> {
     // TODO(seatbelt): 探测 /usr/bin/sandbox-exec，实现 seatbelt profile 构造与降级链
-    // （对照 codex sandboxing/src/seatbelt.rs）。实现前保持 None，不假装可用。
+    // （对照 参考实现 sandboxing/src/seatbelt.rs）。实现前保持 None，不假装可用。
     None
 }
 

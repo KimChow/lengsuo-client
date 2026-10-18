@@ -1,4 +1,4 @@
-//! 安全基线（对照 wb tsbx 规则形态 + R8 环境清洗）：
+//! 安全基线（对照 参考端 tsbx 规则形态 + R8 环境清洗）：
 //! - 凭据目录 deny 全操作：路径中出现 `.ssh` / `.gnupg` 组件即拒绝，连读取都不允许；
 //! - 包管理器缓存目录允许读写绑定（开发链路可用）；
 //! - 派生进程 env 只透传白名单（先清洗请求上下文再注入）。
@@ -6,11 +6,11 @@
 use std::path::{Component, Path};
 
 /// 组件级 denylist 基名：路径分量命中 `<基名>`、`.<基名>` 或 `.<基名>-…` 变体即视为凭据路径
-/// （wb 基线的 .ssh/**、.gnupg/** 两段；`ssh-lib` 这类项目目录不误伤）。
+/// （参考端 基线的 .ssh/**、.gnupg/** 两段；`ssh-lib` 这类项目目录不误伤）。
 pub const DENY_PATH_COMPONENTS: &[&str] = &["ssh", "gnupg"];
 
 /// 包管理器/工具链缓存目录名（相对家目录），允许读写绑定。
-/// 对照 wb 基线：Node/npm、Rust（.cargo/.rustup）、Go（go-build）、Python、Java、通用 .cache。
+/// 对照 参考端 基线：Node/npm、Rust（.cargo/.rustup）、Go（go-build）、Python、Java、通用 .cache。
 pub const CACHE_DIR_NAMES: &[&str] = &[
     ".cargo",
     ".rustup",

@@ -1,7 +1,7 @@
-# wb 资产 · 提示词体系架构（分层组装 / 模板矩阵 / 片段 / 风格 / 变量）
+# 参考端 资产 · 提示词体系架构（分层组装 / 模板矩阵 / 片段 / 风格 / 变量）
 
-> 来源：wb pc-devguide 07《提示词系统》§2-§7、18《Agent运行时深挖》§13、21《工具宇宙与Fragments全文收编》§5-§6。
-> 体例：忠实转写（含原文英文段落逐字照录），除 wb 文档记载外不加任何内容。
+> 来源：参考端 pc-devguide 07《提示词系统》§2-§7、18《Agent运行时深挖》§13、21《工具宇宙与Fragments全文收编》§5-§6。
+> 体例：忠实转写（含原文英文段落逐字照录），除 参考端文档记载外不加任何内容。
 
 ## 1. 分层组装模型（07 册 §2）
 
@@ -47,12 +47,12 @@ messages = [
 
 | 模板 | 大小 | 用途 |
 |---|---|---|
-| reference-platform-prompt.tpl | 31KB | 通用主模板（craft"普通"场景回落到这里） |
-| reference-platform-ask-prompt.tpl / -code- / -coding- | 10.7/10.7/8.8KB | ask 三变体（按话题类型选） |
-| reference-platform-craft-code- / -coding- / -design-prompt.tpl | 33.3/32.3/26.1KB | craft 三变体 |
-| reference-platform-expert-prompt.tpl / -code- / -coding- | 32.7/33.1/32.1KB | expert 三变体 |
-| reference-platform-quick-prompt.tpl | **525B** | quick 极简模板（全文见 system-prompt-quick.md） |
-| ~~reference-platform-craft-prompt.tpl~~ | — | **不存在（幽灵行）**：craft 只有 code/coding/design 三变体 |
+| ref-client-prompt.tpl | 31KB | 通用主模板（craft"普通"场景回落到这里） |
+| ref-client-ask-prompt.tpl / -code- / -coding- | 10.7/10.7/8.8KB | ask 三变体（按话题类型选） |
+| ref-client-craft-code- / -coding- / -design-prompt.tpl | 33.3/32.3/26.1KB | craft 三变体 |
+| ref-client-expert-prompt.tpl / -code- / -coding- | 32.7/33.1/32.1KB | expert 三变体 |
+| ref-client-quick-prompt.tpl | **525B** | quick 极简模板（全文见 system-prompt-quick.md） |
+| ~~ref-client-craft-prompt.tpl~~ | — | **不存在（幽灵行）**：craft 只有 code/coding/design 三变体 |
 | plan | **无专属模板** | 复用 craft + plan fragments 组装——**plan 不是另一种人格，是 craft 人格 + 门禁片段** |
 
 **模式 × 变体选择规则 R07-1**：workMode 决定模板族；变体（普通/编程/设计）按会话话题类型选；productFeatures.* 开关裁剪段落（同一套模板服务多品牌/多功能组合）。
@@ -105,14 +105,14 @@ ask 的只读约束**压倒一切先前指令**。
 | agent-to-agent.md | 0.8KB | **A2A 协作协议**：先 `A2AGetAgentCard` 取目标能力卡（identifier 从 `<available_A2A_agents>` 原文复制），再 `A2ASendMessage` 委派；**委派消息必须自带完整上下文/目标/约束/预期产出**（目标代理看不到当前会话）；`A2AGetTask` 查进度、`A2ACancelTask` 终止；此路禁用 Agent 工具/ToolSearch |
 | memory-context.md | 0.1KB | 三记忆变量注入点 |
 | wecom-routing.md | 5.5KB | **企微双通道路由**（防模型按关键词乱路由）：聊天域只走 A2A 聊天代理，其余走 wecomcli-* 技能；**清单现场解析禁止凭记忆**；`AGENT_NOT_FOUND` = "你传的值是猜的"，重试用真实列表值绝不降级 |
-| reference-platform-memory-system.md | 3.7KB | 三层记忆提示词（30 天蒸馏）；`{% if LocalSkillsMemoryEnabled %}` 包裹 |
+| ref-client-memory-system.md | 3.7KB | 三层记忆提示词（30 天蒸馏）；`{% if LocalSkillsMemoryEnabled %}` 包裹 |
 
-21 册 §6 新增 6 个企微/频道路由片段：`wecom-account-routing / wecom-chat-unavailable / wecom-cli-routing / wecom-connector-off / wecom-unified-connector-off / reference-platform-channel-prompts`——企微路由的**全状态处理**。
+21 册 §6 新增 6 个企微/频道路由片段：`wecom-account-routing / wecom-chat-unavailable / wecom-cli-routing / wecom-connector-off / wecom-unified-connector-off / ref-client-channel-prompts`——企微路由的**全状态处理**。
 
-**reference-platform-memory-system.md 补充细节**（21 册 §6）：
-- Layer 1 云画像**缓存在 `{{ReferencePlatformUserMemoryDir}}/memory/`**，本地改动会被下次会话覆盖（"Do NOT modify locally"）；
+**ref-client-memory-system.md 补充细节**（21 册 §6）：
+- Layer 1 云画像**缓存在 `{{ClientUserMemoryDir}}/memory/`**，本地改动会被下次会话覆盖（"Do NOT modify locally"）；
 - `conversation_search` **对当前会话零访问**——查询必须自包含（描述要找什么+时间范围背景）；触发例句原文（"我们之前讨论的 XX 方法是什么来着？"）；**不得用于查通用偏好**（那是画像的职责）；
-- Layer 2 用户级：`{{ReferencePlatformUserMemoryDir}}/MEMORY.md`，**用 Edit 工具原地更新**（非追加），4000 字符/会话上限，存"精确的强制规则"。
+- Layer 2 用户级：`{{ClientUserMemoryDir}}/MEMORY.md`，**用 Edit 工具原地更新**（非追加），4000 字符/会话上限，存"精确的强制规则"。
 
 ## 8. 七种语言风格（07 册 §4，style/*.md，与模式正交可热切换）
 
@@ -125,7 +125,7 @@ straightforward 直白（结论先行）/ friendly 友好 / professional 专业 
 | 产品 | productName / dataFolderName / modelName | product config |
 | 模式 | workMode / ResponseLanguage / BinaryContext / IsWindows / IsOversea / IsPersonalEdition | 运行时 |
 | 功能开关 | productFeatures.{DisableMultimodalGeneration, BrowserUse, ComputerUse} / ExpertManagementEnabled | feature-flag |
-| 记忆 | WorkingMemoryContent / UserLocalMemoryContent / UserMemoryContent / ClawMemory_1-3 / ReferencePlatformMemory_1 | 三层记忆 |
+| 记忆 | WorkingMemoryContent / UserLocalMemoryContent / UserMemoryContent / ClientMemoryA_1-3 / ClientMemoryB_1 | 三层记忆 |
 | 身份 | SoulContent / IdentityContent / UserContent / BootstrapContent / ToneStyleContent / UserCustomPrompt / PluginAgentPrompt / subAgentPrompt / industryModeSystemPromptAppend | identity 域 |
 | 展示 | ToolResultPresentationPrompt / ArtifactDirectoryPath | 会话 |
 
@@ -136,7 +136,7 @@ straightforward 直白（结论先行）/ friendly 友好 / professional 专业 
 | 场景 | 行为 |
 |---|---|
 | 变量缺失 | nunjucks 渲染空串；关键身份变量缺失走 onboarding 分支（WorkspaceIdentityMode == 'onboarding'） |
-| 模板文件缺失 | 按模式回落表（craft 普通 → reference-platform-prompt.tpl） |
+| 模板文件缺失 | 按模式回落表（craft 普通 → ref-client-prompt.tpl） |
 | 技能描述膨胀 | 只注入 name+description，正文按需 Skill 工具读 |
 | 风格切换 | 热切换即时生效（ToneStyleContent 重渲染） |
 
@@ -151,5 +151,5 @@ straightforward 直白（结论先行）/ friendly 友好 / professional 专业 
 
 `browser-computer-use.md`（`{% if productFeatures.BrowserUse === true %}` 包裹）：
 - 定位 Beta："只在任务真的需要 UI 操作且无更简单办法时考虑"；
-- 浏览器控制的实现是 **`reference-platform-browser-use` Skill**（不是内置工具）；
-- 关闭时引导：**设置 > Agent > 浏览器控制** + Chrome/Edge/QQ 浏览器的 参照平台 扩展。
+- 浏览器控制的实现是 **`ref-client-browser-use` Skill**（不是内置工具）；
+- 关闭时引导：**设置 > Agent > 浏览器控制** + Chrome/Edge/QQ 浏览器的 参考客户端 扩展。

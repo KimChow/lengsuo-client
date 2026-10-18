@@ -1,7 +1,7 @@
 //! 步语义契约测试（docs/step-semantics-spec.md §5 清单）。
 //!
 //! 铁律：一步 = 一次逻辑 LLM 调用；工具结果落盘后 **reload 历史** 开新步；
-//! 禁止 in-memory tool loop（金标：opencode `AGENTS.md:183,186`，
+//! 禁止 in-memory tool loop（金标：ref-session `AGENTS.md:183,186`，
 //! `packages/core/src/session/runner/llm.ts:191-198` + `step.ts:107,281`）。
 //!
 //! 现状 `Runtime::run_turn`（`src/runtime/turns.rs`）已是**步驱循环**：一步一次

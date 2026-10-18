@@ -1,6 +1,6 @@
 //! 技能注册表：有序目录 + 同名覆盖优先级。
 //!
-//! 语义对照 参照平台 的 Skill 工具：上层拿到 `Skill.body` 后整段注入 system
+//! 语义对照 参考客户端 的 Skill 工具：上层拿到 `Skill.body` 后整段注入 system
 //! 消息，因此 `body` 必须是文件全文（仅去掉 front-matter），不做任何裁剪。
 
 use std::collections::BTreeMap;
