@@ -9,6 +9,9 @@ pub mod bus;
 pub mod config;
 pub mod error;
 pub mod event_log;
+#[allow(clippy::module_inception)]
+pub mod r#loop;
+pub mod mode;
 pub mod permission;
 pub mod provider;
 pub mod redact;
@@ -20,8 +23,13 @@ pub mod workspace_read;
 
 pub use error::CoreError;
 pub use event_log::{EventLog, JsonlEventLog};
+pub use mode::{mode_policy, ModePolicy};
 pub use permission::{Decision, PermissionGate};
 pub use provider::{Provider, ProviderStep, TurnContext};
+pub use r#loop::{
+    AgentLoop, ChatProvider, ChatTurn, LoopLimits, LoopOutcome, LoopStatus, PlanGate, ToolCall,
+    ToolExecutor, DEFAULT_MAX_STEPS,
+};
 pub use redact::Redactor;
 pub use runtime::{CreateSession, Runtime, RuntimeBuilder, TurnReceipt};
 pub use schema::{Event, Isolation, Message, Mode, PermissionMode, Role, Session, SCHEMA_VERSION};
