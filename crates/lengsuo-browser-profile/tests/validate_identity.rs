@@ -5,7 +5,7 @@ use lengsuo_browser_profile::{Platform, ProfileError, MAX_IDENTIFIER_LEN};
 mod support;
 use support::{mobile_spec, spec};
 
-fn rejected(spec: &lengsuo_browser_profile::ProfileSpecV1) -> ProfileError {
+fn rejected(spec: &lengsuo_browser_profile::ProfileSpec) -> ProfileError {
     match spec.validate() {
         Ok(()) => panic!("profile must be rejected: {spec:?}"),
         Err(err) => err,
@@ -31,8 +31,11 @@ fn plausible_profiles_are_accepted() {
 }
 
 #[test]
-fn only_schema_version_one_is_accepted() {
-    for version in [0, 2, 3, u32::MAX] {
+fn only_schema_versions_one_and_two_are_accepted() {
+    // Only 1 and 2 are legal. Version 2 additionally requires an explicit
+    // policy, which is covered by tests/schema2_golden.rs; here we assert
+    // that every other version number is a flat SchemaVersion rejection.
+    for version in [0, 3, 4, u32::MAX] {
         let mut s = spec();
         s.schema_version = version;
         assert_eq!(rejected(&s), ProfileError::SchemaVersion(version));

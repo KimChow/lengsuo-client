@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use lengsuo_browser_profile::{
-    DimensionPools, HardwareSpec, LocaleSpec, Platform, PoolCatalogV1, ProfileSpecV1, ScreenSpec,
-    SCHEMA_VERSION,
+    DimensionPools, HardwareSpec, LocaleSpec, Platform, PoolCatalogV1, ProfileSpec, ScreenSpec,
+    SCHEMA_VERSION_V1,
 };
 
 /// 16 lowercase hex characters == 8 seed bytes.
@@ -26,9 +26,9 @@ pub fn slots() -> BTreeMap<String, u32> {
     m
 }
 
-pub fn spec() -> ProfileSpecV1 {
-    ProfileSpecV1 {
-        schema_version: SCHEMA_VERSION,
+pub fn spec() -> ProfileSpec {
+    ProfileSpec {
+        schema_version: SCHEMA_VERSION_V1,
         environment_id: "env-0001_a".to_string(),
         pool_version: "pool-2026-10".to_string(),
         noise_version: 1,
@@ -37,11 +37,12 @@ pub fn spec() -> ProfileSpecV1 {
         screen: ScreenSpec::default(),
         hardware: HardwareSpec::default(),
         locale: LocaleSpec::default(),
+        webrtc_ip_handling_policy: None,
         slots: slots(),
     }
 }
 
-pub fn mobile_spec() -> ProfileSpecV1 {
+pub fn mobile_spec() -> ProfileSpec {
     let mut s = spec();
     s.environment_id = "env-mobile-1".to_string();
     s.platform = Platform::Android;

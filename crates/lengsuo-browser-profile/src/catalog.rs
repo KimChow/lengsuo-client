@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ProfileError;
-use crate::spec::ProfileSpecV1;
+use crate::spec::ProfileSpec;
 
 /// Per-dimension set of tier ids that one pool version actually contains.
 /// Repeated tier ids in JSON arrays normalize to set membership; duplicate
@@ -43,7 +43,7 @@ pub struct PoolCatalogV1 {
 
 impl PoolCatalogV1 {
     fn validate_shape(&self) -> Result<(), ProfileError> {
-        if self.schema_version != crate::SCHEMA_VERSION {
+        if self.schema_version != crate::SCHEMA_VERSION_V1 {
             return Err(ProfileError::SchemaVersion(self.schema_version));
         }
         crate::validate::check_safe_identifier("pool_version", &self.pool_version)?;
@@ -80,7 +80,7 @@ impl PoolCatalogV1 {
         dimensions: DimensionPools,
     ) -> Result<Self, ProfileError> {
         let catalog = Self {
-            schema_version: crate::SCHEMA_VERSION,
+            schema_version: crate::SCHEMA_VERSION_V1,
             pool_version: pool_version.into(),
             dimensions,
         };
@@ -122,7 +122,7 @@ impl PoolCatalogV1 {
     /// Requires the exact pool version string, the exact dimension key set on
     /// both sides, and membership of every tier id in the matching pool. The
     /// error carries the [`Reject`] side that failed.
-    pub fn validate(&self, spec: &ProfileSpecV1) -> Result<(), (Reject, ProfileError)> {
+    pub fn validate(&self, spec: &ProfileSpec) -> Result<(), (Reject, ProfileError)> {
         self.validate_shape().map_err(|e| (Reject::Catalog, e))?;
         spec.validate().map_err(|e| (Reject::Profile, e))?;
         if spec.pool_version != self.pool_version {

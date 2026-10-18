@@ -181,11 +181,13 @@ fn catalog_rejects_bad_pool_version_and_zero_ids() {
 #[test]
 fn catalog_reports_which_side_is_invalid() {
     // An invalid profile is blamed on the profile, not on the mapping.
+    // Schema 2 is a legal version now (it just requires an explicit policy),
+    // so an unsupported version 3 stands in for the old "bad schema" case.
     let mut s = spec();
-    s.schema_version = 2;
+    s.schema_version = 3;
     let (side, err) = catalog().validate(&s).expect_err("bad schema accepted");
     assert_eq!(side, Reject::Profile);
-    assert_eq!(err, ProfileError::SchemaVersion(2));
+    assert_eq!(err, ProfileError::SchemaVersion(3));
 
     let mut s = spec();
     s.slots.remove("ua");

@@ -1,17 +1,17 @@
 //! JSON shape tests: unknown fields must be rejected, exact field names and
 //! lowercase platform tags are required, and hostile JSON must fail closed.
 
-use lengsuo_browser_profile::{Platform, ProfileSpecV1};
+use lengsuo_browser_profile::{Platform, ProfileSpec};
 
 mod support;
 use support::spec;
 
-fn json_of(spec: &ProfileSpecV1) -> serde_json::Value {
+fn json_of(spec: &ProfileSpec) -> serde_json::Value {
     serde_json::to_value(spec).expect("test profile must serialize")
 }
 
-fn parse(text: &str) -> ProfileSpecV1 {
-    ProfileSpecV1::from_json_str(text).unwrap_or_else(|e| panic!("{e}: {text}"))
+fn parse(text: &str) -> ProfileSpec {
+    ProfileSpec::from_json_str(text).unwrap_or_else(|e| panic!("{e}: {text}"))
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn unknown_top_level_field_is_rejected() {
         .as_object_mut()
         .unwrap()
         .insert("proxy_password".to_string(), serde_json::json!("hunter2"));
-    let err = ProfileSpecV1::from_json_str(&value.to_string())
+    let err = ProfileSpec::from_json_str(&value.to_string())
         .expect_err("credential-ish unknown field must be refused");
     assert!(
         err.to_string().contains("unknown field"),
@@ -37,7 +37,7 @@ fn future_schema_field_is_not_ignored() {
         .as_object_mut()
         .unwrap()
         .insert("webgpu".to_string(), serde_json::json!({ "tier": 3 }));
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn unknown_nested_field_is_rejected() {
             .insert(extra.to_string(), serde_json::json!(1));
         let text = value.to_string();
         assert!(
-            ProfileSpecV1::from_json_str(&text).is_err(),
+            ProfileSpec::from_json_str(&text).is_err(),
             "nested unknown field {path}.{extra} must be refused"
         );
     }
@@ -64,42 +64,50 @@ fn unknown_nested_field_is_rejected() {
 fn missing_required_field_is_rejected() {
     let mut value = json_of(&spec());
     value.as_object_mut().unwrap().remove("noise_seed_hex");
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 }
 
 #[test]
 fn wrong_field_types_are_rejected() {
     let mut value = json_of(&spec());
     value["schema_version"] = serde_json::json!("1");
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 
     let mut value = json_of(&spec());
     value["screen"]["width"] = serde_json::json!("1920");
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 
     let mut value = json_of(&spec());
     value["environment_id"] = serde_json::json!(123);
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 
     let mut value = json_of(&spec());
     value["screen"]["color_depth"] = serde_json::json!(300);
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 
     let mut value = json_of(&spec());
     value["schema_version"] = serde_json::json!(-1);
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 }
 
 #[test]
 fn noise_seed_must_not_be_a_json_number() {
-    // A numeric-looking seed would lose leading zeroes, so it is refused.
+    // A numeric-looking seed would lose leading zeroes. Parsing a number
+    // into the string field fails at the JSON shape layer; a numeric string
+    // parses but is then refused by validation. Both entry points must
+    // reject, so each case asserts the full parse+validate pipeline.
     let mut value = json_of(&spec());
     value["noise_seed_hex"] = serde_json::json!(0x0123_4567_89ab_cdefu64);
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 
     let mut value = json_of(&spec());
     value["noise_seed_hex"] = serde_json::json!("1.0e16");
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    let parsed = ProfileSpec::from_json_str(&value.to_string())
+        .expect("numeric string still parses as JSON text");
+    assert!(
+        parsed.validate().is_err(),
+        "a numeric-string seed must fail validation, not be accepted"
+    );
 }
 
 #[test]
@@ -130,18 +138,18 @@ fn platform_tags_are_lowercase_and_closed() {
 fn slots_are_an_object_not_a_sequence() {
     let mut value = json_of(&spec());
     value["slots"] = serde_json::json!([["canvas", 1]]);
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 
     let mut value = json_of(&spec());
     value["slots"]["canvas"] = serde_json::json!("1");
-    assert!(ProfileSpecV1::from_json_str(&value.to_string()).is_err());
+    assert!(ProfileSpec::from_json_str(&value.to_string()).is_err());
 }
 
 #[test]
 fn empty_or_non_object_input_is_rejected() {
     for text in ["", "   ", "null", "[]", "\"env-1\"", "{}"] {
         assert!(
-            ProfileSpecV1::from_json_str(text).is_err(),
+            ProfileSpec::from_json_str(text).is_err(),
             "accepted non-profile JSON: {text:?}"
         );
     }
@@ -162,5 +170,5 @@ fn trailing_garbage_is_rejected() {
         serde_json::to_string(&spec()).unwrap(),
         r#"{"schema_version":1}"#
     );
-    assert!(ProfileSpecV1::from_json_str(&text).is_err());
+    assert!(ProfileSpec::from_json_str(&text).is_err());
 }

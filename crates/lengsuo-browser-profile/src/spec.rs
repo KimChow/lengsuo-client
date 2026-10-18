@@ -1,7 +1,9 @@
-//! Frozen profile types for schema version 1.
+//! Versioned profile types for schema versions 1 and 2.
 //!
 //! These structs are the contract only: nothing here starts a browser, injects
-//! a fingerprint, generates noise from the seed, or talks to a pool service.
+//! a fingerprint, generates noise from the seed, talks to a pool service, or
+//! applies a WebRTC policy anywhere. Schema 2 adds one field to the wire
+//! format; it does not claim the value has any runtime effect.
 
 use std::collections::BTreeMap;
 
@@ -10,8 +12,39 @@ use serde::{Deserialize, Serialize};
 use crate::error::ProfileError;
 use crate::validate;
 
-/// The only schema version this contract accepts.
-pub const SCHEMA_VERSION: u32 = 1;
+/// Schema version 1: the frozen original wire layout.
+pub const SCHEMA_VERSION_V1: u32 = 1;
+
+/// Schema version 2: identical to version 1 except for one additional byte,
+/// `webrtc_ip_handling_policy`, written after `locale.timezone` and before the
+/// slot count.
+pub const SCHEMA_VERSION_V2: u32 = 2;
+
+/// Highest accepted `webrtc_ip_handling_policy` code (the wire byte is 0..=3).
+pub const MAX_WEBRTC_POLICY_CODE: u8 = 3;
+
+/// The `webrtc_ip_handling_policy` wire byte, kept as a raw code.
+///
+/// This type carries a *claim* only: encoding it into a profile says which
+/// policy the environment is supposed to run under. This crate never applies
+/// it, and nothing here makes a browser honor it. The code set is deliberately
+/// closed at 0..=[`MAX_WEBRTC_POLICY_CODE`](crate::MAX_WEBRTC_POLICY_CODE) so a
+/// future code cannot be silently smuggled into a digest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WebRtcIpHandlingPolicy(pub u8);
+
+impl WebRtcIpHandlingPolicy {
+    /// The wire byte.
+    pub fn code(self) -> u8 {
+        self.0
+    }
+
+    /// Whether the code is inside the closed schema 2 set.
+    pub fn is_supported(self) -> bool {
+        self.0 <= MAX_WEBRTC_POLICY_CODE
+    }
+}
 
 /// Maximum accepted length (in ASCII characters) for identifier-like fields.
 pub const MAX_IDENTIFIER_LEN: usize = 64;
@@ -124,7 +157,7 @@ impl Default for LocaleSpec {
 /// contract never rewrites an `environment_id` behind a caller's back.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProfileSpecV1 {
+pub struct ProfileSpec {
     pub schema_version: u32,
     pub environment_id: String,
     pub pool_version: String,
@@ -134,13 +167,19 @@ pub struct ProfileSpecV1 {
     pub screen: ScreenSpec,
     pub hardware: HardwareSpec,
     pub locale: LocaleSpec,
+    /// Schema 2 only: the claimed Blink WebRTC IP handling policy code
+    /// (0..=3). None is legal only for schema 1; a schema 2 profile must
+    /// carry Some, and a schema 1 profile must carry None. This is a
+    /// *claim*: this crate never applies it to any browser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webrtc_ip_handling_policy: Option<WebRtcIpHandlingPolicy>,
     /// Dimension name -> tier (slot) id. The key set must be exactly
     /// [`DIMENSIONS`](crate::DIMENSIONS): no missing entry, no extra entry.
     #[serde(deserialize_with = "crate::json::unique_map")]
     pub slots: BTreeMap<String, u32>,
 }
 
-impl ProfileSpecV1 {
+impl ProfileSpec {
     /// Whether `dimension` is one of the supported slot dimensions.
     pub fn is_supported_dimension(dimension: &str) -> bool {
         crate::DIMENSIONS.contains(&dimension)
@@ -157,9 +196,7 @@ impl ProfileSpecV1 {
     /// Parse profile JSON, then [`validate`](Self::validate).
     pub fn from_json_str(text: &str) -> Result<Self, ProfileError> {
         crate::json::check_size(text, crate::MAX_PROFILE_JSON_BYTES)?;
-        let spec: Self = serde_json::from_str(text).map_err(deser_error)?;
-        spec.validate()?;
-        Ok(spec)
+        serde_json::from_str(text).map_err(deser_error)
     }
 
     /// Serialize to JSON (field order follows this struct declaration).

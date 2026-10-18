@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lengsuo_browser_profile::{DimensionPools, Platform, PoolCatalogV1, ProfileSpecV1};
+use lengsuo_browser_profile::{DimensionPools, Platform, PoolCatalogV1, ProfileSpec};
 
 /// A schema-1 profile that satisfies the contract, serialized as JSON text
 /// with every field present and correctly typed.
@@ -111,8 +111,8 @@ pub fn json_with_field(field: &str, value_json: &str) -> String {
 
 /// Parse `VALID_JSON` into a validated profile. Panics with the parse error so
 /// a fixture problem is never mistaken for a product bug.
-pub fn valid_profile() -> ProfileSpecV1 {
-    let spec = ProfileSpecV1::from_json_str(VALID_JSON)
+pub fn valid_profile() -> ProfileSpec {
+    let spec = ProfileSpec::from_json_str(VALID_JSON)
         .unwrap_or_else(|e| panic!("fixture JSON must be valid: {e}"));
     spec.validate()
         .unwrap_or_else(|e| panic!("fixture profile must validate: {e}"));

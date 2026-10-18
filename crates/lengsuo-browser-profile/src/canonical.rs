@@ -1,7 +1,7 @@
 //! Deterministic canonical byte encoding and identity digest.
 //!
 //! The encoding is deliberately *not* JSON. Field order is fixed by
-//! [`encode`] below (matching the declaration order of [`ProfileSpecV1`]),
+//! [`encode`] below (matching the declaration order of [`ProfileSpec`]),
 //! integers are big-endian, strings are `u16` length-prefixed UTF-8, and the
 //! slot map is written in `BTreeMap` (lexicographic) key order. Consequences:
 //!
@@ -16,13 +16,13 @@
 //! invites accidental identity confusion (logs, caches and dedup keyed by
 //! digest would silently merge distinct environments). Creating a second
 //! environment identity is instead an explicit
-//! [`clone_as_environment`](crate::ProfileSpecV1::clone_as_environment) call,
+//! [`clone_as_environment`](crate::ProfileSpec::clone_as_environment) call,
 //! and the resulting profile necessarily has a different digest.
 
 use sha2::{Digest, Sha256};
 
 use crate::error::ProfileError;
-use crate::spec::ProfileSpecV1;
+use crate::spec::ProfileSpec;
 
 /// Prefix mixed into the digest so a profile digest is not interchangeable with
 /// the bare SHA-256 of some other byte string. Terminated by `0x00`.
@@ -48,7 +48,7 @@ fn platform_code(p: crate::spec::Platform) -> u8 {
     }
 }
 
-pub(crate) fn encode(spec: &ProfileSpecV1) -> Result<Vec<u8>, ProfileError> {
+pub(crate) fn encode(spec: &ProfileSpec) -> Result<Vec<u8>, ProfileError> {
     let mut out: Vec<u8> = Vec::with_capacity(96);
     out.extend_from_slice(CANONICAL_HEADER);
     out.extend_from_slice(&spec.schema_version.to_be_bytes());
@@ -71,6 +71,14 @@ pub(crate) fn encode(spec: &ProfileSpecV1) -> Result<Vec<u8>, ProfileError> {
     // locale
     push_str(&mut out, &spec.locale.language)?;
     push_str(&mut out, &spec.locale.timezone)?;
+    // Schema 2 only: the policy byte sits after timezone and before the
+    // slot count. It is written explicitly from the field rather than by
+    // encoding a schema 1 stream and splicing a byte in afterwards, so the
+    // schema 2 layout is produced directly and every following field keeps
+    // its frozen offset.
+    if let Some(policy) = spec.webrtc_ip_handling_policy {
+        out.push(policy.code());
+    }
     // slots, in BTreeMap order
     let count = u16::try_from(spec.slots.len())
         .map_err(|_| ProfileError::Canonical("too many slot entries"))?;

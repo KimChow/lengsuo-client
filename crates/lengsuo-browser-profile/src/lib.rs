@@ -1,7 +1,7 @@
 //! Versioned browser environment profile contract (`lengsuo-browser-profile`).
 //!
 //! This crate owns the *data contract* for a fingerprint browser environment
-//! profile: the frozen [`ProfileSpecV1`] structure, its validation rules, the
+//! profile: the frozen [`ProfileSpec`] structure, its validation rules, the
 //! deterministic canonical encoding plus SHA-256 identity digest, and the
 //! [`PoolCatalogV1`] slot-pool manifest used to reject unknown tier ids.
 //!
@@ -30,8 +30,9 @@ pub use catalog::{DimensionPools, PoolCatalogV1, Reject};
 pub use error::ProfileError;
 pub use json::{MAX_CATALOG_JSON_BYTES, MAX_PROFILE_JSON_BYTES};
 pub use spec::{
-    HardwareSpec, LocaleSpec, Platform, ProfileSpecV1, ScreenSpec, MAX_IDENTIFIER_LEN,
-    NOISE_SEED_HEX_LEN, SCHEMA_VERSION,
+    HardwareSpec, LocaleSpec, Platform, ProfileSpec, ScreenSpec, WebRtcIpHandlingPolicy,
+    MAX_IDENTIFIER_LEN, MAX_WEBRTC_POLICY_CODE, NOISE_SEED_HEX_LEN, SCHEMA_VERSION_V1,
+    SCHEMA_VERSION_V2,
 };
 pub use validate::{
     DIMENSIONS, MAX_CPU_CORES, MAX_DPR_MILLI, MAX_LANGUAGE_LEN, MAX_MEMORY_MIB, MAX_SCREEN_AREA,

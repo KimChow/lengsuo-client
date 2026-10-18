@@ -6,7 +6,7 @@ use lengsuo_browser_profile::{Platform, ProfileError, DIMENSIONS};
 mod support;
 use support::{mobile_spec, spec};
 
-fn rejected(spec: &lengsuo_browser_profile::ProfileSpecV1) -> ProfileError {
+fn rejected(spec: &lengsuo_browser_profile::ProfileSpec) -> ProfileError {
     match spec.validate() {
         Ok(()) => panic!("profile must be rejected: {spec:?}"),
         Err(err) => err,

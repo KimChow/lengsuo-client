@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use lengsuo_browser_profile::{
-    HardwareSpec, LocaleSpec, Platform, ProfileSpecV1, ScreenSpec, CANONICAL_DOMAIN,
-    CANONICAL_HEADER, DIMENSIONS, SCHEMA_VERSION,
+    HardwareSpec, LocaleSpec, Platform, ProfileSpec, ScreenSpec, CANONICAL_DOMAIN,
+    CANONICAL_HEADER, DIMENSIONS, SCHEMA_VERSION_V1,
 };
 
 mod support;
@@ -29,7 +29,7 @@ fn from_hex(text: &str) -> Vec<u8> {
 }
 
 /// Independent re-implementation of the documented canonical format.
-fn reference_canonical(p: &ProfileSpecV1) -> Vec<u8> {
+fn reference_canonical(p: &ProfileSpec) -> Vec<u8> {
     fn u16(out: &mut Vec<u8>, v: u16) {
         out.extend_from_slice(&v.to_be_bytes());
     }
@@ -73,9 +73,9 @@ fn reference_canonical(p: &ProfileSpecV1) -> Vec<u8> {
     out
 }
 
-fn golden_profile() -> ProfileSpecV1 {
-    ProfileSpecV1 {
-        schema_version: SCHEMA_VERSION,
+fn golden_profile() -> ProfileSpec {
+    ProfileSpec {
+        schema_version: SCHEMA_VERSION_V1,
         environment_id: "env-1".to_string(),
         pool_version: "p1".to_string(),
         noise_version: 1,
@@ -96,6 +96,7 @@ fn golden_profile() -> ProfileSpecV1 {
             language: "en-US".to_string(),
             timezone: "UTC".to_string(),
         },
+        webrtc_ip_handling_policy: None,
         slots: slots(),
     }
 }
@@ -148,7 +149,7 @@ fn serialization_and_digest_are_deterministic() {
     }
     // A rebuilt-but-equal profile gives the same bytes.
     let text = serde_json::to_string(&p).unwrap();
-    let rebuilt = ProfileSpecV1::from_json_str(&text).unwrap();
+    let rebuilt = ProfileSpec::from_json_str(&text).unwrap();
     assert_eq!(rebuilt, p);
     assert_eq!(rebuilt.canonical_bytes().unwrap(), first);
     assert_eq!(rebuilt.identity_digest().unwrap(), GOLDEN_DIGEST);
@@ -164,12 +165,12 @@ fn serialization_and_digest_are_deterministic() {
     })
     .unwrap();
     assert_eq!(
-        ProfileSpecV1::from_json_str(&reordered).unwrap(),
+        ProfileSpec::from_json_str(&reordered).unwrap(),
         p,
         "BTreeMap must normalize slot order"
     );
     assert_eq!(
-        ProfileSpecV1::from_json_str(&reordered)
+        ProfileSpec::from_json_str(&reordered)
             .unwrap()
             .canonical_bytes()
             .unwrap(),

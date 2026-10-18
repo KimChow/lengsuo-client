@@ -1,5 +1,5 @@
 //! Ambiguous map entries and excessive JSON envelopes fail closed.
-use lengsuo_browser_profile::{PoolCatalogV1, ProfileSpecV1};
+use lengsuo_browser_profile::{PoolCatalogV1, ProfileSpec};
 mod support;
 
 #[test]
@@ -7,7 +7,7 @@ fn duplicate_slot_dimension_is_rejected() {
     let text = support::spec().to_json_string().unwrap();
     let duplicate = text.replace("\"slots\":{", "\"slots\":{\"canvas\":2,");
     assert_ne!(text, duplicate);
-    assert!(ProfileSpecV1::from_json_str(&duplicate).is_err());
+    assert!(ProfileSpec::from_json_str(&duplicate).is_err());
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn duplicate_catalog_dimension_is_rejected() {
 fn escaped_duplicate_dimension_is_rejected() {
     let text = support::spec().to_json_string().unwrap();
     let duplicate = text.replace("\"slots\":{", r#""slots":{"canv\u0061s":2,"#);
-    assert!(ProfileSpecV1::from_json_str(&duplicate).is_err());
+    assert!(ProfileSpec::from_json_str(&duplicate).is_err());
 }
 
 #[test]
@@ -34,10 +34,10 @@ fn envelope_limits_are_separate_from_native_encoding() {
         MAX_PROFILE_JSON_BYTES - text.len(),
     ));
     assert!(text.len() > 4096);
-    assert!(ProfileSpecV1::from_json_str(&text).is_ok());
+    assert!(ProfileSpec::from_json_str(&text).is_ok());
     text.push(' ');
     assert!(matches!(
-        ProfileSpecV1::from_json_str(&text),
+        ProfileSpec::from_json_str(&text),
         Err(ProfileError::JsonTooLarge { .. })
     ));
     let text = " ".repeat(MAX_CATALOG_JSON_BYTES + 1);

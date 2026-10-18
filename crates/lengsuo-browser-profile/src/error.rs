@@ -10,8 +10,16 @@ pub enum ProfileError {
     #[error("JSON envelope has {bytes} bytes, above limit {limit}")]
     JsonTooLarge { bytes: usize, limit: usize },
 
-    #[error("schema_version {0} is not supported (expected 1)")]
+    #[error("schema_version {0} is not supported (expected 1 or 2)")]
     SchemaVersion(u32),
+    #[error("webrtc_ip_handling_policy code {0} is outside the schema 2 set 0..=3")]
+    WebRtcPolicyValue(u8),
+    #[error("schema 2 requires an explicit webrtc_ip_handling_policy; it is never defaulted")]
+    MissingWebRtcPolicy,
+    #[error(
+        "webrtc_ip_handling_policy is a schema 2 field and must not appear in a schema 1 profile"
+    )]
+    WebRtcPolicyInSchemaV1,
 
     #[error("noise_version {0} is not supported (expected 1)")]
     NoiseVersion(u32),

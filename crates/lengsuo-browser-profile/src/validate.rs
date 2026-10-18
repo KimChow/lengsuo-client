@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::ProfileError;
-use crate::spec::{ProfileSpecV1, MAX_IDENTIFIER_LEN, NOISE_SEED_HEX_LEN, SCHEMA_VERSION};
+use crate::spec::{ProfileSpec, MAX_IDENTIFIER_LEN, NOISE_SEED_HEX_LEN, SCHEMA_VERSION_V1};
 
 /// The dimensions a schema-1 profile must cover **exactly**: no missing entry,
 /// no extra entry. This order is also the canonical slot iteration order
@@ -168,7 +168,7 @@ fn check_hardware(spec: &crate::spec::HardwareSpec) -> Result<(), ProfileError> 
 }
 
 /// Mobile platforms must claim touch capability, desktop ones must not.
-fn check_touch(spec: &ProfileSpecV1) -> Result<(), ProfileError> {
+fn check_touch(spec: &ProfileSpec) -> Result<(), ProfileError> {
     let points = u64::from(spec.hardware.max_touch_points);
     if spec.platform.is_mobile() {
         if points < 1 || points > u64::from(MAX_TOUCH_POINTS) {
@@ -268,9 +268,21 @@ fn check_slots(slots: &BTreeMap<String, u32>) -> Result<(), ProfileError> {
     Ok(())
 }
 
-pub(crate) fn validate_spec(spec: &ProfileSpecV1) -> Result<(), ProfileError> {
-    if spec.schema_version != SCHEMA_VERSION {
-        return Err(ProfileError::SchemaVersion(spec.schema_version));
+pub(crate) fn validate_spec(spec: &ProfileSpec) -> Result<(), ProfileError> {
+    match spec.schema_version {
+        SCHEMA_VERSION_V1 => {
+            if spec.webrtc_ip_handling_policy.is_some() {
+                return Err(ProfileError::WebRtcPolicyInSchemaV1);
+            }
+        }
+        crate::spec::SCHEMA_VERSION_V2 => match spec.webrtc_ip_handling_policy {
+            None => return Err(ProfileError::MissingWebRtcPolicy),
+            Some(policy) if !policy.is_supported() => {
+                return Err(ProfileError::WebRtcPolicyValue(policy.code()));
+            }
+            Some(_) => {}
+        },
+        other => return Err(ProfileError::SchemaVersion(other)),
     }
     if spec.noise_version != NOISE_VERSION {
         return Err(ProfileError::NoiseVersion(spec.noise_version));
