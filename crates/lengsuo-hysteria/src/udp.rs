@@ -36,8 +36,9 @@
 //!
 //! 本模块只是消息层：QUIC 连接与 datagram 中继、HTTP/3 伪装与认证、分片重组、
 //! Salamander 混淆都不在这里。与原生 apernet/hysteria 服务端的真实互通尚未验收，
-//! 因此不宣称兼容；测试见 `tests/udp_reference.rs`（黄金字节由 Python `struct.pack`
-//! 独立生成）。
+//! 因此不宣称兼容；测试见 `tests/udp_go_vectors.rs`（黄金字节由参考 Go 代码
+//! 逐字抄录实现后**实跑**生成，覆盖 IPv4/IPv6/域名与长度边界）与
+//! `tests/udp_reference.rs`（结构、错误与边界用例）。
 //!
 //! 另注：本 crate 的 `connect_udp.rs`（CONNECT-UDP capsule，帧类型 0x402）是本仓
 //! 自造的消息层，与本模块的官方 `UDPMessage` 是两种不同格式，不能互相替代，
