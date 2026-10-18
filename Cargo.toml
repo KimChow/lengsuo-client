@@ -31,6 +31,7 @@ members = [
     "crates/lengsuo-browser-signature",
     "crates/lengsuo-browser-package",
     "crates/lengsuo-browser-lifecycle",
+    "crates/agent-sandbox",
 ]
 
 [workspace.package]
