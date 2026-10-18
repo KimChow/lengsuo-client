@@ -1,6 +1,7 @@
-# lengsuo-client
+# lengsuo-network
 
-客户端独立开发仓，源码可查看，**不授予开源许可**。
+网络数据面独立开发仓，源码可查看，**不授予开源许可**。
+（2026-10-19 由 `lengsuo-client` 更名；拆出智能体线后本仓只承载网络协议与浏览器组件，故更名。）
 
 | crate | 职责 | 当前状态 |
 |---|---|---|
@@ -8,6 +9,9 @@
 | `crates/ss-core` | 两端共享地址、KDF、AEAD、TCP chunk | 部分原语实现，未完成 Xray 互通验收 |
 | `crates/lengsuo-*` | 八协议、TUN、环境出口隔离 | 协议原语已实现，完整互通待验收 |
 | `crates/lengsuo-browser-*` | 指纹浏览器底层组件（profile/signature/package/lifecycle/installer/state） | 组件级验收，运行器未交付 |
+
+> 注：`ss-client` / `ss-core` / `ss-cli` 中的 "client" 指 Shadowsocks **协议角色**（client/server 两端），
+> 与仓名无关，更名时**不随之改动**。
 
 服务端位于独立 GitLab 私有仓，本仓构建不需要服务端源码或私有仓权限。
 2026-10-15 更新：本批 Rust 网络能力集中在本仓，包括八协议、TUN、环境出口隔离和 VPS 工具；不拆协议仓。平台私有业务仍留在 GitLab。现有私有服务端固定 revision 依赖在明确更新前保持不变。

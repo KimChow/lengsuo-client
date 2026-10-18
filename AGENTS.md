@@ -1,9 +1,10 @@
-# lengsuo-client AI 与协作规则
+# lengsuo-network AI 与协作规则
 
 ## 1. 仓库与边界（已确定）
 
 - 本地独立目录：`D:/OneDrive/project/lengsuo-client`。
-- GitHub：`KimChow/lengsuo-client`，源码可查看，不等于开源授权。
+- GitHub：`KimChow/lengsuo-network`，源码可查看，不等于开源授权。
+- 2026-10-19 由 `lengsuo-client` 更名而来（GitHub 保留旧名重定向）；智能体线已拆至 `KimChow/lengsuo-agent`。
 - 本仓是客户端真实开发仓，不是私有仓抽取镜像。
 - `crates/ss-client`：客户端连接、本地入站与客户端错误处理。
 - 2026-10-15 用户更新：本批 Rust 网络能力统一放在本仓，包括八协议、客户端出口运行时、TUN、环境网络隔离、出口程序和 VPS 工具；不拆协议仓。私有平台业务、权限与计费仍在私有仓。
