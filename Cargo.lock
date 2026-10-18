@@ -41,6 +41,7 @@ dependencies = [
 name = "agent-core"
 version = "0.1.0"
 dependencies = [
+ "agent-execpolicy",
  "agent-memory",
  "agent-prompts",
  "chrono",

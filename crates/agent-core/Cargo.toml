@@ -7,6 +7,7 @@ authors.workspace = true
 description = "智能体运行时核心：会话/事件 schema、事件日志、工具注册表、权限门与脱敏（纯域逻辑，不依赖 tokio）"
 
 [dependencies]
+agent-execpolicy = { path = "../agent-execpolicy" }
 agent-memory = { path = "../agent-memory" }
 agent-prompts = { path = "../agent-prompts" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
