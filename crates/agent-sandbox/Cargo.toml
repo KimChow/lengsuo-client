@@ -12,7 +12,18 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+# 最小 feature 集：令牌（Security/Authorization）、进程与管道（Threading/Pipes）、
+# 文件读（Storage_FileSystem + System_IO，ReadFile 的 OVERLAPPED 参数需要后者）。
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

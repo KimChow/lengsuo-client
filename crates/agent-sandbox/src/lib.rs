@@ -2,8 +2,11 @@
 //!
 //! 平台抽象（`SandboxType` / `SandboxablePreference` / `get_platform_sandbox` / 降级链）
 //! 语义对照 codex（`codex-rs/protocol/src/sandbox.rs`、`codex-rs/sandboxing/src/manager.rs`）。
-//! 本卡交付 Linux（bwrap + seccomp profile 构造）完整实现；
-//! macOS 为编译通过的 TODO 骨架；Windows 为 fail-closed 桩（后续卡实现）。
+//! Linux（bwrap + seccomp profile 构造）与 Windows（受限令牌）为完整实现；
+//! macOS 为编译通过的 TODO 骨架。
+//!
+//! `windows` 模块在**所有平台**编译：其中 [`windows::construct`] 是不依赖 `target_os` 的纯构造层
+//! （命令行/env/探测计划/deny 名单），windows-sys FFI 部分仅 `cfg(windows)`。
 
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 // windows.rs 的只读 FFI 探测（GetModuleHandleW/GetProcAddress）是本 crate 唯一 unsafe 例外，
@@ -34,7 +37,8 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{get_platform_sandbox, run_sandboxed};
 
-#[cfg(windows)]
+// `windows` 模块整体在所有平台编译：`windows::construct` 是纯构造层（47 上可单测），
+// 只有 token/acl/process 与其公共 API 是 `cfg(windows)`。
 pub mod windows;
 #[cfg(windows)]
 pub use windows::{get_platform_sandbox, restricted_token_available, run_sandboxed};
