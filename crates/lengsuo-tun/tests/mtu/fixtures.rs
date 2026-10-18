@@ -4,12 +4,12 @@
 //! 运行。报文由测试侧独立构造，校验和用测试侧独立算法核对，不复用被测实现，
 //! 因此这些断言只证明生成器与 RFC 描述一致，不代表真实链路或协议栈互通。
 
-use lengsuo_tun::mtu::{
+pub use lengsuo_tun::mtu::{
     carried_prefix, decide, decide_from, error_packet, Decision, Direction, Error, IpVersion,
     MAX_MTU_V4_FIELD, MIN_PATH_MTU_V4, MIN_PATH_MTU_V6,
 };
-use lengsuo_tun::packet::Error as PacketError;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+pub use lengsuo_tun::packet::Error as PacketError;
+pub use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub const SOURCE_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 pub const DEST_V4: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 7);
@@ -126,4 +126,3 @@ pub fn v6_tcp(body: usize) -> Vec<u8> {
 }
 
 // --------------------------------------------------------------- 判定边界
-
