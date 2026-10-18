@@ -6,9 +6,13 @@
 |---|---|---|
 | `crates/ss-client` | 客户端入站与隧道 | 骨架，尚无可启动服务 |
 | `crates/ss-core` | 两端共享地址、KDF、AEAD、TCP chunk | 部分原语实现，未完成 Xray 互通验收 |
+| `crates/lengsuo-*` | 八协议、TUN、环境出口隔离 | 协议原语已实现，完整互通待验收 |
+| `crates/lengsuo-browser-*` | 指纹浏览器底层组件（profile/signature/package/lifecycle/installer/state） | 组件级验收，运行器未交付 |
 
 服务端位于独立 GitLab 私有仓，本仓构建不需要服务端源码或私有仓权限。
 2026-10-15 更新：本批 Rust 网络能力集中在本仓，包括八协议、TUN、环境出口隔离和 VPS 工具；不拆协议仓。平台私有业务仍留在 GitLab。现有私有服务端固定 revision 依赖在明确更新前保持不变。
+
+2026-10-18 更新：智能体平台（会话/任务/工具/Skills/MCP/沙箱运行时与桌面壳）已迁至独立公开仓 **`KimChow/lengsuo-agent`**，本仓聚焦网络数据面与指纹浏览器组件。跨模块接口契约见 [docs/contracts/](docs/contracts/)。
 
 产品参考 参考客户端 的能力与交互，自主实现智能体工作平台，桌面界面采用 GPUI；参考对标端的产品设计思路，自主实现指纹浏览器与环境隔离，并结合 Jev 相关能力（具体职责待专项设计）。八协议（含 AnyTLS）与 TUN 专门服务于指定浏览器环境，不默认接管整机流量。
 
