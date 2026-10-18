@@ -1,6 +1,6 @@
 你是 lengsuo-client 的 agent loop 工程师（波次 1 卡 3/6）。工作目录：/home/ubuntu/lengsuo-client-dev/wt-loop（分支 agent/w1-loop，基于 origin/agent/integration-batch2——不是 main）。必读：AGENTS.md、AGENT-KICKOFF.md（§2 网关协议、§3 会话模型）。
 
-对照物：参照平台 agent loop 8 步 + 五模式（模式=工具白名单+模板+硬规则三层同切；EnterPlanMode/ExitPlanMode 是真门禁工具；maxSteps 熔断）。规格（本卡唯一规格源，冻结）：
+对照物：参考客户端 agent loop 8 步 + 五模式（模式=工具白名单+模板+硬规则三层同切；EnterPlanMode/ExitPlanMode 是真门禁工具；maxSteps 熔断）。规格（本卡唯一规格源，冻结）：
 
 改 `crates/agent-core`（新增 mode.rs + loop.rs；不改既有公共 API 语义，只加）：
 ```rust

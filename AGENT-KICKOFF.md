@@ -3,7 +3,7 @@
 > **性质**：本文是轨道 D（智能体运行时）与轨道 E（GPUI 壳）开工的接口说明与任务分工，执行「新模块先说明接口、兼容范围和测试计划」门禁；用户已拍板开工（2026-10-16，见 [v1-scope-freeze](v1-scope-freeze.md) 变更记录）。
 > **工作仓**：`lengsuo-client`（GitHub 公开）；1.47 研究机隔离 worktree 开发，各自分支，**不直接 push main**。
 > **规则**：单文件 700 硬 / 400 软；TDD 先失败再实现；基线不绿不得合并；功能完成后同批次更新文档；生产网络代码无 unsafe；GPL/AGPL/SSPL 不进依赖。
-> **行为基线**：[参照平台行为基线](reference-platform-agent-baseline.md)；存储拍板 N9（不用 SQLite）；权限 deny-by-default。
+> **行为基线**：[参考客户端 行为基线](ref-client-agent-baseline.md)；存储拍板 N9（不用 SQLite）；权限 deny-by-default。
 
 ## 1. Crate 划分（lengsuo-client workspace 新成员）
 
@@ -20,7 +20,7 @@
 
 - 监听：`127.0.0.1` **随机端口** + 握手文件 `%LOCALAPPDATA%/lengsuo/gateway.json`（`{port, pid, token}`，文件 ACL 限当前用户）；token 启动时生成，**退出即失效**。
 - RPC：单入口 `POST /rpc`，body `{action: "<域>:<动作>", payload}`；信封 `{code, msg, data}`（`code==0` 成功；404 未注册动作、403 鉴权拒绝、408 超时；其余按 server-contract 错误码段）。默认 30s 超时。
-- 事件：`GET /events`（WebSocket）；事件名 `thinking / text / tool_use / tool_result / approval_request / files / done`（参照平台基线 §5）+ `session_update`；一行一个 JSON。
+- 事件：`GET /events`（WebSocket）；事件名 `thinking / text / tool_use / tool_result / approval_request / files / done`（参考客户端 基线 §5）+ `session_update`；一行一个 JSON。
 - v0 动作面：`session:list/create/get/send/stop`、`approval:respond`、`config:get/set`、`tool:list`、`sys:ping`。其余动作 404，不预留半成品。
 - 鉴权：所有请求头 `X-Gateway-Token`；失败 403；登录态/租户隔离键随 payload（v0 单用户本地，字段预留）。
 
@@ -35,12 +35,12 @@ Message { role: user|assistant|tool_call|tool_result, content, tool?: {name, arg
 Event  { seq, session_id, kind, payload, ts_ms }   // seq 会话内单调递增（N12 分页回溯锚点）
 ```
 
-- 大结果/附件**不进** `content`（存引用 `result_ref` + 按需取用）——防分页回溯被大输出打爆（参照平台基线 §5 警告项）。
-- 消息四类与崩溃恢复语义照 参照平台基线（历史重放不重跑工具）。
+- 大结果/附件**不进** `content`（存引用 `result_ref` + 按需取用）——防分页回溯被大输出打爆（参考客户端 基线 §5 警告项）。
+- 消息四类与崩溃恢复语义照 参考客户端 基线（历史重放不重跑工具）。
 
 ## 4. 权限门 v0（运行时强制）
 
-- 三态 ask/auto/deny；**默认 deny**，显式配置才放行（收紧 参照平台 默认矩阵）。
+- 三态 ask/auto/deny；**默认 deny**，显式配置才放行（收紧 参考客户端 默认矩阵）。
 - 工具白名单按模式切换（quick 无工具仍有硬规则占位）；敏感动作表（`rm -rf`/强推/格式化等正则）强制 ask，不可配置跳过。
 - 审批事件 `approval_request` 挂起等待 `approval:respond`，带超时（默认 120s → deny）。
 - 凭据只以 `cred_ref` 出现在工具参数；任何工具输出先过脱敏过滤器（密码/token 正则族）再进事件流。

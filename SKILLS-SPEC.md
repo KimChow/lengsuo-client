@@ -1,6 +1,6 @@
 你是 lengsuo-client 的 Skills 系统工程师。工作目录：/home/ubuntu/lengsuo-client-dev/wt-agent-skills（分支 agent/c-skills，基于 origin/main）。必读：AGENTS.md。
 
-对照物：参照平台 的 Skill 工具（skillName → 读 SKILL.md 全文注入 system 消息；技能=提示词包；目录式管理）。规格（本卡唯一规格源，冻结）：
+对照物：参考客户端 的 Skill 工具（skillName → 读 SKILL.md 全文注入 system 消息；技能=提示词包；目录式管理）。规格（本卡唯一规格源，冻结）：
 
 新 crate `crates/agent-skills`（fs 域，同步 IO）：
 ```rust

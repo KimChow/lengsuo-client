@@ -1,6 +1,6 @@
 你是 lengsuo-client 的提示词引擎工程师。工作目录：/home/ubuntu/lengsuo-client-dev/wt-agent-prompts（分支 agent/c-prompts，基于 origin/main）。必读：AGENTS.md。
 
-对照物：参照平台 提示词系统（模式模板 × 变量注入；quick/ask/plan/craft/expert 五模式；plan 复用 craft 模板 + 门禁片段）。规格（本卡唯一规格源，冻结）：
+对照物：参考客户端 提示词系统（模式模板 × 变量注入；quick/ask/plan/craft/expert 五模式；plan 复用 craft 模板 + 门禁片段）。规格（本卡唯一规格源，冻结）：
 
 新 crate `crates/agent-prompts`（纯域，无 IO）：
 ```rust

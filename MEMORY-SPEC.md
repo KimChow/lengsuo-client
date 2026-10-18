@@ -1,6 +1,6 @@
 # 三层记忆系统规格 v0（agent-memory crate）
 
-> **来源**：参照平台行为基线 §6（三层记忆 + 身份文件）+ [产品与协作约定](product-direction.md) §3（会话默认本地保存、跨会话记忆单独开启、可查看/删除/保留期限）。本文是 `agent-memory` crate 与 agent-core 集成的唯一规格源。
+> **来源**：参考客户端 行为基线 §6（三层记忆 + 身份文件）+ [产品与协作约定](product-direction.md) §3（会话默认本地保存、跨会话记忆单独开启、可查看/删除/保留期限）。本文是 `agent-memory` crate 与 agent-core 集成的唯一规格源。
 > **规则**：TDD 先失败再实现；单文件 ≤700（400 软）；no unsafe；凭据/密钥绝不写入任何记忆文件或日志。
 
 ## 1. 三层结构（目录约定）
@@ -12,7 +12,7 @@
 | 项目记忆 | `<workspace>/.lengsuo/memory/MEMORY.md` | ≤3000 字符 | AI 显式写 |
 | 项目日志 | `<workspace>/.lengsuo/memory/YYYY-MM-DD.md` | 追加式（append-only，无上限） | AI 完成实质工作后追加摘要 |
 
-- 目录名固定 `.lengsuo`（不是 参照平台 的 `.reference-dir`）；日期用本地日期（YYYY-MM-DD）。
+- 目录名固定 `.lengsuo`（不是 参考客户端 的 `.reference-dir`）；日期用本地日期（YYYY-MM-DD）。
 - 所有文件 UTF-8；缺失文件 = 空内容（不是错误）。
 
 ## 2. 开关与隐私（冻结）
@@ -56,7 +56,7 @@ pub enum MemoryError { Disabled, CapExceeded { cap: usize, len: usize }, Io { pa
 
 - 字符计数按 `chars().count()`（不是字节）。
 - `append_daily` 幂等性不做（调用方去重）；文件不存在则创建（含父目录）。
-- compose 的 daily_tail 取**当日**文件（非当日则 None——参照平台语义：只注入当日日志尾部）。
+- compose 的 daily_tail 取**当日**文件（非当日则 None——参考客户端 语义：只注入当日日志尾部）。
 
 ## 4. 注入语义（agent-core 集成，第二张卡）
 
