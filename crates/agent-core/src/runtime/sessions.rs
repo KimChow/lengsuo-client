@@ -1,5 +1,7 @@
 //! 会话生命周期：创建、查询、列表、更新与状态迁移。
 
+use std::sync::{Arc, Mutex};
+
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -52,6 +54,7 @@ impl Runtime {
             id,
             HotSession {
                 session: session.clone(),
+                drain: Arc::new(Mutex::new(())),
             },
         );
         self.emit(

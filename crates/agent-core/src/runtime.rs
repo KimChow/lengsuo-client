@@ -66,6 +66,8 @@ pub struct TurnReceipt {
 /// 会话热态记录。
 struct HotSession {
     session: Session,
+    /// 单队列投递锁：同一会话的回合串行执行，后到的输入不插入进行中的步。
+    drain: Arc<Mutex<()>>,
 }
 
 /// 运行时句柄（克隆共享）。
