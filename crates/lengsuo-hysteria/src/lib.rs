@@ -1,22 +1,26 @@
 #![forbid(unsafe_code)]
 //! lengsuo-hysteria — Hysteria2 帧原语：QUIC varint、TCP 请求/响应、
-//! CONNECT-UDP 消息层与 padding 长度策略。
+//! CONNECT-UDP 消息层、padding 长度策略与 UDP 分片重组。
 //!
 //! 已有：RFC 9000 变长整数（规范最短编码、允许非最短解码）、
 //! TCPRequest（帧类型 0x401 + 地址 + padding）与 TCPResponse（状态 +
 //! 消息 + padding）的安全编解码、CONNECT-UDP 请求（类型 0x402）与响应
-//! 的消息层编解码（含 `decode_exact` 精确长度一致性检查），以及 padding.go
-//! 的填充长度策略（半开区间 + `SegmentSize` 上下取整，纯函数、随机由调用方注入）。
+//! 的消息层编解码（含 `decode_exact` 精确长度一致性检查）、padding.go
+//! 的填充长度策略（半开区间 + `SegmentSize` 上下取整，纯函数、随机由调用方注入），
+//! 以及 `frag.go` 的 UDP 分片重组状态机与切片判据（`fragment.rs`，
+//! 只维持单个 packet 的半截状态，与参考同形）。
 //! 解析返回精确消耗长度，帧之后的字节保留给应用载荷，不吞掉任何数据。
 //!
 //! 尚未实现：QUIC 连接与流、HTTP/3 伪装与 `POST /auth` 认证（含认证 token 的
-//! QUIC TLS transcript 派生）、UDP 分片重组与中继调度、Salamander 混淆、以及与
+//! QUIC TLS transcript 派生）、UDP 中继调度、Salamander 混淆、以及与
 //! apernet/hysteria 的真实互通验收。UDP 中继报文本身的消息层字节编解码见
-//! `udp.rs`（消息层原语，不等于 UDP 中继已实现）。
+//! `udp.rs`（消息层原语，不等于 UDP 中继已实现）；分片重组与切片见
+//! `fragment.rs`（纯内存状态机，不等于 UDP 中继已实现）。
 //! 本 crate 不能作为可用 Hysteria2 客户端或服务端发布。
 //! 状态与验证记录见 `docs/hysteria-status.md`。
 
 pub mod connect_udp;
+pub mod fragment;
 mod frame;
 pub mod padding;
 pub mod tcp;
