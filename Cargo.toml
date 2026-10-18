@@ -24,6 +24,7 @@ members = [
     "crates/agent-mcp",
     "crates/agent-tasks",
     "crates/agent-skills",
+    "crates/agent-acp",
     "crates/agent-prompts",
     "crates/agent-execpolicy",
     "crates/lengsuo-browser-state",
