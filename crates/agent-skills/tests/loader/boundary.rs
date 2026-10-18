@@ -4,9 +4,8 @@
 use std::fs;
 
 use agent_skills::{InvocationSource, SkillCatalog};
-use tempfile::TempDir;
 
-use crate::{catalog_for, host_tools, make_skill, names_of, plain, two_roots};
+use crate::{catalog_for, host_tools, names_of, two_roots};
 
 #[cfg(unix)]
 #[test]
