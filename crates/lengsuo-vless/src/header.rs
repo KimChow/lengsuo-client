@@ -27,12 +27,45 @@ pub struct Request {
     pub target: TargetAddr,
 }
 
+/// 请求 addons 的 Flow 字段（`encoding.Addons`，protobuf `Addons.Flow`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    /// 不携带 addons（addons 长度 0）。
+    None,
+    /// `xtls-rprx-vision`。
+    XtlsRprxVision,
+}
+
+const FLOW_XTLS_RPRX_VISION: &[u8] = b"xtls-rprx-vision";
+
 /// 先完成校验再返回报文；调用方负责通过认证 TLS 发送。
 pub fn encode(request: &Request, credential: &[u8; 16]) -> Result<Vec<u8>, Error> {
+    encode_with_flow(request, credential, Flow::None)
+}
+
+/// 与 [`encode`] 相同，另支持 `flow=xtls-rprx-vision` 的请求 addons。
+///
+/// 参考 `EncodeHeaderAddons`：vision 时先写 addons 长度字节 `0x12`，再写
+/// protobuf 载荷 `[0x0A, 0x10] + "xtls-rprx-vision"`（共 18 字节）。
+pub fn encode_with_flow(
+    request: &Request,
+    credential: &[u8; 16],
+    flow: Flow,
+) -> Result<Vec<u8>, Error> {
     let mut result = Vec::with_capacity(280);
     result.push(0);
     result.extend_from_slice(credential);
-    result.extend_from_slice(&[0, request.command as u8]);
+    if flow == Flow::XtlsRprxVision {
+        // 参考 `EncodeHeaderAddons`：先 addons 长度字节（= 载荷 18 字节），再载荷。
+        let addons_len = 2 + FLOW_XTLS_RPRX_VISION.len(); // 0x0A, 0x10 + 16 字节 flow
+        result.push(addons_len as u8);
+        result.push(0x0A);
+        result.push(FLOW_XTLS_RPRX_VISION.len() as u8);
+        result.extend_from_slice(FLOW_XTLS_RPRX_VISION);
+    } else {
+        result.push(0);
+    }
+    result.push(request.command as u8);
     if request.command == Command::Mux {
         return Ok(result);
     }
@@ -194,6 +227,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn vision_flow_addons_encode_to_reference_bytes() {
+        // 参考 `EncodeHeaderAddons`：addons 长度 0x12 + protobuf 0x0A 0x10 + 16 字节 flow。
+        let req = request(TargetAddr::V4([127, 0, 0, 1], 443));
+        let mut expected = vec![0];
+        expected.extend_from_slice(&[0x11; 16]);
+        expected.extend_from_slice(&[0x12, 0x0A, 0x10]);
+        expected.extend_from_slice(b"xtls-rprx-vision");
+        expected.extend_from_slice(&[1, 1, 187, 1, 127, 0, 0, 1]);
+        assert_eq!(
+            encode_with_flow(&req, &[0x11; 16], Flow::XtlsRprxVision).unwrap(),
+            expected
+        );
+        // length 前缀 = 载荷 18 字节。
+        assert_eq!(expected[17], 18);
+        // 默认 encode 仍是无 addons。
+        let mut plain = vec![0];
+        plain.extend_from_slice(&[0x11; 16]);
+        plain.extend_from_slice(&[0, 1, 1, 187, 1, 127, 0, 0, 1]);
+        assert_eq!(encode(&req, &[0x11; 16]).unwrap(), plain);
     }
 
     #[test]
