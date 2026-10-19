@@ -54,6 +54,14 @@
         "wireguard_go"
       ],
       "expected_passed": 5
+    },
+    {
+      "crate": "lengsuo-hysteria",
+      "targets": [
+        "xray_hysteria",
+        "xray_hysteria_server"
+      ],
+      "expected_passed": 6
     }
   ]
 }
