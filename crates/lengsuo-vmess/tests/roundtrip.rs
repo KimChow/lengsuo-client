@@ -86,17 +86,12 @@ async fn request_body_self_roundtrip() {
     let mut cursor: &[u8] = &wire;
     let mut got = Vec::new();
     let mut frames = 0usize;
-    loop {
-        match chunkframe::read_data_chunk(&mut open, None, &mut cursor)
-            .await
-            .expect("读数据段")
-        {
-            Some(plain) => {
-                got.extend_from_slice(&plain);
-                frames += 1;
-            }
-            None => break,
-        }
+    while let Some(plain) = chunkframe::read_data_chunk(&mut open, None, &mut cursor)
+        .await
+        .expect("读数据段")
+    {
+        got.extend_from_slice(&plain);
+        frames += 1;
     }
     assert!(cursor.is_empty(), "读回不得吞/漏尾部字节");
     assert_eq!(frames, 3, "40000 字节 = 16384+16384+7232 三段");

@@ -180,10 +180,7 @@ impl XrayFixture {
     /// 非阻塞探测子进程是否已退出（`try_wait` 需要可变借用，故封装成 &mut 方法）。
     fn child_exit_status(&mut self) -> Option<std::process::ExitStatus> {
         let child = self.child.as_mut()?;
-        match child.try_wait() {
-            Ok(status) => status,
-            Err(_) => None,
-        }
+        child.try_wait().unwrap_or_default()
     }
 
     /// 入站监听地址。
