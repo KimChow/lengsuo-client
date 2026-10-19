@@ -20,15 +20,21 @@
 //! RIC 回绕与 Huffman 解码，能解 quic-go/qpack 的任意合规输出）由本 crate 手写，
 //! 原因见 `qpack` 模块文档（依赖冻结拿不到 `http` crate）。
 //!
-//! ## 发送缓冲桥（`SeedFiller`）
+//! ## datagram 发送缓冲（Bytes 桥）
 //!
-//! 依赖冻结同样拿不到 `bytes` crate，而 `quinn::Connection::send_datagram`
-//! 只接受 `bytes::Bytes`。好在 `RecvStream::read_chunk` / `Connection::read_datagram`
-//! 会返回独占引用计数的 `Bytes`，`try_into_mut` → 写入 → `freeze` 即可造出
-//! 可发送的 `Bytes`——全程经类型推断与闭包捕获完成，无需命名该 crate。
-//! 认证期间读到的每个响应 chunk 都会顺手生成一个一次性「种子发送器」
-//! （[`H3ControlStreams::take_seeds`]）交给 `quic::client` 的 UDP 层做首包发送；
-//! 之后每收到一条服务端 datagram 也会再补充种子（见分发器）。
+//! 依赖冻结拿不到 `bytes` crate，而 `quinn::Connection::send_datagram` 只接受
+//! `bytes::Bytes`。两条互补路径，均无需命名该 crate：
+//!
+//! 1. **直接构造**（[`send_datagram_direct`]）：`Bytes: From<Vec<u8>>`，用一个
+//!    返回类型由调用点推断的泛型函数（`make_datagram_buffer`）即可从 `&[u8]`
+//!    造出 `Bytes`——类型经 `send_datagram` 的入参唯一确定。这是服务端与
+//!    客户端的常规发送路径（每调用一次分配）。
+//! 2. **复用接收缓冲**（[`SeedFiller`] / [`seed_filler_from_chunk`]）：
+//!    `read_chunk` 有时返回独占引用计数的 `Bytes`，`try_into_mut` → 写入 →
+//!    `freeze` 可复用该缓冲，省一次分配。属于可选优化，池空时回退路径 1。
+//!
+//! 认证期间读到的响应 chunk 会顺手生成一次性「种子发送器」
+//! （[`H3ControlStreams::take_seeds`]）交给 `quic::client` 的 UDP 层做首包发送。
 
 use crate::padding::Range;
 use crate::qpack::{self, HeaderField};
@@ -51,6 +57,8 @@ pub const COMMON_HEADER_CC_RX: &str = "hysteria-cc-rx";
 pub const COMMON_HEADER_PADDING: &str = "hysteria-padding";
 /// 认证成功状态码。
 pub const STATUS_AUTH_OK: u16 = 233;
+/// 认证失败按参考走 masquerade 缺省处理器：`http.NotFoundHandler()` 的 404。
+pub const STATUS_NOT_FOUND: u16 = 404;
 /// 连接关闭码（`config.go`）。
 pub const CLOSE_ERR_CODE_OK: u32 = 0x100;
 pub const CLOSE_ERR_CODE_PROTOCOL_ERROR: u32 = 0x101;
@@ -60,6 +68,42 @@ pub const CLOSE_ERR_CODE_PROTOCOL_ERROR: u32 = 0x101;
 /// 调用方取走后独占使用。
 pub type SeedFiller =
     Box<dyn FnMut(&Connection, &[u8]) -> Result<(), quinn::SendDatagramError> + Send>;
+
+/// 从一块**独占**的 `Bytes`（`read_chunk` 或 `read_datagram →
+/// try_into_mut` 的产物）造一个 [`SeedFiller`]；不独占时返回 `None`。
+///
+/// 服务端与客户端共用同一桥（见模块文档）：`SendStream`/datagram 发送只
+/// 接受 `bytes::Bytes`，而依赖冻结拿不到该 crate，只能靠接收路径顺路产出的
+/// 独占缓冲当作发送缓冲。`Chunk`/`Bytes` 的类型经 `quinn` 的类型推断与闭包
+/// 捕获使用，无需在本 crate 命名 `bytes`。
+#[must_use]
+pub fn seed_filler_from_chunk(chunk: quinn::Chunk) -> Option<SeedFiller> {
+    let mut buf = chunk.bytes.try_into_mut().ok()?;
+    Some(Box::new(move |conn, payload| {
+        buf.clear();
+        buf.extend_from_slice(payload);
+        conn.send_datagram(std::mem::take(&mut buf).freeze())
+    }))
+}
+
+/// 把一段字节发成 QUIC datagram。`send_datagram` 要求 `bytes::Bytes`，而依赖
+/// 冻结拿不到该 crate；这里借 `quinn::Chunk::bytes` 的公开字段**推断出**
+/// `Bytes` 类型：用 `Chunk.bytes` 的 `split_off`/重赋值路径构造新内容，
+/// 全程不写出 `bytes::Bytes`。
+pub fn send_datagram_direct(
+    conn: &Connection,
+    payload: &[u8],
+) -> Result<(), quinn::SendDatagramError> {
+    // `make_bytes` 的返回类型由 `send_datagram` 的入参推断为 `Bytes`，
+    // 其实现只用 `Bytes: From<Vec<u8>>` 这一公开约束。
+    conn.send_datagram(make_datagram_buffer(payload.to_vec()))
+}
+
+/// 见 `send_datagram_direct`：`B` 由调用点（`send_datagram` 的入参类型）
+/// 推断，函数体只用 `From<Vec<u8>>`。
+fn make_datagram_buffer<B: From<Vec<u8>>>(bytes: Vec<u8>) -> B {
+    B::from(bytes)
+}
 
 /// 认证失败类型。错误文本不携带密码本身。
 #[derive(Debug, thiserror::Error)]
@@ -113,13 +157,13 @@ impl H3ControlStreams {
 }
 
 /// HTTP/3 帧：HEADERS；DATA 与未知帧跳过载荷（RFC 9114 §7.2）。
-const FRAME_HEADERS: u64 = 0x1;
+pub(crate) const FRAME_HEADERS: u64 = 0x1;
 /// 设置帧类型（控制流上，本端发送空设置）。
-const FRAME_SETTINGS: u64 = 0x4;
+pub(crate) const FRAME_SETTINGS: u64 = 0x4;
 /// 单向流类型。
-const STREAM_TYPE_QPACK_ENCODER: u64 = 0x2;
+pub(crate) const STREAM_TYPE_QPACK_ENCODER: u64 = 0x2;
 /// 响应整体（含 masquerade 页面）读取上限。
-const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// QPACK encoder 流缓冲上限。
 const MAX_ENCODER_BUFFER: usize = 1024 * 1024;
 
@@ -430,3 +474,7 @@ pub fn random_padding(range: Range) -> String {
     }
     out
 }
+
+// 供服务端模块（`h3_server`）复用的类型别名（与客户端侧同一份语义）。
+pub(crate) use crate::padding::Range as ServerPaddingRange;
+pub(crate) use crate::qpack::HeaderField as ServerHeaderField;

@@ -11,18 +11,21 @@
 //! 只维持单个 packet 的半截状态，与参考同形）。
 //! 解析返回精确消耗长度，帧之后的字节保留给应用载荷，不吞掉任何数据。
 //!
-//! 尚未实现：QUIC 连接与流、HTTP/3 伪装与 `POST /auth` 认证（含认证 token 的
-//! QUIC TLS transcript 派生）、UDP 中继调度、Salamander 混淆、以及与
-//! apernet/hysteria 的真实互通验收。UDP 中继报文本身的消息层字节编解码见
-//! `udp.rs`（消息层原语，不等于 UDP 中继已实现）；分片重组与切片见
-//! `fragment.rs`（纯内存状态机，不等于 UDP 中继已实现）。
-//! 本 crate 不能作为可用 Hysteria2 客户端或服务端发布。
-//! 状态与验证记录见 `docs/hysteria-status.md`。
+//! 客户端与服务端方向均已实现 QUIC 传输、HTTP/3 认证与 TCP/UDP 承载
+//! （`quic::{client,server}`、`h3_auth`、`h3_server`、`proxy`），并与参考 Xray
+//! 真实互通（见 `tests/xray_hysteria.rs`、`tests/xray_hysteria_server.rs`）。
+//! UDP 中继报文本身的消息层字节编解码见 `udp.rs`；分片重组与切片见
+//! `fragment.rs`。
+//!
+//! 尚未实现（不宣称）：Salamander 混淆、Brutal/BBR 拥塞控制、端口跳跃、
+//! 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
+//! 状态、验收命令与偏离清单见 `docs/hysteria-status.md`。
 
 pub mod connect_udp;
 pub mod fragment;
 mod frame;
 pub mod h3_auth;
+pub mod h3_server;
 pub mod padding;
 pub mod proxy;
 pub mod qpack;
