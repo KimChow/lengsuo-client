@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use lengsuo_hysteria::obfs::{Obfuscator, KEY_LEN, PSK_MIN_LEN, SALT_LEN, PskTooShort};
+use lengsuo_hysteria::obfs::{Obfuscator, PskTooShort, KEY_LEN, PSK_MIN_LEN, SALT_LEN};
 use lengsuo_hysteria::transport::TransportRng;
 
 const PSK: &[u8] = b"average_password";
@@ -23,7 +23,11 @@ impl FixedSalt {
 
 impl TransportRng for FixedSalt {
     fn gen_index(&self, bound: usize) -> usize {
-        if bound <= 1 { 0 } else { self.gen_u64(bound as u64) as usize }
+        if bound <= 1 {
+            0
+        } else {
+            self.gen_u64(bound as u64) as usize
+        }
     }
     fn gen_u64(&self, bound: u64) -> u64 {
         if bound <= 1 {
@@ -69,7 +73,9 @@ impl lengsuo_hysteria::obfs::Blake2b256 for FakeBlake {
         }
         let mut key = [0u8; KEY_LEN];
         for k in key.iter_mut() {
-            acc = acc.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            acc = acc
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *k = (acc >> 33) as u8;
         }
         Ok(key)
@@ -106,7 +112,9 @@ fn obfuscate_layout_and_bytes() {
     }
     let key: Vec<u8> = (0..KEY_LEN)
         .map(|_| {
-            acc = acc.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            acc = acc
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (acc >> 33) as u8
         })
         .collect();
@@ -180,7 +188,9 @@ fn wrong_psk_never_returns_plaintext() {
     let mut enc = vec![0u8; plain.len() + SALT_LEN];
     o.obfuscate(&plain, &mut enc).expect("缓冲足够");
     let mut dec = vec![0u8; plain.len()];
-    let n = wrong.deobfuscate(&enc, &mut dec).expect("长度足够时仍有输出");
+    let n = wrong
+        .deobfuscate(&enc, &mut dec)
+        .expect("长度足够时仍有输出");
     assert_eq!(n, plain.len());
     assert_ne!(dec, plain, "错误口令不得还原明文");
 }
@@ -199,16 +209,14 @@ fn short_psk_rejected() {
         .err();
         assert_eq!(e, Some(PskTooShort), "长度 {len} 的口令应当拒绝");
     }
-    assert!(
-        Obfuscator::with_deriver(
-            b"abcd".to_vec(),
-            Arc::new(FixedSalt::seq()),
-            Arc::new(FakeBlake {
-                seen: Mutex::new(Vec::new()),
-            }),
-        )
-        .is_ok()
-    );
+    assert!(Obfuscator::with_deriver(
+        b"abcd".to_vec(),
+        Arc::new(FixedSalt::seq()),
+        Arc::new(FakeBlake {
+            seen: Mutex::new(Vec::new()),
+        }),
+    )
+    .is_ok());
 }
 
 /// 缓冲区不足与输出过小都拒绝（对照参考的 `return 0`）。

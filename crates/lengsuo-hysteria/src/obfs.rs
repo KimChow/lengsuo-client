@@ -165,7 +165,9 @@ impl Obfuscator {
             let _guard = self.salt_lock.lock().expect("盐锁中毒");
             self.rng.fill_bytes(&mut out[..SALT_LEN]);
         }
-        let salt = [out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7]];
+        let salt = [
+            out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
+        ];
         let key = self.key(&salt).ok()?;
         // 参考是 `out[i+salt] = in[i] ^ key[i%32]`：`input` 与 `out` 余下
         // 区域不重叠（`input` 是应用层明文），按切片复制后再异或。

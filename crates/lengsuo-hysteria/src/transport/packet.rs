@@ -130,9 +130,7 @@ impl HopSocket {
                 let mut buf = vec![0u8; payload.len() + obfs::SALT_LEN];
                 let Some(n) = o.obfuscate(payload, &mut buf) else {
                     // 缓冲够大时不可达；真发生则视为发送失败，绝不发明文。
-                    return Err(std::io::Error::other(
-                        "混淆缓冲不足（长度计算不一致）",
-                    ));
+                    return Err(std::io::Error::other("混淆缓冲不足（长度计算不一致）"));
                 };
                 self.socket.send_to(&buf[..n], self.current_remote()).await
             }

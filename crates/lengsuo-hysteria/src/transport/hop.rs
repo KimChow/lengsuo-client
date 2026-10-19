@@ -81,7 +81,10 @@ pub fn parse_port_list(spec: &str) -> Result<Vec<PortRange>, HopError> {
 }
 
 fn parse_port(s: &str) -> Result<u16, HopError> {
-    let value: u32 = s.trim().parse().map_err(|_| HopError::InvalidPort { port: 0 })?;
+    let value: u32 = s
+        .trim()
+        .parse()
+        .map_err(|_| HopError::InvalidPort { port: 0 })?;
     if value == 0 || value > u32::from(u16::MAX) {
         return Err(HopError::InvalidPort { port: value });
     }
@@ -124,7 +127,11 @@ pub struct HopSpec {
 
 impl HopSpec {
     /// 从 `port_list` 文本构造（对照 `UdpHop.Build()` + `addrs()`）。
-    pub fn from_port_list(spec: &str, interval_min: i64, interval_max: i64) -> Result<Self, HopError> {
+    pub fn from_port_list(
+        spec: &str,
+        interval_min: i64,
+        interval_max: i64,
+    ) -> Result<Self, HopError> {
         let ports = PortList {
             ranges: parse_port_list(spec)?,
         }
@@ -133,7 +140,11 @@ impl HopSpec {
     }
 
     /// 显式端口序列构造。
-    pub fn new(mut ports: Vec<u16>, interval_min: i64, interval_max: i64) -> Result<Self, HopError> {
+    pub fn new(
+        mut ports: Vec<u16>,
+        interval_min: i64,
+        interval_max: i64,
+    ) -> Result<Self, HopError> {
         if ports.is_empty() {
             return Err(HopError::NoPorts);
         }

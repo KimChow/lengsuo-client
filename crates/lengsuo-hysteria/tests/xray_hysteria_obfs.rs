@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use lengsuo_hysteria::obfs::{Obfuscator, B2sumDeriver};
+use lengsuo_hysteria::obfs::{B2sumDeriver, Obfuscator};
 use lengsuo_hysteria::proxy;
 use lengsuo_hysteria::quic::{ClientConfig, HysteriaClient};
 use lengsuo_hysteria::transport::OsRng;
@@ -47,10 +47,17 @@ fn gen_cert(dir: &std::path::Path) -> (PathBuf, PathBuf) {
         .arg("-out")
         .arg(&cert)
         .args([
-            "-days", "2", "-subj", "/CN=localhost", "-addext",
-            "subjectAltName=DNS:localhost,IP:127.0.0.1", "-addext",
-            "basicConstraints=critical,CA:FALSE", "-addext",
-            "keyUsage=critical,digitalSignature,keyEncipherment", "-addext",
+            "-days",
+            "2",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost,IP:127.0.0.1",
+            "-addext",
+            "basicConstraints=critical,CA:FALSE",
+            "-addext",
+            "keyUsage=critical,digitalSignature,keyEncipherment",
+            "-addext",
             "extendedKeyUsage=serverAuth",
         ])
         .output()
@@ -79,7 +86,7 @@ fn free_udp_port() -> u16 {
 
 /// Xray 服务端：hysteria v2 + Salamander 口令（`finalmask` 里的
 /// `salamander.password`）。
-fn xray_config(port: u16, cert: &std::path::Path, key: &std::path::Path, psk: &str) -> String {
+fn xray_config(port: u16, cert: &std::path::Path, key: &std::path::Path, _psk: &str) -> String {
     format!(
         r#"{{
   "log": {{"loglevel": "warning"}},
@@ -127,7 +134,11 @@ async fn start_world(tag: &str) -> World {
     let der = cert_der(&cert, &dir);
     let port = free_udp_port();
     let cfg_path = dir.join("xray.json");
-    std::fs::write(&cfg_path, xray_config(port, &cert, &key, "lengsuo-obfs-psk")).expect("写配置");
+    std::fs::write(
+        &cfg_path,
+        xray_config(port, &cert, &key, "lengsuo-obfs-psk"),
+    )
+    .expect("写配置");
     let log_out = std::fs::File::create(dir.join("xray-stdout.log")).expect("建日志");
     let log_err = std::fs::File::create(dir.join("xray-stderr.log")).expect("建日志");
     let child = Command::new(xray_bin())
@@ -158,7 +169,10 @@ async fn start_world(tag: &str) -> World {
     );
 }
 
-async fn connect(world: &World, auth: &str) -> Result<HysteriaClient, lengsuo_hysteria::quic::ConnectError> {
+async fn connect(
+    world: &World,
+    auth: &str,
+) -> Result<HysteriaClient, lengsuo_hysteria::quic::ConnectError> {
     HysteriaClient::connect(ClientConfig {
         server_addr: SocketAddr::from(([127, 0, 0, 1], world.port)),
         server_name: SERVER_NAME.to_string(),
@@ -200,12 +214,8 @@ async fn obfs_reference_vector_bytes() {
 
         // 固定盐（测试注入的随机源回放参考的盐）。
         let rng = std::sync::Arc::new(FixedRng::new(salt.clone()));
-        let o = Obfuscator::with_deriver(
-            psk.clone(),
-            rng,
-            std::sync::Arc::new(B2sumDeriver),
-        )
-        .expect("口令长度合法");
+        let o = Obfuscator::with_deriver(psk.clone(), rng, std::sync::Arc::new(B2sumDeriver))
+            .expect("口令长度合法");
         let mut out = vec![0u8; plain.len() + lengsuo_hysteria::obfs::SALT_LEN];
         let n = o.obfuscate(&plain, &mut out).expect("缓冲足够");
         assert_eq!(n, plain.len() + 8, "混淆后长度");
@@ -238,10 +248,12 @@ impl FixedRng {
 
 impl lengsuo_hysteria::transport::TransportRng for FixedRng {
     fn gen_index(&self, bound: usize) -> usize {
-        if bound <= 1 { 0 } else { 0 }
+        let _ = bound;
+        0
     }
     fn gen_u64(&self, bound: u64) -> u64 {
-        if bound <= 1 { 0 } else { 0 }
+        let _ = bound;
+        0
     }
     fn fill_bytes(&self, out: &mut [u8]) {
         let mut i = self.idx.lock().expect("索引锁中毒");
@@ -253,7 +265,7 @@ impl lengsuo_hysteria::transport::TransportRng for FixedRng {
 }
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len() / 2)
@@ -277,11 +289,15 @@ async fn obfs_matches_xray_server() {
         let mut stream = proxy::tcp_connect(&client, &echo.to_string())
             .await
             .expect("tcp_connect 失败");
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         stream.write_all(&payload).await.expect("写载荷");
         stream.finish().expect("半关闭");
         let mut got = vec![0u8; payload.len()];
-        stream.read_exact(&mut got).await.expect("读回包");
+        let mut filled = 0;
+        while filled < got.len() {
+            let n = stream.read(&mut got[filled..]).await.expect("读回包");
+            assert!(n > 0, "对端在读完前关闭");
+            filled += n;
+        }
         got
     };
     let got = tokio::time::timeout(Duration::from_secs(30), fut)
