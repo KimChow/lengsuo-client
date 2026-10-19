@@ -9,17 +9,22 @@
 //! 上层编码好的目标地址（`TargetAddr::encode_checked`），本层不解析地址、不实现
 //! 中继服务，也不做 UDP 关联。
 //!
-//! 尚未实现：UDP 中继服务、密钥轮换、分块 padding 与参考实现的读端行为缓解。
+//! 尚未实现：UDP 中继服务、分块 padding 与参考实现的读端行为缓解。
 //! 入站 salt 防重放已由 `replay` 模块提供（[`ReplayFilter`]，经
-//! [`TcpReader::recv_guarded`] / [`UdpCodec::open_guarded`] 接入）。状态见
-//! `docs/shadowsocks-status.md`。
+//! [`TcpReader::recv_guarded`] / [`UdpCodec::open_guarded`] 接入）。重放状态文件的
+//! 完整性校验由 `persist` 模块的 [`MacKey`]（HMAC-SHA256）提供：`ReplayFilter` 的
+//! 内存重放判定逻辑不变，`save_with_key` / `load_with_keys` 接受调用方注入的密钥，
+//! 校验失败 fail-closed；加载时同时接受上一代密钥并支持升级重写（密钥轮换）。
+//! 状态见 `docs/shadowsocks-status.md`。
 
 mod key;
+mod persist;
 mod replay;
 pub mod tcp;
 pub mod udp;
 
-pub use replay::{Error as ReplayError, ReplayFilter};
+pub use persist::MacKey;
+pub use replay::{Error as ReplayError, LoadedState, ReplayFilter};
 pub use ss_core::crypto::CipherSuite;
 pub use ss_core::target::TargetAddr;
 pub use tcp::Error as TcpError;

@@ -19,8 +19,8 @@
 //! 就绝不解析任何地址字节，一律 fail-closed，也没有明文回退路径。
 //!
 //! 入站 salt 防重放已由 [`UdpCodec::open_guarded`] 接入 `crate::replay` 的
-//! [`ReplayFilter`]（有界窗口 + 跨重启持久化）；密钥轮换尚未实现。无状态的
-//! `open` 仍与参考 `DecodeUDPPacket` 一致、不缓存任何 salt。见
+//! [`ReplayFilter`]（有界窗口；密钥化状态持久化与密钥轮换见 `crate::persist`）。
+//! 无状态的 `open` 仍与参考 `DecodeUDPPacket` 一致、不缓存任何 salt。见
 //! `docs/shadowsocks-status.md`。
 
 use ss_core::crypto::{CipherSuite, SessionAead, TAG_LEN};
