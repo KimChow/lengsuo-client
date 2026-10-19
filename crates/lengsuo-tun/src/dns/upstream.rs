@@ -1,13 +1,16 @@
-//! DNS 载荷到**显式上游**的异步 UDP 请求-响应原语。
+//! DNS 载荷到**显式上游**的异步 UDP 请求-响应原语，以及 environment id → 上游
+//! 端点的绑定表。
 //!
-//! 只有一个入口 [`exchange`]：把一份已编码的 DNS 查询发到调用方指定的上游端点，
-//! 等待与之匹配的那份响应，并原样返回响应字节。它是「一发一收」的孤立动作，
-//! 不构成整个 TUN/DNS 转发链路：不建设备、不查系统默认 DNS、不做缓存、不重写
-//! 报文、不并发多路复用，也不理解资源记录语义。
+//! 入口分两层：环境无关的孤立动作 [`exchange`]（把一份已编码的 DNS 查询发到调用
+//! 方指定的上游端点，等待与之匹配的那份响应，并原样返回响应字节）；环境绑定的
+//! [`Table`]（按 environment id 登记每环境唯一的上游，A 环境的响应绝不回给 B）。
+//! 二者都是「一发一收」，不构成整个 TUN/DNS 转发链路：不建设备、不查系统默认
+//! DNS、不做缓存、不重写报文、不并发多路复用，也不理解资源记录语义。
 //!
-//! 可信边界由调用方负责：本函数假定「这份查询可以发往这个上游」是上层已经做出的
-//! 授权决定，它不会自行挑选上游，也绝不静默回退到别的出口——上游不可信或未授权
-//! 时，唯一正确的做法是不调用本函数。
+//! 可信边界由调用方负责：`exchange` 假定「这份查询可以发往这个上游」是上层已经
+//! 做出的授权决定；`Table` 把它具象化为登记动作——任何 environment 没有登记过的
+//! 查询被拒绝，已登记的查询只发往登记的那个端点，上游不可信或未授权时唯一正确的
+//! 做法是不调用本函数。两个入口都绝不静默回退到系统 DNS 或别的出口。
 //!
 //! fail-closed 清单（任一不满足都返回 [`Error`]，没有任何宽松回退）：
 //! - `deadline` 为零：直接 [`Error::InvalidDeadline`]，不绑定、不发送。
@@ -26,6 +29,7 @@
 //!
 //! 错误只描述失败种类，绝不携带查询内容、名字、token 或响应字节。
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
@@ -56,6 +60,9 @@ pub enum Error {
     /// 丢弃的非预期报文达到 [`MAX_REJECTS`]：放弃继续等待，避免无界消耗。
     #[error("DNS 上游丢弃报文超过上限，放弃等待")]
     TooManyRejects,
+    /// 该 environment 没有登记过 DNS 上游：拒绝，且一条查询都不外发。
+    #[error("环境没有绑定的 DNS 上游，拒绝发送")]
+    UnboundEnvironment,
     /// 绑定、连接或收发底层的 socket 错误（OS 层面，不含查询内容）。
     #[error("DNS 上游 UDP socket 操作失败")]
     Io(#[source] std::io::Error),
@@ -136,6 +143,53 @@ async fn request_and_await(
         if rejected >= MAX_REJECTS {
             return Err(Error::TooManyRejects);
         }
+    }
+}
+
+/// environment id → 上游端点的绑定表：每环境唯一上游，查询只发往登记端点。
+///
+/// 环境身份来自可信入口的显式登记（`bind`），绝不从地址、端口或域名猜测；未登记
+/// 的环境一律 [`Error::UnboundEnvironment`]，不查系统 DNS、不挑别的上游。登记即
+/// 覆盖：换绑后旧端点立即失权，存量会话按新端点重发。条目不可枚举（无迭代器），
+/// 上游地址不落日志、不进错误文本。
+#[derive(Default)]
+pub struct Table {
+    /// 环境 → 该环境唯一授权的 DNS 上游端点。
+    upstreams: HashMap<u64, SocketAddr>,
+}
+
+impl Table {
+    /// 登记 `environment` 的 DNS 上游；重复登记视为换绑，覆盖旧端点。
+    pub fn bind(&mut self, environment: u64, upstream: SocketAddr) {
+        self.upstreams.insert(environment, upstream);
+    }
+
+    /// 撤销 `environment` 的绑定；撤销后其查询一律 [`Error::UnboundEnvironment`]。
+    pub fn unbind(&mut self, environment: u64) {
+        self.upstreams.remove(&environment);
+    }
+
+    /// `environment` 当前绑定的上游；未登记即 [`Error::UnboundEnvironment`]。
+    pub fn upstream_of(&self, environment: u64) -> Result<SocketAddr, Error> {
+        self.upstreams
+            .get(&environment)
+            .copied()
+            .ok_or(Error::UnboundEnvironment)
+    }
+
+    /// 把 `query` 发往 `environment` 绑定的上游并返回匹配的响应字节。
+    ///
+    /// 绑定查找发生在发送之前：环境未登记时一条查询都不会外发。失败路径（超时、
+    /// 报文被拒、底层错误）一律以错误结束，绝不改发其它环境的上游或系统 DNS；
+    /// 时间预算由 `deadline` 单一覆盖（见 [`exchange`]）。
+    pub async fn resolve(
+        &self,
+        environment: u64,
+        query: &[u8],
+        deadline: Duration,
+    ) -> Result<Vec<u8>, Error> {
+        let upstream = self.upstream_of(environment)?;
+        exchange(query, upstream, deadline).await
     }
 }
 
