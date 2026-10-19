@@ -166,7 +166,11 @@ impl Server {
 
     /// 在已建好的流上处理一条 trojan 连接（对齐 `proxy/trojan/server.go` 的
     /// `Process`，transport 无关）。
-    pub(crate) async fn process<C>(&self, conn: C) -> Result<(), Error>
+    ///
+    /// 产品路径是 `handle_tcp`（TLS 接入后调用本函数）；需要在外层传输（WS /
+    /// HTTPUpgrade）之上跑 trojan 的调用方，先完成传输升级，再把升级后的流交给
+    /// 本函数——参考同样是「transport 建流 → Process」两段式。
+    pub async fn process<C>(&self, conn: C) -> Result<(), Error>
     where
         C: AsyncRead + AsyncWrite + Unpin,
     {
