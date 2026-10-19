@@ -7,6 +7,7 @@
 
 pub mod header;
 pub mod mux;
+pub mod reality;
 pub mod stream;
 pub mod vision;
 pub mod xel;
