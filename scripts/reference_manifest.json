@@ -19,9 +19,11 @@
       "targets": [
         "xray_tcp",
         "xray_tls",
-        "xray_udp"
+        "xray_udp",
+        "xray_mux",
+        "xray_target_addr"
       ],
-      "expected_passed": 7
+      "expected_passed": 14
     },
     {
       "crate": "lengsuo-trojan",
