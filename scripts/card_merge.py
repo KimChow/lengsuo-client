@@ -301,6 +301,16 @@ def _perform(led, task: str, root: Path, ctx: dict, attempt: str) -> dict:
     merge_sha = _commit(candidate, "HEAD")
     ctx["merge_sha"] = ctx["candidate_sha"] = merge_sha
     parents = _git(candidate, "rev-list", "--parents", "-n", "1", merge_sha).split()
+    if merge_sha == ctx["main_before"]:
+        # `git merge --no-ff <sha>` 报 "Already up to date"：source 已在 main 里
+        # （上一次 merge 已落盘，只是台账在末尾读写失败/进程被杀）。这不是失败，
+        # 而是幂等重入；直接按已验证状态收口，不再重跑 gates。
+        _source(source, sha, fp)
+        with led.lock():
+            led.update(task, **ctx, state="merged", held=False,
+                       reason="source 已包含在 main（幂等重入，未重复跑门禁）",
+                       merged_at=time.time())
+        return
     if parents != [merge_sha, ctx["main_before"], sha]:
         raise LedgerError("候选不是冻结 main/source 的双亲合并提交")
     for number, argv in enumerate(gates, 1):
