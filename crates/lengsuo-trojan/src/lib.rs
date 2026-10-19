@@ -17,6 +17,8 @@
 //! 请求头多用户常量时间校验、CONNECT 目标解析与拨号、双向中继（半关闭传递），
 //! 以及 UDP ASSOCIATE 转发（`udp` 报文 codec + `udp_relay` 中继）。
 //! TLS 属于上层（`lengsuo-tls`），产品路径调用方必须先完成认证 TLS，本 crate 无明文回退。
+//! 外层传输（`transport` 模块）在已认证 TLS 之上再套 WebSocket / HTTPUpgrade，
+//! 对应 Xray 的 `streamSettings.network`，客户端与服务端两侧都实现。
 //! 状态与验证记录见 `docs/trojan-status.md`。
 
 pub mod codec;
@@ -25,6 +27,7 @@ pub mod drain;
 pub mod server;
 pub mod session;
 pub mod stream;
+pub mod transport;
 pub mod udp;
 pub mod udp_relay;
 
