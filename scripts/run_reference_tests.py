@@ -16,6 +16,31 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# 清单文件（reference_manifest.json）由基建卡独占维护，本卡新增条目就地登记，
+# 语义与清单一致：实际 passed 必须等于 expected_passed，否则非 0 退出。
+# lengsuo-wireguard（--test wireguard_go）未登记：需要 Go 工具链与
+# tools/reference/wireguard_go_udp_test.go 适配器，当前 47 未安装，留待后续卡补登。
+ANYTLS_HOME = Path.home() / "ref" / "bin" / "anytls"
+ANYTLS_CLIENT = Path(os.environ.get("LENGSUO_ANYTLS") or ANYTLS_HOME / "anytls-client")
+ANYTLS_SERVER = Path(os.environ.get("LENGSUO_ANYTLS_SERVER") or ANYTLS_HOME / "anytls-server")
+
+
+def anytls_files():
+    if ANYTLS_CLIENT.is_dir():
+        return [ANYTLS_CLIENT / "anytls-client", ANYTLS_CLIENT / "anytls-server",
+                ANYTLS_SERVER]
+    return [ANYTLS_CLIENT, ANYTLS_SERVER]
+
+
+EXTRA_TESTS = [
+    {"crate": "lengsuo-vmess", "targets": ["xray_tcp"], "expected_passed": 3},
+    {"crate": "lengsuo-anytls", "targets": ["interop_client", "interop_server"],
+     "expected_passed": 4, "requires_commands": ["openssl"],
+     "requires_files": anytls_files(),
+     "env": {"LENGSUO_ANYTLS": str(ANYTLS_CLIENT),
+             "LENGSUO_ANYTLS_SERVER": str(ANYTLS_SERVER)}},
+]
+
 
 def sha256(path):
     digest = hashlib.sha256()
@@ -73,7 +98,22 @@ def prepare_binary(manifest, work, archive):
     return binary, selected["sha256"], result.stdout.strip()
 
 
+def check_prerequisites(tests):
+    problems = []
+    for case in tests:
+        for command in case.get("requires_commands", []):
+            if shutil.which(command) is None:
+                problems.append("缺少命令 {}（{} 需要）".format(command, case["crate"]))
+        for path in case.get("requires_files", []):
+            if not path.is_file():
+                problems.append("参考二进制不存在：{}（{} 需要）".format(path, case["crate"]))
+    if problems:
+        raise RuntimeError("参考矩阵前置检查失败：" + "；".join(problems))
+
+
 def execute(manifest, work, archive, report):
+    tests = manifest["tests"] + EXTRA_TESTS
+    check_prerequisites(tests)
     binary, checksum, version = prepare_binary(manifest, work, archive)
     report.update(archive_sha256=checksum, version=version)
     env = os.environ.copy()
@@ -82,7 +122,7 @@ def execute(manifest, work, archive, report):
                CARGO_PROFILE_DEV_DEBUG="0", CARGO_PROFILE_TEST_DEBUG="0",
                RUST_TEST_THREADS="1")
     cargo = os.environ.get("CARGO", "cargo")
-    for case in manifest["tests"]:
+    for case in tests:
         command = [cargo, "test", "-p", case["crate"], "--locked"]
         for target in case["targets"]:
             command.extend(["--test", target])
@@ -91,8 +131,10 @@ def execute(manifest, work, archive, report):
                  "expected_passed": case["expected_passed"]}
         report["results"].append(entry)
         log = work / (case["crate"] + ".log")
+        case_env = env.copy()
+        case_env.update(case.get("env", {}))
         try:
-            result = subprocess.run(command, cwd=ROOT, env=env,
+            result = subprocess.run(command, cwd=ROOT, env=case_env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, encoding="utf-8", errors="replace", timeout=600)
         except subprocess.TimeoutExpired as error:
