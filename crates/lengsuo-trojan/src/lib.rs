@@ -15,7 +15,7 @@
 //!
 //! 已实现服务端运行时（`server` 模块）：TLS 接入（tokio-rustls `TlsAcceptor`）、
 //! 请求头多用户常量时间校验、CONNECT 目标解析与拨号、双向中继（半关闭传递），
-//! 以及 UDP ASSOCIATE 的命令识别（转发未实现，见 `server` 模块注释与状态文档）。
+//! 以及 UDP ASSOCIATE 转发（`udp` 报文 codec + `udp_relay` 中继）。
 //! TLS 属于上层（`lengsuo-tls`），产品路径调用方必须先完成认证 TLS，本 crate 无明文回退。
 //! 状态与验证记录见 `docs/trojan-status.md`。
 
@@ -25,6 +25,8 @@ pub mod drain;
 pub mod server;
 pub mod session;
 pub mod stream;
+pub mod udp;
+pub mod udp_relay;
 
 pub use codec::{decode, encode, Command, Request};
 pub use credential::Credential;
