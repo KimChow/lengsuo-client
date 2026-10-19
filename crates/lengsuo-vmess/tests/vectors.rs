@@ -96,11 +96,12 @@ fn header_plan_then_seal_open_roundtrip() {
 /// `Port(BE16) | AddrType(1) | ADDR`，与 SOCKS5 的 `ATYP | ADDR | Port` 完全不同。
 /// 期望字节由 Python 独立复算（前缀 38B + 地址段 + FNV-1a32 尾），非本实现产物：
 /// 会话假值 `body_iv=0x22*16`、`body_key=0x11*16`、`response_header=0x33`、
-/// `option=0x05`、`security=(0<<4)|AES-128-GCM=0x01`、`reserved=0x00`、`command=TCP=0x01`、
-/// `padding_len=0`。
+/// `option=0x05`、`security=(0<<4)|AES-128-GCM=0x03`、`reserved=0x00`、`command=TCP=0x01`、
+/// `padding_len=0`。security 字节固定在 `0x03`：与 `common/protocol/headers.pb.go`
+/// `SecurityType_AES128_GCM=3` 一致（旧向量 0x01 是自造的枚举，属互通性 bug）。
 #[test]
 fn request_plaintext_ipv4_is_port_then_type1_then_addr() {
-    let expected = hex::decode("012222222222222222222222222222222211111111111111111111111111111111330501000101bb01c0000201787fab36").unwrap();
+    let expected = hex::decode("012222222222222222222222222222222211111111111111111111111111111111330503000101bb01c00002017276f710").unwrap();
     assert_eq!(
         plan(&TargetAddr::V4([192, 0, 2, 1], 443)),
         expected,
@@ -110,7 +111,7 @@ fn request_plaintext_ipv4_is_port_then_type1_then_addr() {
 
 #[test]
 fn request_plaintext_ipv6_is_port_then_type3_then_addr() {
-    let expected = hex::decode("01222222222222222222222222222222221111111111111111111111111111111133050100011f900320202020202020202020202020202020db4beb3c").unwrap();
+    let expected = hex::decode("01222222222222222222222222222222221111111111111111111111111111111133050300011f900320202020202020202020202020202020000a8cd6").unwrap();
     assert_eq!(
         plan(&TargetAddr::V6([0x20; 16], 8080)),
         expected,
@@ -120,7 +121,7 @@ fn request_plaintext_ipv6_is_port_then_type3_then_addr() {
 
 #[test]
 fn request_plaintext_domain_is_port_then_type2_len_addr() {
-    let expected = hex::decode("012222222222222222222222222222222211111111111111111111111111111111330501000120fb020f6578616d706c652e696e76616c6964f4f26f05").unwrap();
+    let expected = hex::decode("012222222222222222222222222222222211111111111111111111111111111111330503000120fb020f6578616d706c652e696e76616c69645f25e467").unwrap();
     assert_eq!(
         plan(&TargetAddr::Domain("example.invalid".into(), 8443)),
         expected,

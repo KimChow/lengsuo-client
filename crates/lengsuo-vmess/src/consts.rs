@@ -23,14 +23,15 @@ pub const CMD_NONE_TCP: u8 = 1;
 /// 命令字节：转发 UDP。
 pub const CMD_UDP: u8 = 2;
 
-/// 安全选项（`protocol.go` 的 SecurityType）：请求头不加密。
-pub const SECURITY_NONE: u8 = 0;
-/// 安全选项：请求头与数据段使用 AES-128-GCM。
-pub const SECURITY_AES_128_GCM: u8 = 1;
-/// 安全选项：请求头与数据段使用 ChaCha20-Poly1305。
-pub const SECURITY_CHACHA20_POLY1305: u8 = 2;
-/// `SecurityConfig.SupportedMethods` 的 autocipher 哨兵值（由调用方解析为具体套件）。
-pub const SECURITY_AUTOCIPHER: u8 = 255;
+/// 安全选项（`common/protocol/headers.pb.go` 的 SecurityType，线字节即枚举值）：
+/// UNKNOWN=0、AUTO=2、AES128_GCM=3、CHACHA20_POLY1305=4、NONE=5、ZERO=6。
+pub const SECURITY_NONE: u8 = 5;
+/// 安全选项：请求头与数据段使用 AES-128-GCM（`SecurityType_AES128_GCM`）。
+pub const SECURITY_AES_128_GCM: u8 = 3;
+/// 安全选项：请求头与数据段使用 ChaCha20-Poly1305（`SecurityType_CHACHA20_POLY1305`）。
+pub const SECURITY_CHACHA20_POLY1305: u8 = 4;
+/// `SecurityType_AUTO`（=2）的 autocipher 哨兵值；本层不解析，调用方先解析为具体套件。
+pub const SECURITY_AUTOCIPHER: u8 = 2;
 
 /// AES-128-GCM 的 key/nonce 长度。
 pub const AES_GCM_KEY_LEN: usize = 16;
