@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 
 use crate::replay::Error;
 
-mod sha256;
-use sha256::hmac_sha256;
+pub(crate) mod sha256;
+pub(crate) use sha256::hmac_sha256;
 /// 供测试与外部调用复用的 SHA-256 摘要（一次更新全部数据）。
 #[cfg(test)]
 use sha256::{sha256, Sha256};
