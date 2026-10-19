@@ -272,8 +272,8 @@ pub fn parse_request_payload(
     }
 
     // 9) security 判定最后（对齐参考顺序）。
-    let security = HeaderSecurity::from_nibble(security_nibble)
-        .ok_or(HeaderDecodeError::UnknownSecurity)?;
+    let security =
+        HeaderSecurity::from_nibble(security_nibble).ok_or(HeaderDecodeError::UnknownSecurity)?;
 
     Ok(DecodedRequest {
         user_index,
@@ -311,10 +311,7 @@ fn parse_port_then_address(bytes: &[u8]) -> Result<(TargetAddr, usize), ()> {
             if host.contains('\0') {
                 return Err(());
             }
-            Ok((
-                TargetAddr::Domain(host.to_string(), port),
-                4 + domain_len,
-            ))
+            Ok((TargetAddr::Domain(host.to_string(), port), 4 + domain_len))
         }
         3 => {
             if bytes.len() < 3 + 16 {

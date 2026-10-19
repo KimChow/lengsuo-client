@@ -230,8 +230,7 @@ pub fn open_request_header_payload(
         KDF_SALT_VMESS_HEADER_PAYLOAD_AEAD_IV.as_bytes(),
         &paths,
     );
-    aes128gcm_open(&payload_key, &payload_iv, ct, auth_id)
-        .map_err(|_| OpenHeaderError::PayloadTag)
+    aes128gcm_open(&payload_key, &payload_iv, ct, auth_id).map_err(|_| OpenHeaderError::PayloadTag)
 }
 
 /// 服务端流式解头的失败分类（对齐 `OpenVMessAEADHeader` 的 `(shouldDrain, err)`
@@ -283,9 +282,8 @@ pub fn open_vmess_aead_header_stream<R: std::io::Read>(
         KDF_SALT_VMESS_HEADER_LEN_AEAD_IV.as_bytes(),
         &paths,
     );
-    let length_plain =
-        aes128gcm_open(&length_key, &length_iv, &length_ct, auth_id)
-            .map_err(|_| OpenHeaderError::LengthTag)?;
+    let length_plain = aes128gcm_open(&length_key, &length_iv, &length_ct, auth_id)
+        .map_err(|_| OpenHeaderError::LengthTag)?;
     if length_plain.len() != 2 {
         return Err(OpenHeaderError::Truncated {
             need: 2,
@@ -326,11 +324,7 @@ fn stream_read_full<R: std::io::Read>(
 
 /// 封主线响应头长度段：`BE16(明文长度)` + tag 共 18 字节，无 AAD
 /// （服务端 `EncodeResponseHeader` 的长度段路径）。
-pub fn seal_response_header_length(
-    key: &[u8; 16],
-    nonce: &[u8; 12],
-    plain_len: u16,
-) -> Vec<u8> {
+pub fn seal_response_header_length(key: &[u8; 16], nonce: &[u8; 12], plain_len: u16) -> Vec<u8> {
     aes128gcm_seal(key, nonce, &plain_len.to_be_bytes(), &[])
 }
 

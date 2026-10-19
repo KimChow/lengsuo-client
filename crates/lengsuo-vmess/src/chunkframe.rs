@@ -618,8 +618,7 @@ mod tests {
                 .expect("可写");
             seal_padded_chunk(&mut seal_cipher, &mut enc_mask, &mut wire, &[0x33u8; 500])
                 .expect("可写");
-            seal_padded_chunk(&mut seal_cipher, &mut enc_mask, &mut wire, &[])
-                .expect("EOF 可写");
+            seal_padded_chunk(&mut seal_cipher, &mut enc_mask, &mut wire, &[]).expect("EOF 可写");
 
             let mut cursor = 0usize;
             let mut frames = 0;
@@ -634,7 +633,10 @@ mod tests {
                     Some(plain) if frames == 1 => assert_eq!(plain, vec![0x33u8; 500]),
                     Some(_) => panic!("多出帧"),
                     None => {
-                        assert_eq!(declared as usize, cipher_overhead(&open_cipher) + padding as usize);
+                        assert_eq!(
+                            declared as usize,
+                            cipher_overhead(&open_cipher) + padding as usize
+                        );
                         break;
                     }
                 }
@@ -653,7 +655,7 @@ mod tests {
         seal_padded_chunk(&mut cipher, &mut mask, &mut wire, b"secret").expect("可写");
         let last = wire.len() - 1;
         wire[last] ^= 0x01; // 破坏 padding 末字节不影响认证；破坏密文/tag 才影响
-        // size 段占前 2 字节，密文紧随；篡改密文中部。
+                            // size 段占前 2 字节，密文紧随；篡改密文中部。
         wire[4] ^= 0x01;
         let mut victim = DataCipher::new(SECURITY_AES_128_GCM, &KEY, &IV);
         let mut dec_mask = DataSizeParser::new(&IV);

@@ -96,13 +96,7 @@ where
     let mut mask = chunk_masking.then(|| DataSizeParser::new(&resp_iv));
     let mut out = Vec::new();
     loop {
-        match read_data_chunk(
-            &mut cipher,
-            mask.as_mut(),
-            reader,
-        )
-        .await
-        {
+        match read_data_chunk(&mut cipher, mask.as_mut(), reader).await {
             Ok(Some(plain)) => out.extend_from_slice(&plain),
             Ok(None) => break,
             Err(Error::Io(kind))
@@ -134,7 +128,14 @@ where
     R: AsyncRead + Unpin,
 {
     read_response_header(reader, request_body_key, request_body_iv, expected_seed).await?;
-    read_response_body(reader, request_body_key, request_body_iv, security, chunk_masking).await
+    read_response_body(
+        reader,
+        request_body_key,
+        request_body_iv,
+        security,
+        chunk_masking,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -169,9 +170,16 @@ mod tests {
         server.write_all(&wire).await.expect("写入管道");
         drop(server);
 
-        let body = read_response(&mut client, &REQ_KEY, &REQ_IV, SEED, SECURITY_AES_128_GCM, true)
-            .await
-            .expect("可读回");
+        let body = read_response(
+            &mut client,
+            &REQ_KEY,
+            &REQ_IV,
+            SEED,
+            SECURITY_AES_128_GCM,
+            true,
+        )
+        .await
+        .expect("可读回");
         assert_eq!(body, b"echo-payload");
     }
 

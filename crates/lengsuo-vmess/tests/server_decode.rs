@@ -11,8 +11,8 @@ use lengsuo_vmess::consts::SECURITY_AES_128_GCM;
 use lengsuo_vmess::request::{fnv1a32, HeaderPlanner, KeySource, RequestHeader};
 use lengsuo_vmess::response::read_response_header;
 use lengsuo_vmess::server::{
-    decode_request_header, encode_response_header, InboundCommand, HeaderDecodeError,
-    HeaderSecurity, ResponseHeader,
+    decode_request_header, encode_response_header, HeaderDecodeError, HeaderSecurity,
+    InboundCommand, ResponseHeader,
 };
 use lengsuo_vmess::{Command, SecurityOption};
 use ss_core::target::TargetAddr;
@@ -32,17 +32,18 @@ fn keys() -> KeySource {
 }
 
 fn plan_payload(security: SecurityOption, target: Option<&TargetAddr>, padding: &[u8]) -> Vec<u8> {
-    HeaderPlanner::new(keys()).plan_with(
-        &RequestHeader {
-            target: target.cloned(),
-            command: Command::Tcp,
-            security,
-            option: 0,
-            padding_len: padding.len() as u8,
-        },
-        padding,
-    )
-    .expect("可编码")
+    HeaderPlanner::new(keys())
+        .plan_with(
+            &RequestHeader {
+                target: target.cloned(),
+                command: Command::Tcp,
+                security,
+                option: 0,
+                padding_len: padding.len() as u8,
+            },
+            padding,
+        )
+        .expect("可编码")
 }
 
 fn seal_for(payload: &[u8], cmd_key: &[u8; 16], now: i64) -> Vec<u8> {
@@ -113,7 +114,10 @@ fn wrong_cmd_key_is_invalid_user() {
     let payload = plan_payload(SecurityOption::Aes128Gcm, Some(&sample_target()), &[]);
     let evil = [0xEEu8; 16];
     let wire = seal_for(&payload, &evil, NOW);
-    assert!(matches!(decode_from(&wire), Err(HeaderDecodeError::InvalidUser)));
+    assert!(matches!(
+        decode_from(&wire),
+        Err(HeaderDecodeError::InvalidUser)
+    ));
 }
 
 #[test]
@@ -121,7 +125,10 @@ fn expired_time_window_is_invalid_user() {
     let payload = plan_payload(SecurityOption::Aes128Gcm, Some(&sample_target()), &[]);
     // AuthID 时间戳比 now 早 121 秒（窗口 ±120 秒之外）。
     let wire = seal_for(&payload, &CMD_KEY, NOW - 121);
-    assert!(matches!(decode_from(&wire), Err(HeaderDecodeError::InvalidUser)));
+    assert!(matches!(
+        decode_from(&wire),
+        Err(HeaderDecodeError::InvalidUser)
+    ));
     // 恰好在窗口边缘（±120 秒）仍然通过。
     let wire = seal_for(&payload, &CMD_KEY, NOW + 120);
     assert!(decode_from(&wire).is_ok());
@@ -233,10 +240,7 @@ fn fnv_mismatch_and_truncation_are_rejected() {
     let full = seal_for(&payload, &CMD_KEY, NOW);
     let mut cut = full[..30].to_vec();
     cut.truncate(24);
-    assert!(matches!(
-        decode_from(&cut),
-        Err(HeaderDecodeError::Io(_))
-    ));
+    assert!(matches!(decode_from(&cut), Err(HeaderDecodeError::Io(_))));
 }
 
 #[test]
@@ -291,8 +295,11 @@ async fn rust_to_rust_full_chain() {
     let decoded = decode_from(&upstream).expect("全链路服务端解头");
     assert_eq!(decoded.target.as_ref(), Some(&target));
 
-    let mut server_cipher =
-        DataCipher::new(SECURITY_AES_128_GCM, &decoded.request_body_key, &decoded.request_body_iv);
+    let mut server_cipher = DataCipher::new(
+        SECURITY_AES_128_GCM,
+        &decoded.request_body_key,
+        &decoded.request_body_iv,
+    );
     let mut received = Vec::new();
     let mut offset = wire.len();
     loop {
@@ -317,10 +324,8 @@ async fn rust_to_rust_full_chain() {
         &mut response_wire,
     )
     .expect("响应头可封");
-    let (resp_key, resp_iv) = lengsuo_vmess::server::response_key_iv(
-        &decoded.request_body_key,
-        &decoded.request_body_iv,
-    );
+    let (resp_key, resp_iv) =
+        lengsuo_vmess::server::response_key_iv(&decoded.request_body_key, &decoded.request_body_iv);
     let mut resp_cipher = DataCipher::new(SECURITY_AES_128_GCM, &resp_key, &resp_iv);
     for piece in received.chunks(1024) {
         seal_data_chunk(&mut resp_cipher, None, &mut response_wire, piece).expect("可封");
@@ -336,7 +341,10 @@ async fn rust_to_rust_full_chain() {
     )
     .await
     .expect("客户端可读响应头");
-    assert_eq!(parsed.option, 0, "响应头种子已在 read 内校验，option 应为 0");
+    assert_eq!(
+        parsed.option, 0,
+        "响应头种子已在 read 内校验，option 应为 0"
+    );
 
     let mut client_resp = DataCipher::new(SECURITY_AES_128_GCM, &resp_key, &resp_iv);
     let mut echoed = Vec::new();

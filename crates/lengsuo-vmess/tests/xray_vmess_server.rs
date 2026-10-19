@@ -230,10 +230,7 @@ fn handle_connection(
     }
     let must = OPT_CHUNK_STREAM | OPT_CHUNK_MASKING | OPT_GLOBAL_PADDING;
     if decoded.option & must != must || decoded.option & OPT_AUTHENTICATED_LENGTH != 0 {
-        eprintln!(
-            "[vmess-in] 不支持的 option 组合：0x{:02x}",
-            decoded.option
-        );
+        eprintln!("[vmess-in] 不支持的 option 组合：0x{:02x}", decoded.option);
         return;
     }
     let Some(TargetAddr::V4(ip, port)) = decoded.target.clone() else {
@@ -374,8 +371,8 @@ fn xray_client_to_rust_server_echo() {
         _ => panic!("回显后端必须是 IPv4"),
     };
     let inbound = start_vmess_inbound(vec![cmd_key_from_uuid(&uuid)], Some(echo_addr));
-    let xray = XrayClient::start(&bin, &uuid_string(&uuid), inbound.addr.port())
-        .expect("xray 客户端启动");
+    let xray =
+        XrayClient::start(&bin, &uuid_string(&uuid), inbound.addr.port()).expect("xray 客户端启动");
 
     let mut tunnel = socks5_connect(xray.socks_port, echo_v4).expect("socks 隧道建立");
     let payload = payload_1b_4kib_256kib();
