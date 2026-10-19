@@ -322,6 +322,78 @@ fn cipher_overhead(cipher: &DataCipher) -> usize {
     }
 }
 
+// ---- GlobalPadding 版分帧（对齐 common/crypto/auth.go 的 Reader/Writer）----
+//
+// 与无 padding 版的关键差异（不可混用同一条掩码流）：
+// - 每 chunk 的掩码流消耗顺序是 **先 NextPaddingLen(2B) 后 Encode/Decode(2B)**
+//   （`AuthenticationWriter.seal` 与 `AuthenticationReader.readSize` 一致）；
+// - padding 是**明文**随机字节，追加在 AEAD 密文之后，不参与认证；
+// - 声明长度 = 载荷密文长度（含 tag）+ paddingLen；
+// - EOF 帧 = `AEAD(空)`（即仅 tag）+ padding，声明长度 = overhead + paddingLen。
+
+/// 读端第一步：从 2 字节线上 size 还原 `(声明长度, 本 chunk 的 paddingLen)`。
+/// 与写端逐 chunk 的掩码流消耗保持同步（先 padding 后 mask）。
+#[must_use]
+pub fn read_padded_size(mask: &mut DataSizeParser, size_wire: [u8; 2]) -> (u16, u16) {
+    let padding = mask.next_padding_len();
+    let declared = mask.decode_size(size_wire);
+    (declared, padding)
+}
+
+/// 读端第二步：解密一个已完整读入的 chunk（`wire` = 声明长度的载荷字节，
+/// 即 `载荷密文 || padding`）。`Ok(None)` = EOF 帧（声明长度恰为
+/// `overhead + padding`）。
+pub fn open_padded_chunk(
+    cipher: &mut DataCipher,
+    wire: &[u8],
+    padding_len: u16,
+) -> Result<Option<Vec<u8>>> {
+    let overhead = cipher_overhead(cipher);
+    let padding = padding_len as usize;
+    if wire.len() < padding + overhead {
+        return Err(Error::Truncated {
+            need: padding + overhead,
+            got: wire.len(),
+        });
+    }
+    let ct_len = wire.len() - padding;
+    if ct_len == overhead {
+        // 参考判据：size == overhead + padding 即 EOF（空载荷帧）。
+        return Ok(None);
+    }
+    let plain = cipher.open_payload(&wire[..ct_len], ct_len - overhead)?;
+    Ok(Some(plain))
+}
+
+/// 写端：封一个带 padding 的 chunk（size 段 + 载荷密文 + 明文 padding）。
+/// 空 `payload` 即 EOF 帧。
+pub fn seal_padded_chunk(
+    cipher: &mut DataCipher,
+    mask: &mut DataSizeParser,
+    out: &mut Vec<u8>,
+    payload: &[u8],
+) -> Result<()> {
+    if payload.len() > MAX_CHUNK_PAYLOAD {
+        return Err(Error::BadLength {
+            declared: payload.len(),
+            got: MAX_CHUNK_PAYLOAD,
+        });
+    }
+    let padding = mask.next_padding_len() as usize;
+    let ct = cipher.seal_payload(payload)?;
+    let declared = ct.len() + padding;
+    let declared = u16::try_from(declared).map_err(|_| Error::BadLength {
+        declared,
+        got: u16::MAX as usize,
+    })?;
+    out.extend_from_slice(&mask.encode_size(declared));
+    out.extend_from_slice(&ct);
+    let mut pad_bytes = vec![0u8; padding];
+    crate::fill_random(&mut pad_bytes)?;
+    out.extend_from_slice(&pad_bytes);
+    Ok(())
+}
+
 /// 异步写出单个 chunk（流式写端版）。
 pub async fn write_data_chunk<W: AsyncWrite + Unpin>(
     cipher: &mut DataCipher,
@@ -528,5 +600,68 @@ mod tests {
         let a = shake_mask(&IV, 0);
         let b = shake_mask(&IV, 0);
         assert_eq!(a, b, "确定性");
+    }
+
+    #[test]
+    fn padded_chunks_roundtrip_and_eof_declares_overhead_plus_padding() {
+        for security in [
+            crate::consts::SECURITY_NONE,
+            SECURITY_AES_128_GCM,
+            SECURITY_CHACHA20_POLY1305,
+        ] {
+            let mut seal_cipher = DataCipher::new(security, &KEY, &IV);
+            let mut open_cipher = DataCipher::new(security, &KEY, &IV);
+            let mut enc_mask = DataSizeParser::new(&IV);
+            let mut dec_mask = DataSizeParser::new(&IV);
+            let mut wire = Vec::new();
+            seal_padded_chunk(&mut seal_cipher, &mut enc_mask, &mut wire, b"padded!")
+                .expect("可写");
+            seal_padded_chunk(&mut seal_cipher, &mut enc_mask, &mut wire, &[0x33u8; 500])
+                .expect("可写");
+            seal_padded_chunk(&mut seal_cipher, &mut enc_mask, &mut wire, &[]).expect("EOF 可写");
+
+            let mut cursor = 0usize;
+            let mut frames = 0;
+            loop {
+                let size_wire: [u8; 2] = wire[cursor..cursor + 2].try_into().expect("size 段");
+                cursor += 2;
+                let (declared, padding) = read_padded_size(&mut dec_mask, size_wire);
+                let body = &wire[cursor..cursor + declared as usize];
+                cursor += declared as usize;
+                match open_padded_chunk(&mut open_cipher, body, padding).expect("可解") {
+                    Some(plain) if frames == 0 => assert_eq!(plain, b"padded!"),
+                    Some(plain) if frames == 1 => assert_eq!(plain, vec![0x33u8; 500]),
+                    Some(_) => panic!("多出帧"),
+                    None => {
+                        assert_eq!(
+                            declared as usize,
+                            cipher_overhead(&open_cipher) + padding as usize
+                        );
+                        break;
+                    }
+                }
+                frames += 1;
+            }
+            assert_eq!(frames, 2);
+            assert_eq!(cursor, wire.len(), "不得吞尾部字节");
+        }
+    }
+
+    #[test]
+    fn tampered_padded_chunk_fails_closed() {
+        let mut cipher = DataCipher::new(SECURITY_AES_128_GCM, &KEY, &IV);
+        let mut mask = DataSizeParser::new(&IV);
+        let mut wire = Vec::new();
+        seal_padded_chunk(&mut cipher, &mut mask, &mut wire, b"secret").expect("可写");
+        let last = wire.len() - 1;
+        wire[last] ^= 0x01; // 破坏 padding 末字节不影响认证；破坏密文/tag 才影响
+                            // size 段占前 2 字节，密文紧随；篡改密文中部。
+        wire[4] ^= 0x01;
+        let mut victim = DataCipher::new(SECURITY_AES_128_GCM, &KEY, &IV);
+        let mut dec_mask = DataSizeParser::new(&IV);
+        let (declared, padding) = read_padded_size(&mut dec_mask, [wire[0], wire[1]]);
+        let body = &wire[2..2 + declared as usize];
+        let result = open_padded_chunk(&mut victim, body, padding);
+        assert!(matches!(result, Err(Error::AuthFailed)), "实际 {result:?}");
     }
 }
