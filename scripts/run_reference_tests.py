@@ -141,6 +141,13 @@ def check_prerequisites(tests):
         for path in case.get("requires_files", []):
             if not path.is_file():
                 problems.append("参考二进制不存在：{}（{} 需要）".format(path, case["crate"]))
+        # 每个 target 对应的 tests/<target>.rs 必须存在，否则 cargo 会以编译错误收场、
+        # 被误读成“测试失败”。这里显式报错，缺失即退出，绝不静默跳过或降级为通过。
+        crate_dir = ROOT / "crates" / case["crate"]
+        for target in case["targets"]:
+            if not (crate_dir / "tests" / (target + ".rs")).is_file():
+                problems.append("参考测试目标不存在：crates/{}/tests/{}.rs（{} 需要）"
+                                .format(case["crate"], target, case["crate"]))
     if problems:
         raise RuntimeError("参考矩阵前置检查失败：" + "；".join(problems))
 
