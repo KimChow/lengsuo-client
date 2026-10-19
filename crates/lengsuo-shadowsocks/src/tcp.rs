@@ -33,9 +33,11 @@
 //!   方向永久 `Poisoned`，后续调用不碰流直接失败，调用方必须关闭连接，
 //!   不得重试，也没有明文回退路径。
 //!
-//! 未实现（不构成互通证明）：入站 salt 防重放、密钥轮换、参考实现的
+//! 未实现（不构成互通证明）：密钥轮换、参考实现的
 //! `drain.BehaviorSeedLimitedDrainer`（行为探测缓解与慢读惩罚）、分块 padding、
-//! UDP 中继、真实服务与跨平台互通验收。状态见 `docs/shadowsocks-status.md`。
+//! UDP 中继、真实服务与跨平台互通验收。入站 salt 防重放已接入
+//! [`Reader::recv_guarded`]（窗口与持久化见 `crate::replay`）。
+//! 状态见 `docs/shadowsocks-status.md`。
 
 use std::time::Duration;
 
@@ -45,6 +47,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio::time::timeout;
 
 use crate::key::{KeyError, MasterKey};
+use crate::replay::{Error as ReplayError, ReplayFilter};
 
 /// 单个 chunk 载荷明文上限，与参考实现 `writeStream` 的分段大小一致：
 /// `buf.Size(8192) - Overhead(16) - sizeBytes(18)` = 8158。
@@ -80,6 +83,9 @@ pub enum Error {
 
     #[error("单次操作超过截止时间")]
     Timeout,
+
+    #[error("salt 重放拒绝：{0}")]
+    Replay(#[from] ReplayError),
 
     #[error("共享协议原语拒绝：{0}")]
     Protocol(ss_core::Error),
@@ -284,6 +290,10 @@ pub struct Reader<R> {
     buffered: BufReader<R>,
     key: MasterKey,
     aead: Option<SessionAead>,
+    /// 本连接读到并列过会话的 salt；保留到首个 chunk 认证通过后交给重放窗口判定。
+    salt: Option<Vec<u8>>,
+    /// 本连接的重放判定是否已完成（无论是否启用 filter，只在首个认证 chunk 后置真）。
+    replay_checked: bool,
     closed: bool,
     poisoned: bool,
     wait: Duration,
@@ -299,6 +309,8 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             buffered: BufReader::new(read),
             key,
             aead: None,
+            salt: None,
+            replay_checked: false,
             closed: false,
             poisoned: false,
             wait,
@@ -335,7 +347,25 @@ impl<R: AsyncRead + Unpin> Reader<R> {
     /// 目标地址等跨 chunk 结构由上层在 `Ok(Some(..))` 交付的字节序列上续读重组；
     /// 本层只保证每个 chunk 的认证、顺序与长度边界。结束后的再次调用继续返回
     /// `Ok(None)`，不再碰流。
+    ///
+    /// 本入口不做 salt 唯一性检查（与 `UdpCodec::open` 的无状态语义一致）；需要
+    /// 入站防重放的调用方用 [`Reader::recv_guarded`]。
     pub async fn recv(&mut self) -> Result<Option<Vec<u8>>> {
+        self.drive(None).await
+    }
+
+    /// 与 [`Reader::recv`] 相同的读取语义，但会在**首个 chunk 认证通过后**把本连接
+    /// 的 salt 交给 `filter` 做重放判定：`filter` 由调用方在连接之间共享，第二次
+    /// 出现同 salt 时返回 [`Error::Replay`] 并永久 poison 本方向。
+    ///
+    /// 只读到 salt 就干净 EOF 的空流没有任何已认证的 chunk，不记录该 salt——这
+    /// 既避免把「无法证明通过认证」的 salt 记入窗口，也让攻击者无法用随机垃圾
+    /// salt 灌满窗口。
+    pub async fn recv_guarded(&mut self, filter: &mut ReplayFilter) -> Result<Option<Vec<u8>>> {
+        self.drive(Some(filter)).await
+    }
+
+    async fn drive(&mut self, filter: Option<&mut ReplayFilter>) -> Result<Option<Vec<u8>>> {
         if self.poisoned {
             return Err(Error::Poisoned);
         }
@@ -343,7 +373,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             return Ok(None);
         }
         let wait = self.wait;
-        let outcome = timeout(wait, self.recv_inner())
+        let outcome = timeout(wait, self.read_next(filter))
             .await
             .map_err(|_| Error::Timeout);
         match outcome {
@@ -363,7 +393,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         }
     }
 
-    async fn recv_inner(&mut self) -> Result<Option<Vec<u8>>> {
+    async fn read_next(&mut self, filter: Option<&mut ReplayFilter>) -> Result<Option<Vec<u8>>> {
         if self.aead.is_none() {
             // salt 读不满 ⇒ 截断（本层不认为“短 salt 后 EOF”是空流）。
             let mut salt = vec![0u8; self.key.salt_len()];
@@ -371,18 +401,19 @@ impl<R: AsyncRead + Unpin> Reader<R> {
                 .read_exact(&mut salt)
                 .await
                 .map_err(|err| read_io(err, "salt"))?;
+            self.salt = Some(salt.clone());
             let aead = self.key.session(&salt)?;
             self.aead = Some(aead);
         }
         // 边界探测：等到至少一个字节或确认 EOF，才让 read_chunk 开始读帧。
         if self.buffered.fill_buf().await?.is_empty() {
-            // 底层在 chunk 边界干净结束 ⇒ 正常收尾。
+            // 底层在 chunk 边界干净结束 ⇒ 正常收尾；此时没有任何已认证的 chunk。
             return Ok(None);
         }
         // 已可得的字节数用来区分“size 段读到一半结束”与“载荷段读到一半结束”。
         let available = self.buffered.buffer().len();
         let aead = self.aead.as_mut().expect("salt 之后会话必然已建立");
-        read_chunk(&mut self.buffered, aead)
+        let chunk = read_chunk(&mut self.buffered, aead)
             .await
             .map_err(core_error)
             .map_err(|err| match err {
@@ -394,6 +425,19 @@ impl<R: AsyncRead + Unpin> Reader<R> {
                     expect: "载荷段"
                 },
                 other => other,
-            })
+            })?;
+        match chunk {
+            Some(data) => {
+                // 认证通过且确有一块明文交付，才把 salt 记入重放窗口（每连接只记一次）。
+                if !self.replay_checked {
+                    if let (Some(filter), Some(salt)) = (filter, self.salt.as_deref()) {
+                        filter.record(salt, ReplayFilter::system_now_millis())?;
+                    }
+                    self.replay_checked = true;
+                }
+                Ok(Some(data))
+            }
+            None => Ok(None),
+        }
     }
 }
