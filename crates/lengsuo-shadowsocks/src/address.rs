@@ -20,7 +20,7 @@
 //! - **不做 DNS 解析**：返回 `Domain` 原样，由中继的拨号阶段决定是否解析。
 
 use ss_core::target::TargetAddr;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::tcp::Error;
 
@@ -33,10 +33,29 @@ const ATYP_V6: u8 = 0x04;
 ///
 /// 参考实现把「已读入但未交付」的字节放在 `buf.BufferedReader` 里，本类型承担同一
 /// 角色，同时给读端一个唯一的错误类型（地址读失败一律让连接永久失效，不重试）。
+/// 无底层流的占位读端：读到即 EOF。中继路径用它构造
+/// [`AddressReader::from_pending`]，所有地址字节改由 [`AddressReader::push`] 喂入。
+#[derive(Debug, Default)]
+pub struct NoStream;
+
+impl AsyncRead for NoStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        _buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        // 缓冲已空 ⇒ 直接 EOF（地址字节不足时呈现为 Truncated，调用方喂下一个 chunk）。
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 pub struct AddressReader<R> {
     inner: R,
     /// 已认证 chunk 中尚未消费的明文（可能包含地址前几字节与载荷开头）。
     pending: Vec<u8>,
+    /// 已成功消费的前缀长度。用游标而非 `drain`：地址可能跨 chunk，读到一半失败时
+    /// 必须保留进度，等下一个 chunk 到达后从断点续读（否则重试会丢字节）。
+    cursor: usize,
 }
 
 impl<R: AsyncRead + Unpin> AddressReader<R> {
@@ -46,6 +65,7 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
         Self {
             inner,
             pending: Vec::new(),
+            cursor: 0,
         }
     }
 
@@ -57,19 +77,40 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
     /// 缓冲区内尚未消费的字节数。
     #[must_use]
     pub fn buffered(&self) -> usize {
-        self.pending.len()
+        self.pending.len() - self.cursor
     }
 
-    /// 取出并清空缓冲区（中继把读到的字节转交上游时使用）。
+    /// 取出并清空缓冲区（中继把读到的字节转交上游时使用）。游标一并复位。
     pub fn take_pending(&mut self) -> Vec<u8> {
+        self.cursor = 0;
         std::mem::take(&mut self.pending)
     }
 
-    /// 按 SOCKS5 地址格式读出一个目标地址；同时把消费掉的字节从缓冲区移除。
+    /// 按 SOCKS5 地址格式读出一个目标地址。
     ///
-    /// 返回 `Err(Error::Truncated)` 表示流在地址读完前结束（fail-closed，调用方必须
-    /// 关闭连接）；`Err(Error::InvalidFrame)` 表示地址族/域名非法或长度越界。
+    /// **非破坏性**：内部用游标推进，读取成功才提交（`commit`），中途字节不足时
+    /// 返回 `Err(Error::Truncated)` 且**回滚游标**，调用方可在 `push` 新 chunk 后
+    /// 重试（地址跨 chunk 的关键）。`Err(Error::InvalidFrame)` 表示地址族/域名非法，
+    /// 属于永久错误，调用方必须关连接（fail-closed）。
     pub async fn read_target(&mut self) -> Result<TargetAddr, Error> {
+        let saved = self.cursor;
+        match self.try_read_target().await {
+            Ok(target) => {
+                // 提交：丢弃已消费的前缀（含地址与可能的载荷开头留在 pending 里）。
+                self.pending.drain(..self.cursor);
+                self.cursor = 0;
+                Ok(target)
+            }
+            Err(err) => {
+                // 字节不足：回滚，等更多 chunk；协议错误：不可恢复，同样回滚（调用方关连接）。
+                self.cursor = saved;
+                Err(err)
+            }
+        }
+    }
+
+    /// 在游标处尝试解析一个完整地址；成功时把游标推进到地址末尾。
+    async fn try_read_target(&mut self) -> Result<TargetAddr, Error> {
         let atyp = self.take_atyp().await?;
         match atyp {
             ATYP_V4 => {
@@ -99,7 +140,7 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
                 let port = self.take_port().await?;
                 Ok(TargetAddr::Domain(host, port))
             }
-            // 参考按 `addrType & 0x0F` 查表，表外（含 0x02/0x05..0x0F 与掩码后仍越界者）
+            // 参考按 `addrType & 0x0F` 查表，表外（含 0x02/0x05..0x0F 与掩码后越界者）
             // 一律 `unknown address type` 拒绝。
             other => Err(Error::InvalidFrame(usize::from(other))),
         }
@@ -111,7 +152,7 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
         Ok(raw & 0x0F)
     }
 
-    /// 取一个字节；缓冲区空时按需从流里读，EOF 视为截断。
+    /// 取一个字节；缓冲不足时从底层流续读，EOF 视为截断。
     async fn take_u8(&mut self, expect: &'static str) -> Result<u8, Error> {
         let mut one = [0u8; 1];
         self.fill(&mut one, expect).await?;
@@ -125,14 +166,14 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
         Ok(u16::from_be_bytes(raw))
     }
 
-    /// 用流填充 `out`：先消费缓冲，缓冲不够才读底层流（正是参考
-    /// `buf.Buffer.ReadFullFrom` 的行为）。任何一个字节来自 EOF 都是截断错误；
-    /// `expect` 用于把「地址族/域名体读到一半」与「载荷读到一半」区分开。
+    /// 从游标处填充 `out`：先消费缓冲区剩余字节，不足时读底层流（正是参考
+    /// `buf.Buffer.ReadFullFrom` 的行为）。游标随成功读取推进；任何一步字节不足
+    /// 都返回 `Truncated`（调用方回滚游标重试），底层 EOF 亦视为截断。
     async fn fill(&mut self, out: &mut [u8], expect: &'static str) -> Result<(), Error> {
-        let take = out.len().min(self.pending.len());
+        let take = out.len().min(self.pending.len() - self.cursor);
         if take > 0 {
-            out[..take].copy_from_slice(&self.pending[..take]);
-            self.pending.drain(..take);
+            out[..take].copy_from_slice(&self.pending[self.cursor..self.cursor + take]);
+            self.cursor += take;
         }
         if take == out.len() {
             return Ok(());
@@ -140,6 +181,7 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
         self.inner
             .read_exact(&mut out[take..])
             .await
+            .map(|_| ())
             .map_err(|err| {
                 if err.kind() == std::io::ErrorKind::UnexpectedEof {
                     Error::Truncated { expect }
@@ -147,6 +189,19 @@ impl<R: AsyncRead + Unpin> AddressReader<R> {
                     Error::Io(err)
                 }
             })
+    }
+}
+
+impl AddressReader<NoStream> {
+    /// 只有已缓冲字节、没有底层流的构造（中继路径：chunk 由调用方 `push` 驱动，
+    /// 地址所需字节全部来自已认证 chunk，`inner` 不被读取）。
+    #[must_use]
+    pub fn from_pending() -> Self {
+        AddressReader {
+            inner: NoStream,
+            pending: Vec::new(),
+            cursor: 0,
+        }
     }
 }
 
@@ -176,7 +231,10 @@ mod tests {
     #[tokio::test]
     async fn reads_v4_from_stream() {
         let mut r = reader(&[0x01, 127, 0, 0, 1, 0x1F, 0x90]);
-        assert_eq!(r.read_target().await.unwrap(), TargetAddr::V4([127, 0, 0, 1], 8080));
+        assert_eq!(
+            r.read_target().await.unwrap(),
+            TargetAddr::V4([127, 0, 0, 1], 8080)
+        );
         assert_eq!(r.buffered(), 0);
     }
 
@@ -208,14 +266,20 @@ mod tests {
     async fn atyp_masked_before_dispatch() {
         // 参考对地址族字节做 & 0x0F：0x11 → 0x01（IPv4）。
         let mut r = reader(&[0x11, 8, 8, 8, 8, 0, 53]);
-        assert_eq!(r.read_target().await.unwrap(), TargetAddr::V4([8, 8, 8, 8], 53));
+        assert_eq!(
+            r.read_target().await.unwrap(),
+            TargetAddr::V4([8, 8, 8, 8], 53)
+        );
     }
 
     #[tokio::test]
     async fn buffered_bytes_are_consumed_first() {
         let mut r = reader(&[]);
         r.push(&[0x01, 127, 0, 0, 1, 0x00, 0x50, b'x', b'y']);
-        assert_eq!(r.read_target().await.unwrap(), TargetAddr::V4([127, 0, 0, 1], 80));
+        assert_eq!(
+            r.read_target().await.unwrap(),
+            TargetAddr::V4([127, 0, 0, 1], 80)
+        );
         assert_eq!(r.take_pending(), b"xy".to_vec());
     }
 

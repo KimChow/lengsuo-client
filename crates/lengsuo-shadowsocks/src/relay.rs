@@ -34,7 +34,9 @@ use tokio::time::timeout;
 
 use crate::address::AddressReader;
 use crate::replay::ReplayFilter;
-use crate::tcp::{Error as TcpError, Reader as TcpReader, Writer as TcpWriter};
+use crate::tcp::{
+    shared_replay, Error as TcpError, Reader as TcpReader, ReplayFilterShared, Writer as TcpWriter,
+};
 
 /// 中继失败原因。所有变体都不含口令、主密钥、salt 或 subkey，可安全落日志。
 #[derive(Debug, thiserror::Error)]
@@ -145,7 +147,6 @@ impl RelayService {
         })
     }
 
-    #[must_use]
     pub fn local_addr(&self) -> Result<SocketAddr, Error> {
         self.listener.local_addr().map_err(Error::Listen)
     }
@@ -159,15 +160,19 @@ impl RelayService {
     pub async fn start(self) -> Result<RelayHandle, Error> {
         let (stop_tx, stop_rx) = watch::channel(false);
         let listener = self.listener;
-        let config = self.config;
+        let config = Arc::clone(&self.config);
+        let shared_config = Arc::clone(&config);
+        // 重放过滤器**跨连接共享**：重放保护的意义就在于同一 salt 在任何连接上
+        // 第二次出现都要拒绝。句柄内部只在 `record` 这一次同步调用上借用，不跨 await。
+        let replay: Option<ReplayFilterShared> = match config.replay {
+            Some((capacity, window)) => Some(shared_replay(
+                ReplayFilter::new(capacity, window).map_err(Error::Replay)?,
+            )),
+            None => None,
+        };
         let join = tokio::task::spawn_local(async move {
-            let replay = match config.replay {
-                Some((capacity, window)) => match ReplayFilter::new(capacity, window) {
-                    Ok(filter) => Some(filter),
-                    Err(err) => return Err(Error::Replay(err)),
-                },
-                None => None,
-            };
+            let config = shared_config;
+            let shared = replay;
             let mut connections: JoinSet<()> = JoinSet::new();
             let mut stop_rx = stop_rx;
             loop {
@@ -181,8 +186,10 @@ impl RelayService {
                             Err(_) => continue,
                         };
                         let config = Arc::clone(&config);
+                        // 只克隆 Rc 句柄（廉价），不跨 await 持有 RefCell 借用。
+                        let replay = shared.clone();
                         connections.spawn_local(async move {
-                            let _ = handle_connection(stream, config, replay.as_mut()).await;
+                            let _ = handle_connection(stream, config, replay.as_ref()).await;
                         });
                     }
                     changed = stop_rx.changed() => {
@@ -197,11 +204,8 @@ impl RelayService {
             connections.shutdown().await;
             Ok(())
         });
-        // 建连前先确认配置里的重放窗口可构造：非法配置必须在 start 就失败，
+        // 重放窗口的合法性已在上面构造共享句柄时校验：非法配置必须在 start 就失败，
         // 而不是等到第一条连接才暴露（服务对外表现为「已启动但不工作」）。
-        if let Some((capacity, window)) = config.replay {
-            ReplayFilter::new(capacity, window).map_err(Error::Replay)?;
-        }
         Ok(RelayHandle {
             stop_tx: Some(stop_tx),
             join: Some(join),
@@ -252,7 +256,7 @@ impl Drop for RelayHandle {
 async fn handle_connection(
     mut stream: TcpStream,
     config: Arc<RelayConfig>,
-    replay: Option<&mut ReplayFilter>,
+    replay: Option<&ReplayFilterShared>,
 ) -> Result<(), Error> {
     let wait = config.idle_timeout;
     let outcome = timeout(wait, async {
@@ -261,19 +265,26 @@ async fn handle_connection(
             .map_err(Error::Handshake)?;
         // 地址读取借下游读半（与 reader 同一底层流，不会双读）；地址读完即丢弃。
         let mut target: Option<TargetAddr> = None;
+        // 与地址同 chunk 到达的载荷开头（必须原样转交上游，不能丢）。
+        let mut head_payload: Vec<u8> = Vec::new();
         {
-            let mut address = AddressReader::new(reader.get_ref());
+            // 地址字节全部来自已认证 chunk：AddressReader 只吃 `push` 进来的字节，
+            // 不直接读底层流（避免与 reader 的读半双读/借用冲突）。
+            let mut address = AddressReader::from_pending();
             while target.is_none() {
                 let chunk = match replay {
-                    Some(filter) => reader.recv_guarded(filter).await,
+                    Some(filter) => reader.recv_guarded_shared(filter).await,
                     None => reader.recv().await,
                 }
                 .map_err(Error::Handshake)?;
                 match chunk {
                     Some(bytes) => {
                         address.push(&bytes);
+                        // 非破坏性解析：字节不够时回滚游标，等下一个 chunk。
                         if let Ok(parsed) = address.read_target().await {
                             target = Some(parsed);
+                            // 地址之后剩余的同 chunk 字节即载荷开头，转交上游。
+                            head_payload = address.take_pending();
                         }
                     }
                     // 地址没读完就干净收尾 ⇒ 握手失败，不是空请求。
@@ -286,7 +297,7 @@ async fn handle_connection(
         let upstream = dial(&target, wait).await?;
         let writer = TcpWriter::new(write_half, config.suite, &config.password, wait)
             .map_err(Error::Handshake)?;
-        relay_both_ways(reader, writer, upstream).await
+        relay_both_ways(reader, writer, upstream, head_payload).await
     })
     .await;
     match outcome {
@@ -321,27 +332,38 @@ async fn relay_both_ways<R, W>(
     reader: TcpReader<R>,
     writer: TcpWriter<W>,
     upstream: TcpStream,
+    head_payload: Vec<u8>,
 ) -> Result<(), Error>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     let (upstream_read, upstream_write) = upstream.into_split();
-    let to_upstream = copy_request(reader, upstream_write);
+    let to_upstream = copy_request(reader, upstream_write, head_payload);
     let to_client = copy_response(writer, upstream_read);
-    tokio::select! {
-        result = to_upstream => result?,
-        result = to_client => result?,
-    }
+    // 两个方向**并发**跑：请求方向干净结束会对上游做写半关闭（`task.Close(link.Writer)`），
+    // 但绝不能因此取消回程方向——回程可能尚未写出（echo 需要先收到请求）。
+    // 因此用 `join` 而非 `select!`（`select!` 会在任一分支完成时丢弃另一个方向）。
+    let (request_result, response_result) = tokio::join!(to_upstream, to_client);
+    request_result?;
+    response_result?;
     Ok(())
 }
 
 /// 请求方向：把已认证的明文写上游，上游写出错则断开（不重试）。
-async fn copy_request<R, W>(mut reader: TcpReader<R>, mut upstream: W) -> Result<(), Error>
+async fn copy_request<R, W>(
+    mut reader: TcpReader<R>,
+    mut upstream: W,
+    head_payload: Vec<u8>,
+) -> Result<(), Error>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    // 与地址同 chunk 到达的载荷必须先写上游，否则会丢首包（首包常含整条请求）。
+    if !head_payload.is_empty() {
+        upstream.write_all(&head_payload).await.map_err(Error::Io)?;
+    }
     loop {
         let chunk = reader.recv().await.map_err(Error::Stream)?;
         match chunk {
@@ -355,10 +377,7 @@ where
 }
 
 /// 回程方向：上游字节经 `TcpWriter`（新方向 salt + 新 nonce 序列）回写给客户端。
-async fn copy_response<W, R>(
-    mut writer: TcpWriter<W>,
-    mut upstream: R,
-) -> Result<(), Error>
+async fn copy_response<W, R>(mut writer: TcpWriter<W>, mut upstream: R) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin,
     R: AsyncRead + Unpin,
@@ -370,9 +389,6 @@ where
             // 干净收尾：写半关闭客户端方向，不伪造终止帧。
             return writer.shutdown().await.map_err(Error::Stream);
         }
-        writer
-            .send(&buffer[..got])
-            .await
-            .map_err(Error::Stream)?;
+        writer.send(&buffer[..got]).await.map_err(Error::Stream)?;
     }
 }

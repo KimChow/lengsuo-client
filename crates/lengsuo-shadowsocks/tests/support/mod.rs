@@ -309,7 +309,9 @@ pub async fn socks5_connect(proxy_port: u16, target: &TargetAddr) -> TcpStream {
         "SOCKS CONNECT 应被接受：{head:?}"
     );
     let trailing = match head[3] {
-        0x01 => &[u8 + 2,
+        // ATYP=BND.ADDR 类型：IPv4 余 4 字节 + 2 字节端口。
+        0x01 => 4 + 2,
+        // 域名：1 字节长度 + 域名体 + 2 字节端口。
         0x03 => 1 + usize::from(head[1]) + 2,
         0x04 => 16 + 2,
         other => panic!("SOCKS 响应未知 ATYP：{other:#04x}"),

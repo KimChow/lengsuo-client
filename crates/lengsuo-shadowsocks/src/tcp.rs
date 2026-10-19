@@ -47,8 +47,44 @@ use ss_core::crypto::{CipherSuite, SessionAead, TAG_LEN};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::time::timeout;
 
+use std::sync::{Arc, Mutex};
+
 use crate::key::{KeyError, MasterKey};
 use crate::replay::{Error as ReplayError, ReplayFilter};
+
+/// 跨连接共享的重放过滤器句柄。用 `Arc<Mutex<..>>`（**Send + Sync**）：`record`
+/// 是同步方法，锁只在这一次调用内持有，不跨 await。
+pub type ReplayFilterShared = Arc<Mutex<ReplayFilter>>;
+
+/// 构造一个共享句柄。
+#[must_use]
+pub fn shared_replay(filter: ReplayFilter) -> ReplayFilterShared {
+    Arc::new(Mutex::new(filter))
+}
+
+/// 重放判定句柄：一次性可变借用或跨连接共享句柄二选一。
+///
+/// 用枚举而非 trait object，避免在热路径上引入动态分发；两种形态都只是借用，
+/// 不改变 `Reader` 各 future 的 `Send`/`Sync` 性质（`&Arc<Mutex<..>>` 是 `Send`）。
+pub enum FilterRef<'a> {
+    /// 调用方持有唯一可变引用（单连接测试路径）。
+    Unique(&'a mut ReplayFilter),
+    /// 跨连接共享句柄（中继服务路径）。
+    Shared(&'a ReplayFilterShared),
+}
+
+impl FilterRef<'_> {
+    fn record(&mut self, salt: &[u8], now_millis: u64) -> std::result::Result<(), Error> {
+        let outcome = match self {
+            Self::Unique(filter) => filter.record(salt, now_millis),
+            Self::Shared(shared) => shared
+                .lock()
+                .expect("重放窗口锁中毒")
+                .record(salt, now_millis),
+        };
+        outcome.map_err(Error::Replay)
+    }
+}
 
 /// 单个 chunk 载荷明文上限，与参考实现 `writeStream` 的分段大小一致：
 /// `buf.Size(8192) - Overhead(16) - sizeBytes(18)` = 8158。
@@ -363,10 +399,19 @@ impl<R: AsyncRead + Unpin> Reader<R> {
     /// 既避免把「无法证明通过认证」的 salt 记入窗口，也让攻击者无法用随机垃圾
     /// salt 灌满窗口。
     pub async fn recv_guarded(&mut self, filter: &mut ReplayFilter) -> Result<Option<Vec<u8>>> {
-        self.drive(Some(filter)).await
+        self.drive(Some(FilterRef::Unique(filter))).await
     }
 
-    async fn drive(&mut self, filter: Option<&mut ReplayFilter>) -> Result<Option<Vec<u8>>> {
+    /// 与 [] 同语义，但接受**跨连接共享**的重放句柄
+    /// （中继服务用：多条连接并发握手时不会争用同一个 ）。
+    pub async fn recv_guarded_shared(
+        &mut self,
+        filter: &ReplayFilterShared,
+    ) -> Result<Option<Vec<u8>>> {
+        self.drive(Some(FilterRef::Shared(filter))).await
+    }
+
+    async fn drive(&mut self, filter: Option<FilterRef<'_>>) -> Result<Option<Vec<u8>>> {
         if self.poisoned {
             return Err(Error::Poisoned);
         }
@@ -394,7 +439,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         }
     }
 
-    async fn read_next(&mut self, filter: Option<&mut ReplayFilter>) -> Result<Option<Vec<u8>>> {
+    async fn read_next(&mut self, filter: Option<FilterRef<'_>>) -> Result<Option<Vec<u8>>> {
         if self.aead.is_none() {
             // salt 读不满 ⇒ 截断（本层不认为“短 salt 后 EOF”是空流）。
             let mut salt = vec![0u8; self.key.salt_len()];
@@ -431,7 +476,8 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             Some(data) => {
                 // 认证通过且确有一块明文交付，才把 salt 记入重放窗口（每连接只记一次）。
                 if !self.replay_checked {
-                    if let (Some(filter), Some(salt)) = (filter, self.salt.as_deref()) {
+                    if let (Some(mut filter), Some(salt)) = (filter, self.salt.as_deref()) {
+                        // record 是同步方法，锁/借用只覆盖这一次调用，绝不跨 await。
                         filter.record(salt, ReplayFilter::system_now_millis())?;
                     }
                     self.replay_checked = true;
