@@ -17,13 +17,17 @@
 //! 校验失败 fail-closed；加载时同时接受上一代密钥并支持升级重写（密钥轮换）。
 //! 状态见 `docs/shadowsocks-status.md`。
 
+pub mod address;
 mod key;
 mod persist;
+mod relay;
 mod replay;
 pub mod tcp;
 pub mod udp;
 
+pub use address::AddressReader;
 pub use persist::MacKey;
+pub use relay::{RelayConfig, RelayConfigParts, RelayHandle, RelayService};
 pub use replay::{Error as ReplayError, LoadedState, ReplayFilter};
 pub use ss_core::crypto::CipherSuite;
 pub use ss_core::target::TargetAddr;
