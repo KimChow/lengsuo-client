@@ -17,10 +17,12 @@
 //! UDP 中继报文本身的消息层字节编解码见 `udp.rs`；分片重组与切片见
 //! `fragment.rs`。
 //!
-//! 尚未实现（不宣称）：Brutal/BBR 拥塞控制、0-RTT、连接迁移、
-//! masquerade 自定义（file/proxy/string）。
+//! 尚未实现（不宣称）：**拥塞器内核替换**（Brutal/BBR 算法本身未移植，
+//! 实际仍为 quinn 默认 CUBIC；`congestion` 模块只做参数/协商面）、
+//! 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
 //! 状态、验收命令与偏离清单见 `docs/hysteria-status.md`。
 
+pub mod congestion;
 pub mod connect_udp;
 pub mod fragment;
 mod frame;
