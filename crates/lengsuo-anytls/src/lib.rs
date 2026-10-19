@@ -4,6 +4,8 @@
 pub mod auth;
 pub mod client_state;
 pub mod frame;
+pub mod padding;
+pub mod server;
 pub mod server_state;
 
 #[derive(Debug, thiserror::Error)]
