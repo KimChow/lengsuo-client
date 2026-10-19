@@ -6,6 +6,7 @@
 //! 客户端流量层见 [`vision`]。
 
 pub mod header;
+pub mod mux;
 pub mod stream;
 pub mod vision;
 pub mod xel;
