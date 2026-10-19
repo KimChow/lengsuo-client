@@ -49,6 +49,7 @@ use tokio::time::timeout;
 
 use std::sync::{Arc, Mutex};
 
+use crate::drain::{BehaviorSeedLimitedDrainer, BehaviorSeedSource, HandshakeError};
 use crate::key::{KeyError, MasterKey};
 use crate::replay::{Error as ReplayError, ReplayFilter};
 
@@ -129,6 +130,9 @@ pub enum Error {
 
     #[error("底层 I/O 失败：{0}")]
     Io(#[from] std::io::Error),
+
+    #[error("握手失败触发行为探测缓解：{0}")]
+    Drained(HandshakeError),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -324,7 +328,7 @@ impl<W: AsyncWrite + Unpin> Writer<W> {
 /// `into_inner`/`get_mut`（会丢掉已读入缓冲但未交付的字节）。
 /// **故意不实现 `Debug`**（持有主密钥与 subkey）。
 pub struct Reader<R> {
-    buffered: BufReader<R>,
+    pub(crate) buffered: BufReader<R>,
     key: MasterKey,
     aead: Option<SessionAead>,
     /// 本连接读到并列过会话的 salt；保留到首个 chunk 认证通过后交给重放窗口判定。
@@ -334,6 +338,8 @@ pub struct Reader<R> {
     closed: bool,
     poisoned: bool,
     wait: Duration,
+    /// 行为探测缓解（参考 `ReadTCPSession` 的 drainer 钩子）；细节见 `crate::tcp_drain`。
+    pub(crate) drainer: Option<BehaviorSeedLimitedDrainer>,
 }
 
 impl<R: AsyncRead + Unpin> Reader<R> {
@@ -351,7 +357,26 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             closed: false,
             poisoned: false,
             wait,
+            drainer: None,
         })
+    }
+
+    /// 挂上行为探测缓解（参考 `ReadTCPSession` 的 drainer）；细节见 `crate::tcp_drain`。
+    #[must_use]
+    pub fn with_drainer(self, seed_source: Option<&mut BehaviorSeedSource>) -> Self {
+        crate::tcp_drain::attach(self, seed_source)
+    }
+
+    /// 直接指定 seed（测试与可复现部署用）。
+    #[must_use]
+    pub fn with_drainer_seed(self, seed: i64) -> Self {
+        crate::tcp_drain::attach_seed(self, seed)
+    }
+
+    /// 当前 drain 预算（未挂 drainer 时为 `None`）。仅供测试与诊断观察。
+    #[must_use]
+    pub fn drain_budget(&self) -> Option<i64> {
+        crate::tcp_drain::budget(self)
     }
 
     #[must_use]
@@ -439,16 +464,36 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         }
     }
 
+    /// 握手失败时的行为探测缓解钩子（参考 `drain.WithError` → `Drain`）。
+    ///
+    /// 未挂 drainer 时原样返回 `err`；挂上时按 seed 限量读出并丢弃对端字节，
+    /// 详见 `crate::tcp_drain`。
+    async fn drain_handshake(&mut self, handshake: HandshakeError, err: Error) -> Error {
+        crate::tcp_drain::drain_handshake(self, handshake, err).await
+    }
+
     async fn read_next(&mut self, filter: Option<FilterRef<'_>>) -> Result<Option<Vec<u8>>> {
         if self.aead.is_none() {
             // salt 读不满 ⇒ 截断（本层不认为“短 salt 后 EOF”是空流）。
             let mut salt = vec![0u8; self.key.salt_len()];
-            self.buffered
-                .read_exact(&mut salt)
-                .await
-                .map_err(|err| read_io(err, "salt"))?;
+            if let Err(err) = self.buffered.read_exact(&mut salt).await {
+                return Err(self
+                    .drain_handshake(HandshakeError::ShortHeader, read_io(err, "salt"))
+                    .await);
+            }
+            // salt 等价于参考读完 IV 后的 `AcknowledgeReceive(ivLen)`：
+            // 已认证前缀从不变量里抵扣，正常客户端不必为缓解付代价。
+            crate::tcp_drain::credit_salt(self);
             self.salt = Some(salt.clone());
-            let aead = self.key.session(&salt)?;
+            let aead = match self.key.session(&salt) {
+                Ok(aead) => aead,
+                // 派生失败等价于参考的 “failed to initialize decoding stream”。
+                Err(err) => {
+                    return Err(self
+                        .drain_handshake(HandshakeError::DecodeInit, Error::Key(err))
+                        .await)
+                }
+            };
             self.aead = Some(aead);
         }
         // 边界探测：等到至少一个字节或确认 EOF，才让 read_chunk 开始读帧。
@@ -459,19 +504,32 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         // 已可得的字节数用来区分“size 段读到一半结束”与“载荷段读到一半结束”。
         let available = self.buffered.buffer().len();
         let aead = self.aead.as_mut().expect("salt 之后会话必然已建立");
-        let chunk = read_chunk(&mut self.buffered, aead)
-            .await
-            .map_err(core_error)
-            .map_err(|err| match err {
-                // read_chunk 用 read_exact 取段，帧内 EOF ⇒ 截断；按已可得字节定位段。
-                Error::Truncated { .. } if available < SIZE_WIRE_LEN => {
-                    Error::Truncated { expect: "size 段" }
-                }
-                Error::Truncated { .. } => Error::Truncated {
-                    expect: "载荷段"
-                },
-                other => other,
-            })?;
+        let chunk = match read_chunk(&mut self.buffered, aead).await {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let mapped = match core_error(err) {
+                    // read_chunk 用 read_exact 取段，帧内 EOF ⇒ 截断；按已可得字节定位段。
+                    Error::Truncated { .. } if available < SIZE_WIRE_LEN => {
+                        Error::Truncated { expect: "size 段" }
+                    }
+                    Error::Truncated { .. } => Error::Truncated {
+                        expect: "载荷段"
+                    },
+                    other => other,
+                };
+                // 首个 chunk 认证失败等价于参考的 “failed to match an user” /
+                // “failed iv check”：探测者最可能命中这条路径，必须同样缓解。
+                let handshake = match mapped {
+                    Error::Authentication => Some(HandshakeError::NoUser),
+                    Error::Truncated { .. } => Some(HandshakeError::ShortHeader),
+                    _ => None,
+                };
+                return Err(match handshake {
+                    Some(h) => self.drain_handshake(h, mapped).await,
+                    None => mapped,
+                });
+            }
+        };
         match chunk {
             Some(data) => {
                 // 认证通过且确有一块明文交付，才把 salt 记入重放窗口（每连接只记一次）。

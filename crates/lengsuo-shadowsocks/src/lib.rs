@@ -18,14 +18,25 @@
 //! 状态见 `docs/shadowsocks-status.md`。
 
 pub mod address;
+pub mod drain;
 mod key;
+pub mod padding;
 mod persist;
 mod relay;
 mod replay;
 pub mod tcp;
+mod tcp_drain;
 pub mod udp;
 
 pub use address::AddressReader;
+pub use drain::{
+    response_behavior_seed, BehaviorSeedLimitedDrainer, BehaviorSeedSource, DrainError,
+    HandshakeError, DRAIN_FOUNDATION, SALT_LEN,
+};
+pub use padding::{
+    dechunk_padded, decode_flags, encode_padded, PaddedChunk, PaddingError, PaddingPolicy,
+    MAX_PADDING_LEN,
+};
 pub use persist::MacKey;
 pub use relay::{RelayConfig, RelayConfigParts, RelayHandle, RelayService};
 pub use replay::{Error as ReplayError, LoadedState, ReplayFilter};
