@@ -24,9 +24,13 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
 
-use crate::config::Endpoint;
-
-use crate::config::NodeConfig;
+use crate::config::{Endpoint, NodeConfig, Protocol};
+use crate::outbound_hysteria::HysteriaOutbound;
+use crate::outbound_ss::ShadowsocksOutbound;
+use crate::outbound_ss2022::Ss2022Outbound;
+use crate::outbound_vless::VlessOutbound;
+use crate::outbound_vmess::VmessOutbound;
+use crate::outbound_wireguard::WireguardOutbound;
 use lengsuo_anytls::auth::Credential as AnyTlsCredential;
 use lengsuo_anytls::client_state::ClientState;
 use lengsuo_anytls::frame::{Command as AnyTlsCommand, Frame};
@@ -58,6 +62,20 @@ pub enum Outbound {
     Trojan(TrojanOutbound),
     /// anytls：认证块 + 客户端 Settings 已写出，且已收到服务端 ServerSettings。
     AnyTls(Box<AnyTlsOutbound>),
+    /// vless：请求头已完整写出且已收到服务端成功响应头 `[0, 0]`。
+    Vless(Box<VlessOutbound>),
+    /// vmess：AEAD 请求头已写出、加密数据帧已送达，且已收到认证响应头。
+    Vmess(Box<VmessOutbound>),
+    /// shadowsocks（经典 AEAD）：salt + 目标地址 + 首批载荷已写出，
+    /// 且回程方向已成功解出至少一个通过认证的 chunk。
+    Shadowsocks(Box<ShadowsocksOutbound>),
+    /// ss2022（SIP022）：请求流开场（salt + 固定头 + 变长头）已写出，
+    /// 且服务端响应流开场已通过 salt 归属校验。
+    Ss2022(Box<Ss2022Outbound>),
+    /// hysteria2：QUIC + H3 认证已完成（status=233），且 TCP 承载请求已被接受。
+    Hysteria(Box<HysteriaOutbound>),
+    /// wireguard：Noise IK 响应已认证解封并派生 transport 会话密钥。
+    Wireguard(WireguardOutbound),
 }
 
 /// anytls 出站会话：已认证、已协商版本，可继续开流（SYN/PUSH）转发业务。
@@ -81,6 +99,24 @@ pub enum DialError {
     AnyTls(#[from] lengsuo_anytls::Error),
     #[error("anytls 客户端状态机拒绝：{0}")]
     AnyTlsState(String),
+    #[error("vless 协议错误：{0}")]
+    Vless(#[from] lengsuo_vless::stream::Error),
+    #[error("vless 请求头编码失败：{0}")]
+    VlessHeader(#[from] lengsuo_vless::header::Error),
+    #[error("vmess 协议错误：{0}")]
+    Vmess(#[from] lengsuo_vmess::Error),
+    #[error("shadowsocks 协议错误：{0}")]
+    Shadowsocks(#[from] lengsuo_shadowsocks::TcpError),
+    #[error("ss2022 协议错误：{0}")]
+    Ss2022(#[from] lengsuo_ss2022::Error),
+    #[error("hysteria 协议错误：{0}")]
+    Hysteria(#[from] lengsuo_hysteria::proxy::ProxyError),
+    #[error("hysteria QUIC/H3 建连失败：{0}")]
+    HysteriaConnect(#[from] lengsuo_hysteria::quic::ConnectError),
+    #[error("wireguard 协议错误：{0}")]
+    Wireguard(#[from] lengsuo_wireguard::TransportError),
+    #[error("wireguard 握手失败：{0}")]
+    WireguardHandshake(#[from] lengsuo_wireguard::handshake::ResponderError),
     #[error("认证被对端拒绝：{0}")]
     Rejected(String),
     #[error("等待认证确认超时")]
@@ -100,6 +136,16 @@ async fn resolve(host: &str, port: u16, wait: Duration) -> Result<SocketAddr, Di
         .into_iter()
         .next()
         .ok_or_else(|| DialError::Resolve(format!("{host}:{port}: 无地址")))
+}
+
+/// [`resolve`] 的公开别名：QUIC/UDP 承载（hysteria、wireguard）需要
+/// `SocketAddr` 而不是 `TargetAddr`。
+pub(crate) async fn resolve_public(
+    host: &str,
+    port: u16,
+    wait: Duration,
+) -> Result<SocketAddr, DialError> {
+    resolve(host, port, wait).await
 }
 
 /// 由配置构造 TLS 客户端：名称缺省用 endpoint.host，信任锚来自 `ca_pem`。
@@ -142,14 +188,73 @@ pub async fn dial(
     observe: Duration,
 ) -> Result<Outbound, DialError> {
     match config.protocol {
-        crate::config::Protocol::Trojan => dial_trojan(config, wait, observe)
+        Protocol::Trojan => dial_trojan(config, wait, observe)
             .await
             .map(Outbound::Trojan),
-        crate::config::Protocol::AnyTls => dial_anytls(config, wait)
+        Protocol::AnyTls => dial_anytls(config, wait)
             .await
             .map(Box::new)
             .map(Outbound::AnyTls),
+        Protocol::Vless => crate::outbound_vless::dial_vless(config, wait)
+            .await
+            .map(Box::new)
+            .map(Outbound::Vless),
+        Protocol::Vmess => crate::outbound_vmess::dial_vmess(config, wait)
+            .await
+            .map(Box::new)
+            .map(Outbound::Vmess),
+        Protocol::Shadowsocks => crate::outbound_ss::dial_shadowsocks(config, wait)
+            .await
+            .map(Box::new)
+            .map(Outbound::Shadowsocks),
+        Protocol::Ss2022 => crate::outbound_ss2022::dial_ss2022(config, wait)
+            .await
+            .map(Box::new)
+            .map(Outbound::Ss2022),
+        Protocol::Hysteria => crate::outbound_hysteria::dial_hysteria(config, wait)
+            .await
+            .map(Box::new)
+            .map(Outbound::Hysteria),
+        Protocol::Wireguard => crate::outbound_wireguard::dial_wireguard(config, wait)
+            .await
+            .map(Outbound::Wireguard),
     }
+}
+
+/// 由配置取 dry-run 握手目标（缺省 `127.0.0.1:9` discard，与 trojan 一致）。
+pub(crate) fn probe_target(config: &NodeConfig) -> TargetAddr {
+    let probe = config.probe_target.clone().unwrap_or_else(|| Endpoint {
+        host: TROJAN_PROBE_FALLBACK_HOST.to_owned(),
+        port: TROJAN_PROBE_FALLBACK_PORT,
+    });
+    match probe.host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => TargetAddr::V4(v4.octets(), probe.port),
+        Ok(IpAddr::V6(v6)) => TargetAddr::V6(v6.octets(), probe.port),
+        Err(_) => TargetAddr::Domain(probe.host, probe.port),
+    }
+}
+
+/// 解析并连接节点端点，返回已完成的 TLS 连接。
+pub(crate) async fn connect_tls(
+    config: &NodeConfig,
+    wait: Duration,
+) -> Result<NodeTlsStream, DialError> {
+    let client = tls_client(config, wait)?;
+    let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
+    Ok(client.connect(addr).await?)
+}
+
+/// 解析并连接节点端点，返回裸 TCP 连接（shadowsocks / ss2022 用）。
+pub(crate) async fn connect_tcp(
+    config: &NodeConfig,
+    wait: Duration,
+) -> Result<TcpStream, DialError> {
+    let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
+    let connect = TcpStream::connect(addr);
+    timeout(wait, connect)
+        .await
+        .map_err(|_| DialError::Timeout)?
+        .map_err(|err| DialError::Resolve(format!("连接 {} 失败：{}", config.endpoint.host, err)))
 }
 
 /// trojan 出站：TLS → 写请求头 → 观察窗负向排除。

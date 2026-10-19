@@ -42,6 +42,42 @@ pub async fn dry_run(nodes: &[NodeConfig], wait: Duration, observe: Duration) ->
                 let _ = outbound.stream.shutdown().await;
                 None
             }
+            Ok(Outbound::Vless(mut outbound)) => {
+                // 成功响应头已收到；干净关闭 TLS，不发业务载荷。
+                use tokio::io::AsyncWriteExt as _;
+                let _ = outbound.stream.shutdown().await;
+                None
+            }
+            Ok(Outbound::Vmess(mut outbound)) => {
+                // 认证响应头已解开；dry-run 数据帧已送达，TLS 干净收尾。
+                use tokio::io::AsyncWriteExt as _;
+                let _ = outbound.stream.shutdown().await;
+                None
+            }
+            Ok(Outbound::Shadowsocks(mut outbound)) => {
+                // 回程已有认证 chunk；写半关闭干净收尾。
+                use tokio::io::AsyncWriteExt as _;
+                let _ = outbound.write.shutdown().await;
+                None
+            }
+            Ok(Outbound::Ss2022(mut outbound)) => {
+                // 响应流开场已通过归属校验；半关闭收尾。
+                use tokio::io::AsyncWriteExt as _;
+                let _ = outbound.stream.shutdown().await;
+                None
+            }
+            Ok(Outbound::Hysteria(mut outbound)) => {
+                // TCP 承载已被接受；发送侧 FIN 收尾（对齐 interConn.Close）。
+                let _ = outbound.stream.finish();
+                outbound.stream.stop_read();
+                None
+            }
+            Ok(Outbound::Wireguard(outbound)) => {
+                // 握手响应已认证、transport 密钥已派生；UDP 无连接可关。
+                // 只做一次脱敏诊断输出，不打印任何密钥字节。
+                let _ = outbound.keys.local_index;
+                None
+            }
             Err(error) => Some(error.to_string()),
         };
         reports.push(NodeReport {
