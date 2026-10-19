@@ -8,4 +8,18 @@ authors.workspace = true
 [dependencies]
 tokio = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
 ss-core = { path = "../ss-core" }
+lengsuo-tls = { path = "../lengsuo-tls" }
+lengsuo-trojan = { path = "../lengsuo-trojan" }
+lengsuo-anytls = { path = "../lengsuo-anytls" }
+
+[dev-dependencies]
+rcgen = "0.13.2"
+
+[[bin]]
+name = "lengsuo-node-dryrun"
+path = "src/main.rs"
