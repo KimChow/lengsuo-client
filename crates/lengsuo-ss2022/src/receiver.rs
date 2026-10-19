@@ -1,6 +1,10 @@
 //! 每个密钥及环境 epoch 独占接收器；认证后才更新重放窗口和对端地址。
-//! 内存状态不跨进程重启保存，重启必须恢复状态或轮换实际密钥。
-use crate::{crypto::Key, packet::Decoded, Error};
+//!
+//! 内存窗口不跨进程重启保存。需要跨重启保护时，用 [`Receiver::with_replay_store`]
+//! 挂接 [`crate::replay_store::ReplayStore`]：认证通过后先查持久化集合，
+//! 已见的 `(session_id, packet_id)` fail-closed 拒绝，新 id 落盘后转发。
+//! 未挂接时行为与既有内存窗口一致（重启即重置），调用方必须显式选择。
+use crate::{crypto::Key, packet::Decoded, replay_store::ReplayStore, Error};
 use ss_core::replay::Window;
 use std::{
     collections::BTreeMap,
@@ -26,6 +30,8 @@ pub struct Receiver {
     retention: Duration,
     clock: Option<Clock>,
     sessions: BTreeMap<[u8; 8], Session>,
+    /// 调用方挂接的跨重启重放集合；`None` 表示仅内存窗口。
+    store: Option<ReplayStore>,
 }
 impl Receiver {
     /// None 接收请求；Some 接收绑定到指定客户端会话的响应。
@@ -47,7 +53,22 @@ impl Receiver {
             retention,
             clock: None,
             sessions: BTreeMap::new(),
+            store: None,
         })
+    }
+    /// 挂接跨重启重放集合；调用方负责以互斥量串行化本 `Receiver` 与其存储，
+    /// 并在每次接受后调用 [`Receiver::flush_replay`] 落盘。
+    #[must_use]
+    pub fn with_replay_store(mut self, store: ReplayStore) -> Self {
+        self.store = Some(store);
+        self
+    }
+    /// 将跨重启重放集合落盘；未挂接存储时为空操作。
+    pub fn flush_replay(&self) -> Result<(), Error> {
+        match &self.store {
+            Some(store) => store.flush(),
+            None => Ok(()),
+        }
     }
     fn validate_clock(&self, now: Clock) -> Result<(), Error> {
         if self.clock.is_some_and(|last| {
@@ -93,6 +114,12 @@ impl Receiver {
                 >= self.capacity
         {
             return Err(Error::SessionCapacity);
+        }
+        // 跨重启保护：认证通过后查持久化集合，已见的 (session, packet id) fail-closed。
+        if let Some(store) = &mut self.store {
+            if !store.accept(decoded.session_id, decoded.packet_id) {
+                return Err(Error::Replay);
+            }
         }
         // 全部检查通过后再提交：伪造、重放和容量拒绝均不更新地址或存活时间。
         self.gc(now)?;

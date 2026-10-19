@@ -66,6 +66,72 @@ fn wrong_key_tampering_and_every_truncation_fail() {
     }
 }
 
+/// ChaCha 的 UDP 布局与 AES 同形，但 nonce 是 24 字节明文前缀、AEAD 直接用 PSK。
+#[test]
+fn chacha_both_directions_fields_and_addresses() {
+    let key = Key::new(Method::ChaCha20, &[0x11; 32]).unwrap();
+    let mut client = Sender::new(key.clone(), None).unwrap();
+    let mut server = Sender::new(key.clone(), Some(client.session_id())).unwrap();
+    for (index, target) in [
+        TargetAddr::V4([127, 0, 0, 1], 53),
+        TargetAddr::Domain("test.invalid".into(), 443),
+        TargetAddr::V6([0x11; 16], 80),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let packet = client.seal(&target, b"payload", 1000, 7).unwrap();
+        // 前 24 字节是明文 nonce，其后才是 AEAD 密文。
+        let decoded = key.open_client(&packet, 1030).unwrap();
+        assert_eq!(decoded.session_id, client.session_id());
+        assert_eq!(decoded.packet_id, index as u64);
+        assert_eq!(decoded.target, target);
+        assert_eq!(decoded.payload, b"payload");
+        assert!(matches!(
+            key.open_client(&packet, 1031),
+            Err(Error::Timestamp)
+        ));
+        let packet = server.seal(&target, b"reply", 1000, 0).unwrap();
+        let decoded = key.open_server(&packet, 1000, client.session_id()).unwrap();
+        assert_eq!(decoded.client_session, Some(client.session_id()));
+        assert_eq!(decoded.payload, b"reply");
+        assert!(matches!(
+            key.open_server(&packet, 1000, [0; 8]),
+            Err(Error::ClientSession)
+        ));
+        assert!(matches!(
+            key.open_client(&packet, 1000),
+            Err(Error::Direction)
+        ));
+    }
+}
+
+/// ChaCha：错钥、任意截断、任意单比特翻转都必须认证失败。
+#[test]
+fn chacha_wrong_key_tampering_and_every_truncation_fail() {
+    let key = Key::new(Method::ChaCha20, &[0x11; 32]).unwrap();
+    let wrong = Key::new(Method::ChaCha20, &[0x22; 32]).unwrap();
+    let mut sender = Sender::new(key.clone(), None).unwrap();
+    let packet = sender
+        .seal(&TargetAddr::V4([1; 4], 1), b"payload", 1000, 0)
+        .unwrap();
+    assert!(wrong.open_client(&packet, 1000).is_err());
+    for end in 0..packet.len() {
+        assert!(
+            key.open_client(&packet[..end], 1000).is_err(),
+            "截断到 {end} 字节应拒绝"
+        );
+    }
+    for offset in 0..packet.len() {
+        let mut bad = packet.clone();
+        bad[offset] ^= 1;
+        assert!(
+            key.open_client(&bad, 1000).is_err(),
+            "翻转第 {offset} 字节应拒绝"
+        );
+    }
+}
+
 #[test]
 fn key_and_packet_limits() {
     assert!(matches!(

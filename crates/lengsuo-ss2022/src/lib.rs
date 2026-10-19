@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod packet;
 pub mod receiver;
+pub mod replay_store;
 pub mod tcp;
 
 #[derive(Debug, thiserror::Error)]
@@ -45,4 +46,6 @@ pub enum Error {
     Address(#[from] ss_core::Error),
     #[error("该方法不支持此操作")]
     Unsupported,
+    #[error("重放快照损坏或格式非法")]
+    ReplayStore,
 }
