@@ -18,6 +18,8 @@ pub mod client;
 pub mod framing;
 pub mod padding;
 pub mod record;
+pub mod server;
+pub mod unpad;
 
 /// 随机整数（`[0, limit)`）。limit == 0 时返回 0。
 ///
