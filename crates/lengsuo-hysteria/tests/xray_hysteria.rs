@@ -95,7 +95,7 @@ fn free_udp_port() -> u16 {
 fn xray_config(port: u16, cert: &Path, key: &Path) -> String {
     format!(
         r#"{{
-  "log": {{"loglevel": "debug"}},
+  "log": {{"loglevel": "warning"}},
   "inbounds": [{{
     "listen": "127.0.0.1",
     "port": {port},
