@@ -33,10 +33,11 @@
 //!   方向永久 `Poisoned`，后续调用不碰流直接失败，调用方必须关闭连接，
 //!   不得重试，也没有明文回退路径。
 //!
-//! 未实现（不构成互通证明）：密钥轮换、参考实现的
+//! 未实现（不构成互通证明）：参考实现的
 //! `drain.BehaviorSeedLimitedDrainer`（行为探测缓解与慢读惩罚）、分块 padding、
 //! UDP 中继、真实服务与跨平台互通验收。入站 salt 防重放已接入
-//! [`Reader::recv_guarded`]（窗口与持久化见 `crate::replay`）。
+//! [`Reader::recv_guarded`]（窗口见 `crate::replay`，密钥化状态持久化见
+//! `crate::persist`；密钥轮换见 [`crate::ReplayFilter::load_with_keys`]）。
 //! 状态见 `docs/shadowsocks-status.md`。
 
 use std::time::Duration;

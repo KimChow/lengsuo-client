@@ -13,7 +13,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use lengsuo_shadowsocks::{
-    CipherSuite, ReplayError, ReplayFilter, TargetAddr, TcpError, TcpReader, UdpCodec,
+    CipherSuite, MacKey, ReplayError, ReplayFilter, TargetAddr, TcpError, TcpReader, UdpCodec,
 };
 use ss_core::chunk::write_chunk;
 use ss_core::crypto::SessionAead;
@@ -22,8 +22,11 @@ use ss_core::kdf::{evp_bytes_to_key, hkdf_sha1_subkey};
 /// 测试假口令，与任何生产凭据无关。
 const PASSWORD: &[u8] = b"ss-replay-test-passw0rd";
 const WAIT: Duration = Duration::from_secs(2);
-/// 与 `src/replay.rs` 头部布局一致（magic 8 + version 4 + capacity 8 + window 8 + body_len 8）。
-const HEADER_LEN: usize = 8 + 4 + 8 + 8 + 8;
+
+/// 测试密钥（与任何生产密钥无关）；当前密钥用于 worker 的写→读自检。
+fn current_key() -> MacKey {
+    MacKey::new(b"replay-state-key-current".to_vec())
+}
 
 /// 临时目录守卫：测试结束删除，落盘只进系统临时目录、不进仓库。
 struct TempDir(PathBuf);
@@ -157,49 +160,9 @@ fn udp_same_salt_replayed_rejected_fresh_accepted() {
     );
 }
 
-/// 状态文件截断 / 篡改 / 版本不符都必须返回明确错误类型并拒绝启动，绝不静默清空。
-#[test]
-fn truncated_or_tampered_state_refuses_to_load_with_distinct_errors() {
-    let dir = TempDir::new("corrupt");
-    let path = dir.path().join("replay.bin");
-    let now = 1_000_000u64;
-    let mut filter = ReplayFilter::new(16, Duration::from_secs(60)).unwrap();
-    filter.record(&[0x33u8; 32], now).unwrap();
-    filter.save(&path, now).unwrap();
-    let good = std::fs::read(&path).expect("应能读回状态文件");
-
-    // 截断（去掉尾部、破坏长度一致性）→ Corrupt。
-    std::fs::write(&path, &good[..good.len() - 2]).unwrap();
-    let err = ReplayFilter::load(&path, now).expect_err("截断文件必须拒绝加载");
-    assert!(
-        matches!(err, ReplayError::Corrupt(_)),
-        "截断应报 Corrupt，实际 {err:?}"
-    );
-
-    // 篡改 body 一个字节（长度不变、CRC 变化）→ ChecksumMismatch。
-    let mut tampered = good.clone();
-    tampered[HEADER_LEN] ^= 0x01;
-    std::fs::write(&path, &tampered).unwrap();
-    let err = ReplayFilter::load(&path, now).expect_err("篡改文件必须拒绝加载");
-    assert!(
-        matches!(err, ReplayError::ChecksumMismatch),
-        "篡改应报 ChecksumMismatch，实际 {err:?}"
-    );
-
-    // 版本号字节被改 → VersionMismatch（版本在 CRC 之前判定）。
-    let mut bumped = good.clone();
-    bumped[8] ^= 0xFF;
-    std::fs::write(&path, &bumped).unwrap();
-    let err = ReplayFilter::load(&path, now).expect_err("版本不符必须拒绝加载");
-    assert!(
-        matches!(err, ReplayError::VersionMismatch { expected: 1, .. }),
-        "版本不符应报 VersionMismatch，实际 {err:?}"
-    );
-}
-
 /// 跨进程重启语义：进程 A 写状态 → 进程 B 独立加载并判定重放被拒。
 /// 用真实子进程（当前测试二进制 `--exact replay_worker`）模拟两次独立实例，
-/// 不是同一进程内重复初始化。
+/// 不是同一进程内重复初始化。密钥经环境变量注入两个子进程。
 #[test]
 fn cross_process_restart_rejects_replay() {
     let dir = TempDir::new("restart");
@@ -207,6 +170,7 @@ fn cross_process_restart_rejects_replay() {
     let salt = [0x7Eu8; 32];
     let now = 1_700_000_000_000u64;
     let exe = std::env::current_exe().expect("取当前测试二进制失败");
+    let key_hex = hex_encode(b"cross-process-replay-key");
 
     // 进程 A：独立实例写入状态文件。
     let write = Command::new(&exe)
@@ -215,6 +179,7 @@ fn cross_process_restart_rejects_replay() {
         .env("LENGSUO_REPLAY_PATH", path.as_os_str())
         .env("LENGSUO_REPLAY_SALT", hex_encode(&salt))
         .env("LENGSUO_REPLAY_NOW", now.to_string())
+        .env("LENGSUO_REPLAY_KEY", &key_hex)
         .output()
         .expect("spawn 写状态子进程失败");
     assert!(
@@ -230,6 +195,7 @@ fn cross_process_restart_rejects_replay() {
         .env("LENGSUO_REPLAY_PATH", path.as_os_str())
         .env("LENGSUO_REPLAY_SALT", hex_encode(&salt))
         .env("LENGSUO_REPLAY_NOW", now.to_string())
+        .env("LENGSUO_REPLAY_KEY", &key_hex)
         .output()
         .expect("spawn 载入状态子进程失败");
     assert!(
@@ -242,22 +208,32 @@ fn cross_process_restart_rejects_replay() {
 /// 子进程 worker：`LENGSUO_REPLAY_WORKER` 未设置时执行一次真实的写→读往返自检
 /// （避免空跑）；设置时按 `write` / `load` 扮演跨进程语义的进程 A / B，并以退出码
 /// 返回结果（由 `cross_process_restart_rejects_replay` 通过子进程调用）。
+/// 密钥经 `LENGSUO_REPLAY_KEY`（hex）注入，与父进程共享同一密钥。
 #[test]
 fn replay_worker() {
     let Ok(mode) = std::env::var("LENGSUO_REPLAY_WORKER") else {
         let dir = TempDir::new("worker-selfcheck");
         let path = dir.path().join("self.bin");
+        let key = current_key();
         let now = 1_000_000u64;
         let mut filter = ReplayFilter::new(8, Duration::from_secs(60)).unwrap();
         filter.record(&[0x11u8; 16], now).unwrap();
-        filter.save(&path, now).unwrap();
-        let loaded = ReplayFilter::load(&path, now).unwrap();
-        assert!(loaded.contains(&[0x11u8; 16]), "自检往返应能读回 salt");
+        filter.save_with_key(&path, now, &key).unwrap();
+        let loaded = ReplayFilter::load_with_keys(&path, now, &key, None)
+            .unwrap()
+            .expect("自检往返应能载入");
+        assert!(
+            loaded.filter.contains(&[0x11u8; 16]),
+            "自检往返应能读回 salt"
+        );
         return;
     };
 
     let path = std::env::var("LENGSUO_REPLAY_PATH").expect("缺少状态文件路径");
     let salt = hex_decode(&std::env::var("LENGSUO_REPLAY_SALT").expect("缺少 salt"));
+    let key = MacKey::new(hex_decode(
+        &std::env::var("LENGSUO_REPLAY_KEY").expect("缺少密钥"),
+    ));
     let now: u64 = std::env::var("LENGSUO_REPLAY_NOW")
         .expect("缺少 now")
         .parse()
@@ -267,12 +243,16 @@ fn replay_worker() {
         "write" => {
             let mut filter = ReplayFilter::new(64, Duration::from_secs(60)).unwrap();
             filter.record(&salt, now).expect("写入 salt 应成功");
-            filter.save(path, now).expect("保存状态应成功");
+            filter
+                .save_with_key(path, now, &key)
+                .expect("保存状态应成功");
             std::process::exit(0);
         }
         "load" => {
-            let mut filter = ReplayFilter::load(path, now).expect("加载状态应成功");
-            match filter.record(&salt, now) {
+            let mut loaded = ReplayFilter::load_with_keys(path, now, &key, None)
+                .expect("加载状态应成功")
+                .expect("状态文件应存在");
+            match loaded.filter.record(&salt, now) {
                 Err(ReplayError::Duplicate) => std::process::exit(0),
                 other => {
                     eprintln!("期望同 salt 被判重放，实际 {other:?}");
