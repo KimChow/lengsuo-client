@@ -36,10 +36,13 @@ pub mod authid;
 pub mod chunkframe;
 pub mod consts;
 pub mod kdf;
+pub mod muxframe;
+pub mod muxsession;
 pub mod request;
 pub mod response;
 pub mod server;
 pub mod testvector;
+pub mod udp;
 
 pub use crate::consts::{
     KDF_SALT_AEAD_RESP_HEADER_LEN_IV, KDF_SALT_AEAD_RESP_HEADER_LEN_KEY,
@@ -64,6 +67,14 @@ pub use chunkframe::{
     write_data_eof, DataCipher, DataSizeParser, MAX_CHUNK_PAYLOAD,
 };
 pub use kdf::{kdf, kdf16, kdf_n, ID_BYTES, KDF_MAX_LEN};
+pub use muxframe::{
+    read_data, FrameError, FrameMetadata, SessionStatus, TargetNetwork, MAX_META_LEN, OPTION_DATA,
+    OPTION_ERROR, SESSION_CHUNK_SIZE,
+};
+pub use muxsession::{
+    address_port_len, ClientSession, DiscardSink, FrameReader, ServerSession, SessionState,
+    SessionStrategy, SessionTable, StreamSender, StreamSink, TargetDialer,
+};
 pub use request::{
     fnv1a32, CipherSpec, Command, HeaderPlanner, KeySource, RequestHeader, SecurityOption, KEY_LEN,
     NONCE_LEN,
@@ -76,6 +87,10 @@ pub use server::{
 pub use testvector::{
     aead_encrypt_case, aead_seal_case, auth_id_case, kdf_case, legacy_reduced_key_case,
     request_plaintext_case, response_auth_case, shake_size_case,
+};
+pub use udp::{
+    decode_udp_packet, encode_udp_packet, read_udp_packet, write_udp_packet, UdpPacket,
+    MAX_UDP_PAYLOAD,
 };
 
 /// 本 crate 统一错误类型。
