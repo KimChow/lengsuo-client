@@ -694,9 +694,17 @@ dependencies = [
 name = "lengsuo-node"
 version = "0.1.0"
 dependencies = [
+ "lengsuo-anytls",
+ "lengsuo-tls",
+ "lengsuo-trojan",
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
  "ss-core",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]
