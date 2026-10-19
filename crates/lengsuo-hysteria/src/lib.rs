@@ -17,8 +17,8 @@
 //! UDP 中继报文本身的消息层字节编解码见 `udp.rs`；分片重组与切片见
 //! `fragment.rs`。
 //!
-//! 尚未实现（不宣称）：Salamander 混淆、Brutal/BBR 拥塞控制、端口跳跃、
-//! 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
+//! 尚未实现（不宣称）：Brutal/BBR 拥塞控制、0-RTT、连接迁移、
+//! masquerade 自定义（file/proxy/string）。
 //! 状态、验收命令与偏离清单见 `docs/hysteria-status.md`。
 
 pub mod connect_udp;
@@ -26,11 +26,13 @@ pub mod fragment;
 mod frame;
 pub mod h3_auth;
 pub mod h3_server;
+pub mod obfs;
 pub mod padding;
 pub mod proxy;
 pub mod qpack;
 pub mod quic;
 pub mod tcp;
+pub mod transport;
 pub mod udp;
 pub mod varint;
 
