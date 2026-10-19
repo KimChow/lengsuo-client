@@ -57,7 +57,7 @@ pub enum Outbound {
     /// trojan：请求头已完整写出且观察窗内未被对端拒绝。
     Trojan(TrojanOutbound),
     /// anytls：认证块 + 客户端 Settings 已写出，且已收到服务端 ServerSettings。
-    AnyTls(AnyTlsOutbound),
+    AnyTls(Box<AnyTlsOutbound>),
 }
 
 /// anytls 出站会话：已认证、已协商版本，可继续开流（SYN/PUSH）转发业务。
@@ -145,7 +145,10 @@ pub async fn dial(
         crate::config::Protocol::Trojan => dial_trojan(config, wait, observe)
             .await
             .map(Outbound::Trojan),
-        crate::config::Protocol::AnyTls => dial_anytls(config, wait).await.map(Outbound::AnyTls),
+        crate::config::Protocol::AnyTls => dial_anytls(config, wait)
+            .await
+            .map(Box::new)
+            .map(Outbound::AnyTls),
     }
 }
 
