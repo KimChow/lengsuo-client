@@ -11,7 +11,9 @@ use lengsuo_vmess::aead;
 use lengsuo_vmess::authid;
 use lengsuo_vmess::chunkframe::{self, DataCipher, DataSizeParser, MAX_CHUNK_PAYLOAD};
 use lengsuo_vmess::consts::SECURITY_AES_128_GCM;
-use lengsuo_vmess::request::{fnv1a32, Command, HeaderPlanner, KeySource, RequestHeader, SecurityOption};
+use lengsuo_vmess::request::{
+    fnv1a32, Command, HeaderPlanner, KeySource, RequestHeader, SecurityOption,
+};
 use ss_core::target::TargetAddr;
 
 /// `responseBodyKey = SHA256(requestBodyKey)[..16]`、`responseBodyIV = SHA256(requestBodyIV)[..16]`

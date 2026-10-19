@@ -194,7 +194,15 @@ async fn wrong_uuid_is_rejected() {
         .expect("连接 Xray 失败");
 
     // 错误 UUID：服务端读 16 字节 AuthID 即查用户失败，随后 drain 并关闭。
-    match codec::write_request(&mut stream, &wrong_cmd_key, &keys, &target, &[payload.as_slice()]).await {
+    match codec::write_request(
+        &mut stream,
+        &wrong_cmd_key,
+        &keys,
+        &target,
+        &[payload.as_slice()],
+    )
+    .await
+    {
         // 写入中途就被对端关闭，本身就是拒绝证据，算通过。
         Err(e) if codec::is_clean_close(&e) => {
             eprintln!("OK: 用例 B 错误 UUID 在写入阶段即被服务端关闭。");
@@ -243,9 +251,18 @@ async fn tampered_tag_is_rejected() {
 
     // 写篡改头 + 足够字节让入站 drain 后立即关闭（服务端不再解析 body）。
     match async {
-        stream.write_all(&header).await.map_err(|e| Error::Io(format!("{:?}", e.kind())))?;
-        stream.write_all(&vec![0u8; 8192]).await.map_err(|e| Error::Io(format!("{:?}", e.kind())))?;
-        stream.flush().await.map_err(|e| Error::Io(format!("{:?}", e.kind())))
+        stream
+            .write_all(&header)
+            .await
+            .map_err(|e| Error::Io(format!("{:?}", e.kind())))?;
+        stream
+            .write_all(&vec![0u8; 8192])
+            .await
+            .map_err(|e| Error::Io(format!("{:?}", e.kind())))?;
+        stream
+            .flush()
+            .await
+            .map_err(|e| Error::Io(format!("{:?}", e.kind())))
     }
     .await
     {
