@@ -133,7 +133,7 @@ impl TrafficState {
 }
 
 /// 参考 `XtlsFilterTls`（单 buffer 形态：`payload` 非 nil 时才调用，且只降一档）。
-fn xtls_filter_tls_single(state: &mut TrafficState, payload: &[u8]) {
+pub(crate) fn xtls_filter_tls_single(state: &mut TrafficState, payload: &[u8]) {
     state.number_of_packet_to_filter -= 1;
     if payload.len() >= 6 {
         let starts = &payload[..6];
@@ -175,7 +175,7 @@ fn xtls_filter_tls_single(state: &mut TrafficState, payload: &[u8]) {
 }
 
 /// 参考 `XtlsPadding` 的 padding 长度决策（纯函数，rng 注入）。
-fn padding_length(
+pub(crate) fn padding_length(
     content_len: i32,
     long_padding: bool,
     testseed: &[u32; 4],
@@ -189,6 +189,15 @@ fn padding_length(
     let max = BUF_SIZE as i32 - PADDING_OVERHEAD as i32 - content_len;
     if padding_len > max {
         padding_len = max;
+    }
+    // 参考在 `XtlsPadding` 之后调用 `newbuffer.Extend(paddingLen)`，而
+    // `buf.Buffer.Extend` 并不校验负值（`end := b.end + n` 会**回退** end），参考侧
+    // 之所以安全，是因为调用点用 `NumberOfPacketToFilter` 把进 padding 的块约束在
+    // `contentLen < 900`（`testseed[0]`），该下溢分支在 Go 里不可达。本仓接口不保证
+    // 该不变量，故显式把负值夹到 0：这是唯一不会缩短 `b.end` 的选择，否则
+    // `padding_len as usize` 会在调试构建下 panic（overflow check）。
+    if padding_len < 0 {
+        padding_len = 0;
     }
     padding_len
 }
@@ -667,6 +676,23 @@ mod tests {
         assert_eq!(
             padding_length(900, false, &DEFAULT_TEST_SEED, &mut CounterRng(5)),
             5
+        );
+    }
+
+    #[test]
+    fn padding_length_never_goes_negative() {
+        // contentLen ≥ testseed[0]=900 但 longPadding 为真时，公式
+        // `900 + rand(0,500) - contentLen` 会下溢成负数（参考用
+        // NumberOfPacketToFilter 保证不可达，本仓接口不保证）。必须夹到 0：
+        // 负值一旦 `as usize` 会在调试构建 panic。
+        assert_eq!(
+            padding_length(1200, true, &DEFAULT_TEST_SEED, &mut CounterRng(0)),
+            0
+        );
+        // 夹紧与 0 下界共存：contentLen 撑爆 8192-21 上界时 max 本身为负。
+        assert_eq!(
+            padding_length(9000, false, &DEFAULT_TEST_SEED, &mut CounterRng(255)),
+            0
         );
     }
 }

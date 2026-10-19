@@ -137,6 +137,55 @@ pub fn decode(input: &[u8]) -> Result<([u8; 16], Request, usize), Error> {
     ))
 }
 
+/// 与 [`decode`] 相同，但接受 `flow=xtls-rprx-vision` 的请求 addons。
+///
+/// 参考服务端 `proxy/vless/inbound/inbound.go`：uuid 之后是 addons 长度字节；vision
+/// 时长度 = 18，载荷 `[0x0A, 0x10] + "xtls-rprx-vision"`，随后才是 command 与地址。
+/// 本函数为该形态解析，返回 `(credential, request, 消费字节数)`，使调用方把剩余字节
+/// 交给 Vision 流量层。
+pub fn decode_vision(input: &[u8]) -> Result<([u8; 16], Request, usize), Error> {
+    let mut cursor = Cursor { input, offset: 0 };
+    if cursor.byte()? != 0 {
+        return Err(Error::Unsupported);
+    }
+    let credential = cursor.take(16)?.try_into().expect("固定长度");
+    let addons_len = cursor.byte()? as usize;
+    if addons_len == 0 {
+        return Err(Error::Unsupported);
+    }
+    let addons = cursor.take(addons_len)?;
+    // 参考 `EncodeHeaderAddons`：`[0x0A, len(flow)] + flow`。
+    if addons.len() != 2 + FLOW_XTLS_RPRX_VISION.len()
+        || addons[0] != 0x0A
+        || usize::from(addons[1]) != FLOW_XTLS_RPRX_VISION.len()
+        || &addons[2..] != FLOW_XTLS_RPRX_VISION
+    {
+        return Err(Error::Unsupported);
+    }
+    let command = match cursor.byte()? {
+        1 => Command::Tcp,
+        2 => Command::Udp,
+        3 => Command::Mux,
+        _ => return Err(Error::Unsupported),
+    };
+    if command == Command::Mux {
+        return Ok((
+            credential,
+            Request {
+                command,
+                target: TargetAddr::Domain("v1.mux.cool".into(), 0),
+            },
+            cursor.offset,
+        ));
+    }
+    let (target, consumed) = decode_address(&input[cursor.offset..])?;
+    Ok((
+        credential,
+        Request { command, target },
+        cursor.offset + consumed,
+    ))
+}
+
 pub(crate) fn decode_address(input: &[u8]) -> Result<(TargetAddr, usize), Error> {
     let mut cursor = Cursor { input, offset: 0 };
     let port = u16::from_be_bytes(cursor.take(2)?.try_into().expect("固定长度"));
