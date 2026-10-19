@@ -90,9 +90,15 @@ fn verify_binary(path: &Path, role: &str) -> String {
 }
 
 /// 二进制所在目录；未显式提供环境变量时，尝试仓库约定的参考夹具目录。
+/// `LENGSUO_ANYTLS` 既可以是含 server/client 两二进制的目录，也可以是其中一个
+/// 二进制文件（server/client 恒同目录），后者这里取父目录，兼容验收命令的写法。
 fn fixture_dir(explicit: Option<&str>) -> PathBuf {
-    if let Some(dir) = explicit {
-        return PathBuf::from(dir);
+    if let Some(path) = explicit {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return path.parent().unwrap_or(&path).to_path_buf();
+        }
+        return path;
     }
     let root = std::env::var("LENGSUO_REFERENCE_BINARIES")
         .unwrap_or_else(|_| "/home/ubuntu/lengsuo-dev/references/binaries".to_owned());
