@@ -10,10 +10,10 @@
 //! 没有成功响应首字节可写，拒绝的唯一表达就是关闭连接。
 //!
 //! 已实现：请求头多用户常量时间校验、CONNECT 目标解析与拨号、双向中继（半关闭
-//! 传递）。未实现：UDP ASSOCIATE 转发——参考 `server.go` 的 `handleUDPPayload`
-//! 依赖 `transport/internet/udp` 的会话化/cone 调度器，超出本卡四个 trojan 参考
-//! 路径；本仓只保留命令识别与帧格式（见 `crate::stream`，已与 Xray 双向互通），
-//! 收到 UDP 请求按 trojan 静默收尾（见 `Error::UdpUnsupported`）。
+//! 传递），以及 UDP ASSOCIATE 转发（`crate::udp` 报文 codec + `crate::udp_relay`
+//! 中继，参考 `server.go` 的 `handleUDPPayload`）。UDP 中继按目标地址绑定出站
+//! socket、逐包解析地址、回程带地址与原长度前缀；无会话池/复用与 cone 模式，
+//! 差异见 `crate::udp_relay` 模块注释与 `docs/trojan-status.md`。
 
 mod header;
 mod relay;
@@ -57,8 +57,8 @@ pub enum Error {
     HeaderTooLarge,
     #[error("目标拨号失败：{0}")]
     Dial(#[source] std::io::Error),
-    #[error("UDP ASSOCIATE 转发未实现，按 trojan 静默收尾")]
-    UdpUnsupported,
+    #[error("UDP 关联中继失败：{0}")]
+    UdpRelay(#[source] Box<crate::udp_relay::Error>),
     #[error("中继失败：{0}")]
     Relay(#[source] std::io::Error),
     #[error("连接 I/O 失败：{0}")]
@@ -185,7 +185,16 @@ impl Server {
         let _ = user;
 
         match request.command {
-            Command::Udp => Err(Error::UdpUnsupported),
+            // UDP 关联：读侧是请求头之后的 `PrefixedReader`（把首块未消费的字节
+            // 回放给帧解析），写侧直接写回同一 TLS 流。
+            Command::Udp => crate::udp_relay::relay(
+                prefixed,
+                writer,
+                crate::stream::REFERENCE_MAX_DATAGRAM_PAYLOAD,
+                self.timeouts.connection_idle,
+            )
+            .await
+            .map_err(|error| Error::UdpRelay(Box::new(error))),
             Command::Tcp => {
                 let upstream =
                     relay::connect_target(&request.target, self.timeouts.handshake).await?;
