@@ -696,9 +696,17 @@ dependencies = [
 name = "lengsuo-node"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
  "lengsuo-anytls",
+ "lengsuo-hysteria",
+ "lengsuo-shadowsocks",
+ "lengsuo-ss2022",
  "lengsuo-tls",
  "lengsuo-trojan",
+ "lengsuo-vless",
+ "lengsuo-vmess",
+ "lengsuo-wireguard",
+ "md-5",
  "rcgen",
  "rustls",
  "serde",

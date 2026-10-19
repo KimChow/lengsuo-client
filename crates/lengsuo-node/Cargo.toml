@@ -12,10 +12,18 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
+md-5 = { workspace = true }
+getrandom = { workspace = true }
 ss-core = { path = "../ss-core" }
 lengsuo-tls = { path = "../lengsuo-tls" }
 lengsuo-trojan = { path = "../lengsuo-trojan" }
 lengsuo-anytls = { path = "../lengsuo-anytls" }
+lengsuo-vless = { path = "../lengsuo-vless" }
+lengsuo-vmess = { path = "../lengsuo-vmess" }
+lengsuo-shadowsocks = { path = "../lengsuo-shadowsocks" }
+lengsuo-ss2022 = { path = "../lengsuo-ss2022" }
+lengsuo-hysteria = { path = "../lengsuo-hysteria" }
+lengsuo-wireguard = { path = "../lengsuo-wireguard" }
 
 [dev-dependencies]
 rcgen = "0.13.2"
