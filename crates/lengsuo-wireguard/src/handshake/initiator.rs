@@ -117,7 +117,11 @@ impl Handshake {
         }
         let (new_ck, temp_key) = kdf2(&self.chain_key, ss.as_bytes());
         self.chain_key = new_ck;
-        let encrypted_static = seal(&temp_key, XPublic::from(&self.static_secret).as_bytes(), &self.hash);
+        let encrypted_static = seal(
+            &temp_key,
+            XPublic::from(&self.static_secret).as_bytes(),
+            &self.hash,
+        );
         self.hash = mix_hash_pub(self.hash, &encrypted_static);
 
         // DH(static, remote_static)（precomputedStaticStatic）→ KDF2 → 加密 TAI64N。
@@ -191,7 +195,10 @@ impl Handshake {
         // MAC1 校验（参考 receive.go 对 initiation/response 都先过 CheckMAC1）：
         // key = BLAKE2s-256("mac1----" || 本端静态公钥)——即"报文接收方自己的公钥"。
         let own_public = XPublic::from(&self.static_secret).to_bytes();
-        if !ct_eq(&mac1(&own_public, &wire[..RESPONSE_LEN - 32]), &wire[60..76]) {
+        if !ct_eq(
+            &mac1(&own_public, &wire[..RESPONSE_LEN - 32]),
+            &wire[60..76],
+        ) {
             self.state = State::Poisoned;
             return Err(Error::AuthFailed);
         }

@@ -39,8 +39,7 @@ pub const X_NONCE_LEN: usize = 24;
 /// `CookieRefreshTime`：cookie 有效期。
 pub const COOKIE_REFRESH_TIME: std::time::Duration = std::time::Duration::from_secs(120);
 /// `HandshakeInitationRate`：两次 initiation 剥壳的时间下限（防洪水）。
-pub const HANDSHAKE_INITIATION_RATE: std::time::Duration =
-    std::time::Duration::from_millis(20);
+pub const HANDSHAKE_INITIATION_RATE: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// `HMAC1`：单输入 HMAC-BLAKE2s-256。
 fn hmac_blake2s(key: &[u8], data: &[u8]) -> [u8; 32] {

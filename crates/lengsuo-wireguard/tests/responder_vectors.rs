@@ -56,12 +56,17 @@ fn responder(psk: Option<[u8; 32]>) -> Responder {
 #[test]
 fn msg2_no_psk_matches_independent_go_vector() {
     let mut r = responder(None);
-    r.consume_initiation(&hex(INIT)).expect("initiation 剥壳成功");
+    r.consume_initiation(&hex(INIT))
+        .expect("initiation 剥壳成功");
     let mut msg = r
         .create_response(SERVER_EPH, 0x20261234)
         .expect("response 可生成");
     r.add_macs(&mut msg);
-    assert_eq!(to_hex(&msg), MSG2_NOPSK, "msg2（无 PSK）必须与 Go 向量逐字节一致");
+    assert_eq!(
+        to_hex(&msg),
+        MSG2_NOPSK,
+        "msg2（无 PSK）必须与 Go 向量逐字节一致"
+    );
     // 方向性字段 sanity：type2 + local sender + 回显的 remote receiver。
     assert_eq!(&msg[..4], &2u32.to_le_bytes());
     assert_eq!(&msg[4..8], &0x20261234u32.to_le_bytes());
@@ -72,12 +77,17 @@ fn msg2_no_psk_matches_independent_go_vector() {
 #[test]
 fn msg2_explicit_psk_matches_independent_go_vector() {
     let mut r = responder(Some(PSK));
-    r.consume_initiation(&hex(INIT)).expect("initiation 剥壳成功");
+    r.consume_initiation(&hex(INIT))
+        .expect("initiation 剥壳成功");
     let mut msg = r
         .create_response(SERVER_EPH, 0x20261234)
         .expect("response 可生成");
     r.add_macs(&mut msg);
-    assert_eq!(to_hex(&msg), MSG2_PSK, "msg2（显式 PSK）必须与 Go 向量逐字节一致");
+    assert_eq!(
+        to_hex(&msg),
+        MSG2_PSK,
+        "msg2（显式 PSK）必须与 Go 向量逐字节一致"
+    );
 }
 
 /// 错误 MAC1：篡改 MAC1 任一字节都应被 `check_mac1` 拒绝。
@@ -103,7 +113,10 @@ fn wrong_mac2_rejected() {
     assert_eq!(reply.len(), 64);
     assert_eq!(&reply[..4], &3u32.to_le_bytes(), "cookie reply 类型为 3");
     // 之后仍拿一条 MAC2 全零的 initiation 来校验：错误 MAC2 必须被拒。
-    assert!(!r.check_mac2(&init, b"192.0.2.1:51820"), "错误 MAC2 必须被拒绝");
+    assert!(
+        !r.check_mac2(&init, b"192.0.2.1:51820"),
+        "错误 MAC2 必须被拒绝"
+    );
 }
 
 /// TAI64N 重放：同一条 initiation（时间戳相等，`After` 为严格大于）必须被拒。
@@ -122,7 +135,8 @@ fn replay_equal_timestamp_rejected() {
 #[test]
 fn older_timestamp_drift_rejected() {
     let mut r = responder(None);
-    r.consume_initiation(&hex(INIT)).expect("较新时间戳剥壳成功");
+    r.consume_initiation(&hex(INIT))
+        .expect("较新时间戳剥壳成功");
     assert_eq!(
         r.consume_initiation(&hex(INIT_OLD_TS)),
         Err(ResponderError::Replay),
@@ -146,7 +160,11 @@ fn unknown_sender_index_accepted_and_echoed() {
         MSG2_ALT_SENDER,
         "未知 sender index 的 msg2 必须与 Go 向量逐字节一致"
     );
-    assert_eq!(&msg[8..12], &0xdeadbeefu32.to_le_bytes(), "须原样回显 sender index");
+    assert_eq!(
+        &msg[8..12],
+        &0xdeadbeefu32.to_le_bytes(),
+        "须原样回显 sender index"
+    );
 }
 
 /// 未知对端静态公钥：initiation 解密出的对端非配置公钥 → `UnknownPeer`。

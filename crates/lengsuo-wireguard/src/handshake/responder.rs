@@ -13,7 +13,8 @@ use x25519_dalek::{PublicKey as XPublic, StaticSecret as XSecret};
 use super::cookie::{CookieChecker, CookieGenerator};
 use super::noise::{
     initial_chain_key, initial_hash, kdf2, kdf3, mix_hash, mix_key, open, seal, tai64n_after,
-    COOKIE_REPLY_LEN, HANDSHAKE_INITIATION_RATE, INITIATION_LEN, PSK_LEN, RESPONSE_LEN, X_NONCE_LEN,
+    COOKIE_REPLY_LEN, HANDSHAKE_INITIATION_RATE, INITIATION_LEN, PSK_LEN, RESPONSE_LEN,
+    X_NONCE_LEN,
 };
 
 /// 响应方握手失败原因。所有分支 fail-closed，密钥与时间戳内容不进错误文本。
@@ -278,9 +279,7 @@ impl Responder {
         local_index: u32,
     ) -> Result<[u8; RESPONSE_LEN], ResponderError> {
         if self.state != ResponderState::InitiationConsumed {
-            return Err(ResponderError::State(
-                "先剥壳 initiation 才能构造 response",
-            ));
+            return Err(ResponderError::State("先剥壳 initiation 才能构造 response"));
         }
         // 参考在 index table 里删除旧 index 并分配新 index；单 peer 化后由调用方给定。
         self.local_index = local_index;

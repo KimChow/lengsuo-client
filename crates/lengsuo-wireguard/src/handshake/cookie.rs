@@ -12,8 +12,8 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::XChaCha20Poly1305;
 
 use super::noise::{
-    cookie_encryption_key, ct_eq, derive_cookie, keyed_blake2s_128, mac1_key, COOKIE_REPLY_LEN,
-    COOKIE_REFRESH_TIME, MAC_LEN, X_NONCE_LEN,
+    cookie_encryption_key, ct_eq, derive_cookie, keyed_blake2s_128, mac1_key, COOKIE_REFRESH_TIME,
+    COOKIE_REPLY_LEN, MAC_LEN, X_NONCE_LEN,
 };
 
 /// 入站握手（initiation/response）的 MAC 校验与 cookie reply 签发。

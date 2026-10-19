@@ -19,9 +19,10 @@ mod responder;
 pub use cookie::{CookieChecker, CookieGenerator};
 pub use initiator::{Handshake, TransportKeys};
 pub use noise::{
-    ct_eq, derive_cookie, initial_chain_key, initial_hash, kdf1_pub, kdf2_pub, kdf3_pub, keyed_blake2s_128,
-    mac1, mix_hash_pub, mix_key, open_aead, seal_aead, tai64n_after, tai64n_now, CONSTRUCTION,
-    COOKIE_REPLY_LEN, COOKIE_REFRESH_TIME, HANDSHAKE_INITIATION_RATE, INITIATION_LEN, LABEL_COOKIE,
-    LABEL_MAC1, MAC_LEN, PSK_LEN, RESPONSE_LEN, WG_IDENTIFIER, X_NONCE_LEN, ZERO_NONCE_LEN,
+    ct_eq, derive_cookie, initial_chain_key, initial_hash, kdf1_pub, kdf2_pub, kdf3_pub,
+    keyed_blake2s_128, mac1, mix_hash_pub, mix_key, open_aead, seal_aead, tai64n_after, tai64n_now,
+    CONSTRUCTION, COOKIE_REFRESH_TIME, COOKIE_REPLY_LEN, HANDSHAKE_INITIATION_RATE, INITIATION_LEN,
+    LABEL_COOKIE, LABEL_MAC1, MAC_LEN, PSK_LEN, RESPONSE_LEN, WG_IDENTIFIER, X_NONCE_LEN,
+    ZERO_NONCE_LEN,
 };
 pub use responder::{Responder, ResponderError, ResponderKeys, ResponderState};
