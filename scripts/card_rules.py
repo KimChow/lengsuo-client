@@ -155,9 +155,12 @@ def collect_errors(task: str, spec: dict, led: Ledger) -> list[str]:
     if not wt:
         errs.append("缺少 worktree")
 
-    # 共享区必须独占
+    # 共享区必须独占，唯一例外是 Cargo.lock：它只是 crate manifest 变化的派生物，
+    # 不允许随 crate 走就会把「加依赖」这件事人为切成两张卡。
+    # 并发安全仍然成立——两张卡同时声明 Cargo.lock 会被上面的路径重叠判定拦住。
     hits = [t for t in scope for s in SHARED_PATHS if overlaps(t, s)]
-    if hits and len(scope) > len(hits):
+    lock_only = bool(hits) and all(overlaps(h, "Cargo.lock") for h in hits)
+    if hits and len(scope) > len(hits) and not lock_only:
         errs.append(f"共享路径必须独占：{hits}；改 Cargo.toml/scripts 请单开基建卡")
 
     # worktree 不得复用
