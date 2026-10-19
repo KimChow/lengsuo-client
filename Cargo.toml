@@ -60,6 +60,9 @@ trash = "5"
 url = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 tempfile = "3"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
 
 [profile.dev]
 incremental = false

@@ -9,3 +9,8 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+# QUIC/HTTP3（Hysteria2 传输层；基建卡统一接线，实现卡只写代码）
+# 许可：quinn/h3 均 MIT OR Apache-2.0。
+quinn = { workspace = true }
+h3 = { workspace = true }
+h3-quinn = { workspace = true }
