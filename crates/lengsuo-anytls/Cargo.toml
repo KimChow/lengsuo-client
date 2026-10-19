@@ -11,6 +11,10 @@ thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
 sha2 = { workspace = true }
 subtle = "2.6"
+md-5 = { workspace = true }
+getrandom = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
 
 [dev-dependencies]
 rustls = { workspace = true }
