@@ -12,6 +12,7 @@
 //! 即被拒绝（不是应用层兜底）。名称逐字节比对叠加在 pin 之上，pin 是最强身份绑定。
 //!
 //! 证书只经 openssl 现取、只写临时目录、用后即删；日志与断言均不回显口令。
+#![allow(dead_code)]
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, SignatureVerificationAlgorithm, UnixTime};
 use rustls::RootCertStore;

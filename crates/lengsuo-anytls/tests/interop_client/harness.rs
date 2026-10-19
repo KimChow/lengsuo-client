@@ -1,6 +1,7 @@
 //! 客户端方向互通的测试装配：定位官方 anytls-server 二进制、检查 openssl、
 //! spawn 官方 server、现取其 TLS 证书，产出一次性 `Fixture`。
 //! 缺二进制或缺 openssl 时打印原因并跳过（不得静默通过）；证书只用临时目录。
+#![allow(dead_code)]
 use crate::support::{self, Process};
 use crate::tls;
 use std::path::PathBuf;
@@ -99,6 +100,11 @@ impl Fixture {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// 参考进程日志路径；失败诊断用（内容不含口令）。
+    pub fn log_path(&self) -> &std::path::Path {
+        &self.log
     }
 
     /// 会校验服务端证书与名称的 tokio-rustls 客户端连接器。
