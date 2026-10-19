@@ -23,6 +23,10 @@ pub const DEFAULT_SCHEME: &[u8] = b"stop=8\n\
 6=500-1000\n\
 7=500-1000";
 
+/// 默认方案的 md5（小写十六进制），即 Settings `padding-md5` 字段的取值。
+/// 常量形式避免每次写出 Settings 时重算，且可供 `tunnel` 无分配地取用。
+pub const DEFAULT_PADDING_MD5: &str = "75cff2ad89aadf5e257059ee571ebe11";
+
 /// 已解析的方案：`stop` 阈值 + 每个写包的大小表。
 /// 每个写包的一次性随机取值在写出侧现算（见 `server/padding`）。
 #[derive(Clone)]

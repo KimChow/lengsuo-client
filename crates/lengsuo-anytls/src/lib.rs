@@ -5,8 +5,13 @@ pub mod auth;
 pub mod client_state;
 pub mod frame;
 pub mod padding;
+pub mod pool;
 pub mod server;
 pub mod server_state;
+pub mod socks;
+pub mod stream;
+pub mod tunnel;
+pub mod udp_assoc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
