@@ -15,6 +15,7 @@
 //! - C：直连入站喂畸形头（错 cmdKey / 截断 / 错长度 tag / 错载荷 tag）：
 //!   连接被关、一个字节都不回、处理线程不 panic。不依赖 Xray 二进制。
 
+#[path = "support/codec_mod.rs"]
 mod support;
 
 use std::io::{Read, Write};
@@ -220,10 +221,10 @@ fn handle_connection(
         }
     };
 
-    let Some(echo_addr) = echo else {
+    if echo.is_none() {
         eprintln!("[vmess-in] 未配置后端，关闭");
         return;
-    };
+    }
     if decoded.security != HeaderSecurity::Aes128Gcm {
         eprintln!("[vmess-in] 夹具仅支持 AES-128-GCM 数据面");
         return;

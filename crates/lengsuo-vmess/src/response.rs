@@ -150,12 +150,12 @@ mod tests {
     const REQ_IV: [u8; 16] = [0x42u8; 16];
     const SEED: u8 = 0x5C;
 
-    fn seal_body(mut writer: &mut Vec<u8>, payload: &[u8]) {
+    fn seal_body(writer: &mut Vec<u8>, payload: &[u8]) {
         let (resp_key, resp_iv) = response_key_iv(&REQ_KEY, &REQ_IV);
         let mut cipher = DataCipher::new(SECURITY_AES_128_GCM, &resp_key, &resp_iv);
         let mut mask = DataSizeParser::new(&resp_iv);
-        seal_data_chunk(&mut cipher, Some(&mut mask), &mut writer, payload).expect("可写");
-        write_data_eof(&mut cipher, Some(&mut mask), &mut writer).expect("EOF 可写");
+        seal_data_chunk(&mut cipher, Some(&mut mask), writer, payload).expect("可写");
+        write_data_eof(&mut cipher, Some(&mut mask), writer).expect("EOF 可写");
     }
 
     #[tokio::test]
