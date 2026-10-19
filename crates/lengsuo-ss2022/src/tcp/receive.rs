@@ -9,7 +9,6 @@
 //! salt + 固定头 chunk（本身即第一个 length chunk，声明首批载荷 chunk 明文长），
 //! 没有变长头。两个方向其后都接 length/payload chunk 对，u96le nonce 跨流连续。
 use ss_core::{
-    chunk::read_chunk,
     crypto::{SessionAead, TAG_LEN},
     target::TargetAddr,
 };
@@ -20,7 +19,7 @@ use std::{
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::{
-    fixed_header_wire_len, header::FixedHeader, map_core, salt_len, suite, Direction,
+    fixed_header_wire_len, header::FixedHeader, map_core, read_chunk, salt_len, suite, Direction,
     PADDING_FIELD_LEN, TIMESTAMP_WINDOW_SECS,
 };
 use crate::{crypto::Key, receiver::Clock, Error};
@@ -329,7 +328,7 @@ impl Reader {
         let aead = self.aead.as_mut().ok_or(Error::Poisoned)?;
         let result = match tokio::time::timeout(self.read_timeout, read_chunk(stream, aead)).await {
             Ok(Ok(chunk)) => Ok(chunk),
-            Ok(Err(error)) => Err(map_core(error)),
+            Ok(Err(error)) => Err(error),
             Err(_) => Err(Error::Timeout),
         };
         result.map_err(|error| self.fail(error))

@@ -7,8 +7,8 @@
 //! 这里只做字段编解码与自洽校验，不判时间窗（需要注入时钟，留给接收侧）。
 //! 不含 `Debug`：时间戳与 salt 不得进入日志。
 use super::{
-    Direction, LENGTH_FIELD_LEN, MAX_CHUNK_PAYLOAD, MAX_PADDING_LEN, PADDING_FIELD_LEN,
-    REQUEST_FIXED_HEADER_LEN, RESPONSE_HEADER_HEAD_LEN, TIMESTAMP_LEN, TYPE_REQUEST, TYPE_RESPONSE,
+    Direction, LENGTH_FIELD_LEN, MAX_PADDING_LEN, PADDING_FIELD_LEN, REQUEST_FIXED_HEADER_LEN,
+    RESPONSE_HEADER_HEAD_LEN, TIMESTAMP_LEN, TYPE_REQUEST, TYPE_RESPONSE,
 };
 use crate::Error;
 
@@ -109,11 +109,12 @@ impl FixedHeader {
             return Err(Error::Direction);
         }
         if direction.has_variable_header() {
-            // 变长头至少要有 ATYP+IPv4+port 再加 padding 字段，且不得超出可成帧范围。
+            // 变长头至少要有 ATYP+IPv4+port 再加 padding 字段；声明长是 u16be，其满值
+            // 65535 即 SIP022 `MaxPacketSize` 的可成帧上限，类型层面已保证，无需再比较。
             let min = ss_core::target::TargetAddr::decode(&[0x01, 0, 0, 0, 0, 0, 0])
                 .map(|(_, used)| used + PADDING_FIELD_LEN)
                 .map_err(|_| Error::Length)?;
-            if usize::from(self.length) < min || usize::from(self.length) > MAX_CHUNK_PAYLOAD {
+            if usize::from(self.length) < min {
                 return Err(Error::HeaderPadding);
             }
         }
@@ -243,11 +244,10 @@ mod tests {
             FixedHeader::request(1, 8).validate(Direction::Request),
             Err(Error::HeaderPadding)
         ));
-        // 变长头声明超过单 chunk 可成帧上限。
-        assert!(matches!(
-            FixedHeader::request(1, (MAX_CHUNK_PAYLOAD + 1) as u16).validate(Direction::Request),
-            Err(Error::HeaderPadding)
-        ));
+        // 变长头声明上界是 u16be 满值 65535（SIP022 MaxPacketSize），必须可成帧。
+        assert!(FixedHeader::request(1, u16::MAX)
+            .validate(Direction::Request)
+            .is_ok());
         assert!(FixedHeader::request(1, 9)
             .validate(Direction::Request)
             .is_ok());

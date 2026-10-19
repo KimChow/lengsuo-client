@@ -5,16 +5,12 @@
 //! 头 = 0、首批载荷 = 1、之后逐帧递增。
 //! salt 与头部 chunk（响应还含首批载荷）合并成一次 `write_all`（SIP022 §3.1.3 反
 //! 指纹要求）。任何编码、校验或写出失败都会永久 poison 本 [`Writer`]：不降级明文。
-use ss_core::{
-    chunk::{write_chunk, write_eof, MAX_CHUNK_PAYLOAD},
-    crypto::SessionAead,
-    target::TargetAddr,
-};
+use ss_core::{chunk::write_eof, crypto::SessionAead, target::TargetAddr};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::{
-    header::FixedHeader, map_core, random_bytes, suite, Direction, Opening, MAX_VAR_HEADER_LEN,
-    PADDING_FIELD_LEN,
+    header::FixedHeader, map_core, random_bytes, suite, write_chunk, Direction, Opening,
+    MAX_CHUNK_PAYLOAD, MAX_VAR_HEADER_LEN, PADDING_FIELD_LEN,
 };
 use crate::{crypto::Key, Error};
 
@@ -225,7 +221,7 @@ impl Writer {
         }
         match write_chunk(writer, &mut self.aead, payload).await {
             Ok(()) => Ok(()),
-            Err(error) => Err(self.fail(map_core(error))),
+            Err(error) => Err(self.fail(error)),
         }
     }
 
