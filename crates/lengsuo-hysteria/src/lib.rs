@@ -22,7 +22,11 @@
 pub mod connect_udp;
 pub mod fragment;
 mod frame;
+pub mod h3_auth;
 pub mod padding;
+pub mod proxy;
+pub mod qpack;
+pub mod quic;
 pub mod tcp;
 pub mod udp;
 pub mod varint;
