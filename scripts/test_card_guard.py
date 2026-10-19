@@ -160,6 +160,26 @@ def main() -> int:
         rc, out = run(root, "merged", "w2b")
         check("未合入被拒", rc != 0, out.strip())
 
+        print("\n[9] Cargo.lock 可随 crate 走，其他共享区仍须独占")
+        make_card(
+            root,
+            "lock-with-crate",
+            ["crates/lengsuo-e2e-lock", "Cargo.lock"],
+            lane="datapath",
+        )
+        rc, out = run(root, "claim", "lock-with-crate")
+        check("Cargo.lock 伴随 crate 可认领", rc == 0, out.strip())
+
+        make_card(
+            root,
+            "scripts-with-crate",
+            ["crates/lengsuo-e2e-scripts", "scripts"],
+            lane="datapath",
+        )
+        rc, out = run(root, "claim", "scripts-with-crate")
+        check("scripts 仍必须独占", rc != 0, out.strip())
+        run(root, "release", "lock-with-crate")
+
         print("\n[8] 台账损坏 → 报错而非当未占用")
         bad = root / "state" / "broken.json"
         bad.parent.mkdir(parents=True, exist_ok=True)
