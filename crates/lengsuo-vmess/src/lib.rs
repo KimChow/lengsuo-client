@@ -37,6 +37,8 @@ pub mod chunkframe;
 pub mod consts;
 pub mod kdf;
 pub mod request;
+pub mod response;
+pub mod server;
 pub mod testvector;
 
 pub use crate::consts::{
@@ -65,6 +67,11 @@ pub use kdf::{kdf, kdf16, kdf_n, ID_BYTES, KDF_MAX_LEN};
 pub use request::{
     fnv1a32, CipherSpec, Command, HeaderPlanner, KeySource, RequestHeader, SecurityOption, KEY_LEN,
     NONCE_LEN,
+};
+pub use response::{parse_response_header, read_response_header, Response};
+pub use server::{
+    decode_request_header, encode_response_header, DecodedRequest, HeaderDecodeError,
+    ResponseHeader,
 };
 pub use testvector::{
     aead_encrypt_case, aead_seal_case, auth_id_case, kdf_case, legacy_reduced_key_case,
