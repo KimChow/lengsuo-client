@@ -13,13 +13,16 @@
 //! `CancelAfterInactivity` 直接断连）。因此本 crate 不发明这些语义，fail-closed
 //! 由“握手顺序 + Session 类型 + 永久 poison”表达（见 `session` 模块注释）。
 //!
-//! 尚未实现：产品代理运行时与客户端入口、所有传输及异常范围的完整验收。TLS 属于
-//! 上层（`lengsuo-tls`），调用方必须先完成认证 TLS，本 crate 无明文回退。
+//! 已实现服务端运行时（`server` 模块）：TLS 接入（tokio-rustls `TlsAcceptor`）、
+//! 请求头多用户常量时间校验、CONNECT 目标解析与拨号、双向中继（半关闭传递），
+//! 以及 UDP ASSOCIATE 的命令识别（转发未实现，见 `server` 模块注释与状态文档）。
+//! TLS 属于上层（`lengsuo-tls`），产品路径调用方必须先完成认证 TLS，本 crate 无明文回退。
 //! 状态与验证记录见 `docs/trojan-status.md`。
 
 pub mod codec;
 pub mod credential;
 pub mod drain;
+pub mod server;
 pub mod session;
 pub mod stream;
 
