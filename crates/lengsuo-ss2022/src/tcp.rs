@@ -14,7 +14,8 @@
 //! TCP 流内没有会话标识字段：响应流靠原样回传的请求 salt 归属。u96le nonce 计数器
 //! 跨整条流连续——请求方向固定头 = 0、变长头 = 1、之后逐帧递增；响应方向固定头 = 0、
 //! 首批载荷 = 1、之后逐帧递增。
-use ss_core::crypto::{CipherSuite, TAG_LEN};
+use ss_core::crypto::{CipherSuite, SessionAead, TAG_LEN};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{
     crypto::{Key, Method},
@@ -45,9 +46,12 @@ pub const TIMESTAMP_LEN: usize = 8;
 pub const RESPONSE_HEADER_HEAD_LEN: usize = 1 + TIMESTAMP_LEN;
 /// 变长头明文声明长上限（SIP022 该字段是 u16be，满值即协议上限）。
 pub const MAX_VAR_HEADER_LEN: u16 = u16::MAX;
-/// 单个 chunk 载荷上限，直接取 `ss_core::chunk`，不在本 crate 另立策略：发送侧超过它
-/// 无法成帧，接收侧声明超过它也不可能读到，一律拒绝。
-pub const MAX_CHUNK_PAYLOAD: usize = ss_core::chunk::MAX_CHUNK_PAYLOAD;
+/// 单个 chunk 载荷上限：SIP022 `shadowaead_2022.MaxPacketSize = 65535`（length 字段
+/// 是 u16be，满值即协议上限）。`ss_core::chunk` 的 8192 是经典 AEAD 的 `buf.Size`，
+/// 不适用于 SIP022，因此本 crate 自带与参考一致的 chunk 编解码（见下），不沿用该值。
+pub const MAX_CHUNK_PAYLOAD: usize = u16::MAX as usize;
+/// size 段线上长度（2B 长度密文 + 16B tag），与 ss-core 线格式一致。
+pub const SIZE_WIRE_LEN: usize = LENGTH_FIELD_LEN + TAG_LEN;
 /// 填充声明长上限（SIP022 `MaxPaddingLength = 900`，`MinPaddingLength = 0`）。
 pub const MAX_PADDING_LEN: u16 = 900;
 /// 时间戳允许偏差秒数（SIP022：超过 30 秒必须按重放处理）。
@@ -108,11 +112,12 @@ impl Direction {
     }
 }
 
-/// 套件到 `ss_core` AEAD 的映射（本 crate 只有两个 AES-GCM 套件）。
+/// 套件到 `ss_core` AEAD 的映射（AES-GCM 与 ChaCha20-Poly1305 三种 SIP022 TCP 套件）。
 pub(crate) fn suite(method: Method) -> CipherSuite {
     match method {
         Method::Aes128 => CipherSuite::Aes128Gcm,
         Method::Aes256 => CipherSuite::Aes256Gcm,
+        Method::ChaCha20 => CipherSuite::ChaCha20IetfPoly1305,
     }
 }
 
@@ -132,6 +137,51 @@ pub(crate) fn map_core(error: ss_core::Error) -> Error {
         ss_core::Error::Io(io) => Error::Io(io),
         other => Error::Address(other),
     }
+}
+
+/// SIP022 TCP 载荷帧写出：`AEAD(len u16be) || AEAD(payload)`。线格式与 `ss_core::chunk`
+/// 完全一致，仅分块上限取参考 `shadowaead_2022.MaxPacketSize = 65535`。
+pub(crate) async fn write_chunk<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    aead: &mut SessionAead,
+    payload: &[u8],
+) -> Result<(), Error> {
+    if payload.len() > MAX_CHUNK_PAYLOAD {
+        return Err(Error::Length);
+    }
+    let size_ct = aead
+        .seal(&(payload.len() as u16).to_be_bytes())
+        .map_err(map_core)?;
+    let payload_ct = aead.seal(payload).map_err(map_core)?;
+    writer.write_all(&size_ct).await.map_err(Error::Io)?;
+    writer.write_all(&payload_ct).await.map_err(Error::Io)?;
+    Ok(())
+}
+
+/// SIP022 TCP 载荷帧读取。`Ok(None)` 表示对端写了长度为 0 的终止 chunk。
+pub(crate) async fn read_chunk<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    aead: &mut SessionAead,
+) -> Result<Option<Vec<u8>>, Error> {
+    let mut size_wire = [0u8; SIZE_WIRE_LEN];
+    reader.read_exact(&mut size_wire).await.map_err(Error::Io)?;
+    let size_plain = aead.open(&size_wire).map_err(map_core)?;
+    if size_plain.len() != LENGTH_FIELD_LEN {
+        return Err(Error::Length);
+    }
+    let stored = u16::from_be_bytes([size_plain[0], size_plain[1]]);
+    if stored == 0 {
+        return Ok(None);
+    }
+    if usize::from(stored) > MAX_CHUNK_PAYLOAD {
+        return Err(Error::Length);
+    }
+    let mut payload_wire = vec![0u8; usize::from(stored) + TAG_LEN];
+    reader
+        .read_exact(&mut payload_wire)
+        .await
+        .map_err(Error::Io)?;
+    Ok(Some(aead.open(&payload_wire).map_err(map_core)?))
 }
 
 /// 请求流开场标识：只有随机 salt（SIP022 TCP 固定头没有会话标识字段）。

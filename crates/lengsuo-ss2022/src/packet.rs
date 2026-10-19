@@ -76,7 +76,7 @@ impl Sender {
         body.extend_from_slice(&address);
         body.extend_from_slice(payload);
         let ciphertext = self.key.body(&self.subkey, &header[4..16], &body, true)?;
-        let mut packet = self.key.header(header, true).to_vec();
+        let mut packet = self.key.header(header, true)?.to_vec();
         packet.extend_from_slice(&ciphertext);
         self.next = id.checked_add(1);
         Ok(packet)
@@ -101,7 +101,7 @@ impl Key {
         if packet.len() < 32 || packet.len() > 65507 {
             return Err(Error::Length);
         }
-        let header = self.header(packet[..16].try_into().expect("已校验长度"), false);
+        let header = self.header(packet[..16].try_into().expect("已校验长度"), false)?;
         let session_id = header[..8].try_into().expect("固定长度");
         let packet_id = u64::from_be_bytes(header[8..].try_into().expect("固定长度"));
         let subkey = self.subkey(&header[..8]);
@@ -181,7 +181,7 @@ mod tests {
         let mut body = vec![0];
         body.extend_from_slice(&1000u64.to_be_bytes());
         body.extend_from_slice(&u16::MAX.to_be_bytes());
-        let mut packet = key.header(header, true).to_vec();
+        let mut packet = key.header(header, true).unwrap().to_vec();
         packet.extend_from_slice(&key.body(&sender.subkey, &header[4..], &body, true).unwrap());
         assert!(matches!(key.open_client(&packet, 1000), Err(Error::Length)));
     }

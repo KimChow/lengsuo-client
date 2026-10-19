@@ -43,4 +43,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("目标地址非法：{0}")]
     Address(#[from] ss_core::Error),
+    #[error("该方法不支持此操作")]
+    Unsupported,
 }
