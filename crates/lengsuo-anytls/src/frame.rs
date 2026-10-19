@@ -7,6 +7,11 @@ use tokio::{
     time::timeout,
 };
 
+/// 帧头长度：cmd(1) + stream id(4) + length(2)，与参考 `headerOverHeadSize` 一致。
+pub const fn header_size() -> usize {
+    7
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Command {
