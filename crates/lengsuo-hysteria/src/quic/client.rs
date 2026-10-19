@@ -326,17 +326,16 @@ impl UdpSession {
     }
 
     /// 发送一条已含会话 ID 前缀的 datagram（同步，对齐 quinn 的
-    /// `send_datagram`）。发送缓冲取自种子池；分片判断请先用
+    /// `send_datagram`）。优先复用种子池里的独占缓冲；池为空时退回
+    /// [`h3_auth::send_datagram_direct`]（每调用分配一次）。分片判断请先用
     /// [`UdpSession::max_datagram_size`]。
     pub fn send_raw(&self, datagram: &[u8]) -> Result<(), UdpSendError> {
-        let mut filler = self
-            .udp
-            .lock()
-            .expect("UDP 管理器锁中毒")
-            .seeds
-            .pop()
-            .ok_or(UdpSendError::NoSeedBuffer)?;
-        filler(&self.conn, datagram).map_err(|e| match e {
+        let filler = self.udp.lock().expect("UDP 管理器锁中毒").seeds.pop();
+        let sent = match filler {
+            Some(mut filler) => filler(&self.conn, datagram),
+            None => h3_auth::send_datagram_direct(&self.conn, datagram),
+        };
+        sent.map_err(|e| match e {
             quinn::SendDatagramError::TooLarge => UdpSendError::TooLarge {
                 len: datagram.len(),
             },

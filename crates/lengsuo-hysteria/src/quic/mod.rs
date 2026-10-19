@@ -8,5 +8,7 @@
 //!   由后台任务按会话 ID 分发（对齐 dialer.go `udpSessionManagerClient`）。
 
 pub mod client;
+pub mod server;
 
 pub use client::{ClientConfig, ConnectError, HysteriaClient, UdpSendError, UdpSession};
+pub use server::{HysteriaServer, ServerConfig, ServerError, ServerSessionCtx, UdpInboundSession};
