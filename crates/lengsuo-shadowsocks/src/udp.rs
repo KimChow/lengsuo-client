@@ -18,13 +18,16 @@
 //! `open` 的顺序固定为长度检查 → 拆 salt → 派生 → 认证 → 解析地址：认证不通过
 //! 就绝不解析任何地址字节，一律 fail-closed，也没有明文回退路径。
 //!
-//! 入站防重放（同 salt 唯一性）与密钥轮换尚未实现，也不在此处缓存任何 salt；
-//! 见 `docs/shadowsocks-status.md`。
+//! 入站 salt 防重放已由 [`UdpCodec::open_guarded`] 接入 `crate::replay` 的
+//! [`ReplayFilter`]（有界窗口 + 跨重启持久化）；密钥轮换尚未实现。无状态的
+//! `open` 仍与参考 `DecodeUDPPacket` 一致、不缓存任何 salt。见
+//! `docs/shadowsocks-status.md`。
 
 use ss_core::crypto::{CipherSuite, SessionAead, TAG_LEN};
 use ss_core::target::TargetAddr;
 
 use crate::key::{KeyError, MasterKey};
+use crate::replay::{Error as ReplayError, ReplayFilter};
 
 /// 单个 UDP 数据报的总长度上限（IPv4 最大报文扣除最小 IP/UDP 头）。
 /// `seal` 与 `open` 都拒绝超过该值的包，避免把巨型数据报交给网络层。
@@ -50,6 +53,9 @@ pub enum Error {
 
     #[error("AEAD 认证失败（错误口令、篡改或 salt 不匹配）")]
     Authentication,
+
+    #[error("salt 重放拒绝：{0}")]
+    Replay(#[from] ReplayError),
 
     #[error("解密后的目标地址非法：{0}")]
     Address(#[from] ss_core::Error),
@@ -98,8 +104,34 @@ impl UdpCodec {
         self.seal_with_salt(&salt, target, packet)
     }
 
-    /// 解密并验证一个 UDP 数据报，返回（目标地址，原始载荷）。
+    /// 解密并验证一个 UDP 数据报，返回（目标地址，原始载荷）。无状态：不缓存、
+    /// 不过滤任何 salt（与参考 `DecodeUDPPacket` 一致）。需要入站重放过滤的调用方
+    /// 用 [`UdpCodec::open_guarded`]。
     pub fn open(&self, packet: &[u8]) -> Result<(TargetAddr, Vec<u8>), Error> {
+        let (_, plaintext) = self.authenticate(packet)?;
+        // 认证通过之后才信任明文里的地址字节。
+        let (target, consumed) = TargetAddr::decode(&plaintext)?;
+        Ok((target, plaintext[consumed..].to_vec()))
+    }
+
+    /// 与 [`UdpCodec::open`] 相同的解密语义，但在**认证通过后**把包内 salt 交给
+    /// `filter` 做重放判定：相同 salt 第二次出现返回 [`Error::Replay`]。
+    /// `filter` 由调用方在数据报之间共享；认证失败不记录 salt，避免把无法通过
+    /// 认证的随机 salt 灌满窗口。
+    pub fn open_guarded(
+        &self,
+        packet: &[u8],
+        filter: &mut ReplayFilter,
+    ) -> Result<(TargetAddr, Vec<u8>), Error> {
+        let (salt, plaintext) = self.authenticate(packet)?;
+        filter.record(&salt, ReplayFilter::system_now_millis())?;
+        // 认证通过之后才信任明文里的地址字节。
+        let (target, consumed) = TargetAddr::decode(&plaintext)?;
+        Ok((target, plaintext[consumed..].to_vec()))
+    }
+
+    /// 长度检查 → 拆 salt → 派生 → 认证。认证不通过绝不解析地址，也绝不记录 salt。
+    fn authenticate(&self, packet: &[u8]) -> Result<(Vec<u8>, Vec<u8>), Error> {
         let salt_len = self.suite.salt_len();
         let min_len = salt_len + TAG_LEN;
         if packet.len() < min_len {
@@ -122,9 +154,7 @@ impl UdpCodec {
                 ss_core::Error::AuthFailed => Error::Authentication,
                 other => Error::Seal(other),
             })?;
-        // 认证通过之后才信任明文里的地址字节。
-        let (target, consumed) = TargetAddr::decode(&plaintext)?;
-        Ok((target, plaintext[consumed..].to_vec()))
+        Ok((salt.to_vec(), plaintext))
     }
 
     /// 用给定 salt 密封。唯一的公开入口是 `seal`（salt 只来自 `getrandom`）；

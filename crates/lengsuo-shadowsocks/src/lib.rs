@@ -9,14 +9,17 @@
 //! 上层编码好的目标地址（`TargetAddr::encode_checked`），本层不解析地址、不实现
 //! 中继服务，也不做 UDP 关联。
 //!
-//! 尚未实现：UDP 中继服务、入站防重放（盐唯一性检查）与密钥轮换、分块 padding 与
-//! 参考实现的读端行为缓解、以及参考实现的真实互通验收。状态见
+//! 尚未实现：UDP 中继服务、密钥轮换、分块 padding 与参考实现的读端行为缓解。
+//! 入站 salt 防重放已由 `replay` 模块提供（[`ReplayFilter`]，经
+//! [`TcpReader::recv_guarded`] / [`UdpCodec::open_guarded`] 接入）。状态见
 //! `docs/shadowsocks-status.md`。
 
 mod key;
+mod replay;
 pub mod tcp;
 pub mod udp;
 
+pub use replay::{Error as ReplayError, ReplayFilter};
 pub use ss_core::crypto::CipherSuite;
 pub use ss_core::target::TargetAddr;
 pub use tcp::Error as TcpError;
