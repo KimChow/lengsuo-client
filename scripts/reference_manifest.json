@@ -47,6 +47,13 @@
         "xray_udp"
       ],
       "expected_passed": 4
+    },
+    {
+      "crate": "lengsuo-wireguard",
+      "targets": [
+        "wireguard_go"
+      ],
+      "expected_passed": 5
     }
   ]
 }

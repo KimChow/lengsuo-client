@@ -18,8 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 清单文件（reference_manifest.json）由基建卡独占维护，本卡新增条目就地登记，
 # 语义与清单一致：实际 passed 必须等于 expected_passed，否则非 0 退出。
-# lengsuo-wireguard（--test wireguard_go）未登记：需要 Go 工具链与
-# tools/reference/wireguard_go_udp_test.go 适配器，当前 47 未安装，留待后续卡补登。
 ANYTLS_HOME = Path.home() / "ref" / "bin" / "anytls"
 ANYTLS_CLIENT = Path(os.environ.get("LENGSUO_ANYTLS") or ANYTLS_HOME / "anytls-client")
 ANYTLS_SERVER = Path(os.environ.get("LENGSUO_ANYTLS_SERVER") or ANYTLS_HOME / "anytls-server")
@@ -40,6 +38,42 @@ EXTRA_TESTS = [
      "env": {"LENGSUO_ANYTLS": str(ANYTLS_CLIENT),
              "LENGSUO_ANYTLS_SERVER": str(ANYTLS_SERVER)}},
 ]
+
+
+# WireGuard 条目（--test wireguard_go）用官方 wireguard-go 核心当真实参考：跑之前
+# 必须把 tools/reference/wireguard_go_udp_test.go 复制进固定的官方检出并编译成
+# 测试二进制，再经 LENGSUO_WG_REFERENCE_BIN 注入 cargo 子进程。缺 Go / 缺检出 /
+# 编译失败一律显式报错退出，绝不静默跳过或把缺失当通过。
+WIREGUARD_ADAPTER = ROOT / "tools" / "reference" / "wireguard_go_udp_test.go"
+WIREGUARD_HOME = Path.home() / "ref" / "wireguard-go"
+
+
+def build_wireguard_reference(work):
+    go = shutil.which("go")
+    if go is None:
+        raise RuntimeError(
+            "缺少 Go 工具链（go 命令）：--test wireguard_go 需要把官方 "
+            "wireguard-go 适配器编译成参考二进制，请先安装 Go 并确保其在 PATH 中")
+    if not WIREGUARD_HOME.is_dir():
+        raise RuntimeError("官方 wireguard-go 检出不存在：{}（--test wireguard_go 需要）"
+                           .format(WIREGUARD_HOME))
+    if not WIREGUARD_ADAPTER.is_file():
+        raise RuntimeError("WireGuard 参考适配器不存在：{}".format(WIREGUARD_ADAPTER))
+    installed = WIREGUARD_HOME / "device" / "lengsuo_wg_udp_test.go"
+    if installed.is_symlink():
+        raise ValueError("拒绝符号链接适配器目标")
+    shutil.copyfile(WIREGUARD_ADAPTER, installed)
+    binary = work / "wg_reference_test"
+    if binary.is_symlink():
+        raise ValueError("拒绝符号链接可执行目标")
+    command = [go, "test", "-c", "-o", str(binary), "./device"]
+    result = subprocess.run(command, cwd=str(WIREGUARD_HOME), capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", timeout=900)
+    if result.returncode != 0 or not binary.is_file():
+        raise RuntimeError("编译 WireGuard 参考适配器失败（{}）：\n{}{}".format(
+            " ".join(command), result.stdout, result.stderr))
+    binary.chmod(0o755)
+    return binary
 
 
 def sha256(path):
@@ -121,6 +155,8 @@ def execute(manifest, work, archive, report):
                CARGO_BUILD_JOBS="2", CARGO_INCREMENTAL="0", CARGO_TERM_COLOR="never",
                CARGO_PROFILE_DEV_DEBUG="0", CARGO_PROFILE_TEST_DEBUG="0",
                RUST_TEST_THREADS="1")
+    if any(case["crate"] == "lengsuo-wireguard" for case in tests):
+        env["LENGSUO_WG_REFERENCE_BIN"] = str(build_wireguard_reference(work))
     cargo = os.environ.get("CARGO", "cargo")
     for case in tests:
         command = [cargo, "test", "-p", case["crate"], "--locked"]
