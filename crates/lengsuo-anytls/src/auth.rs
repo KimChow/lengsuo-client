@@ -24,10 +24,15 @@ impl Credential {
             return Err(Error::Invalid);
         }
         let length = u16::try_from(padding.len()).map_err(|_| Error::TooLarge)?;
+        // 与参考客户端 createOutboundConnection 一致：把 SHA256(password) + BE16 长度 +
+        // padding 拼成一段连续的缓冲区一次写尽，保证 server 端首次 `ReadOnceFrom` 即读到
+        // 完整认证块（官方 server 首读不足 32 字节会判为失配并 fallback）。
+        let mut auth = Vec::with_capacity(32 + 2 + padding.len());
+        auth.extend_from_slice(&self.0);
+        auth.extend_from_slice(&length.to_be_bytes());
+        auth.extend_from_slice(padding);
         timeout(wait, async {
-            stream.write_all(&self.0).await?;
-            stream.write_all(&length.to_be_bytes()).await?;
-            stream.write_all(padding).await?;
+            stream.write_all(&auth).await?;
             stream.flush().await
         })
         .await
