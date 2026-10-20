@@ -408,7 +408,9 @@ mod xray {
         // 单次尝试自带墙钟上限：Windows 上向未监听端口发 UDP 是**静默丢弃**，
         // `connect()` 会无限等待，把 20s 总预算架空 ⇒ 用例永久挂起。
         for _ in 0..80 {
-            match crate::support::with_attempt_timeout(HysteriaClient::connect(config(&world))).await {
+            match crate::support::with_attempt_timeout(HysteriaClient::connect(config(&world)))
+                .await
+            {
                 Ok(Ok(_)) => return world,
                 Ok(Err(_)) => {}
                 Err(_) => {}
