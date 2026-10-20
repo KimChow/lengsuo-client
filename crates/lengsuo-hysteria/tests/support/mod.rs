@@ -15,6 +15,7 @@
 /// 规则（RFC 8259）：`\` → `\\`，`"` → `\"`，其余 U+0000..U+001F
 /// 控制字符 → `\u00XX`。路径里不会出现非 ASCII 之外的其它需要转义的字符，
 /// 但控制字符仍按规范处理，避免以后有人把换行等塞进路径。
+#[allow(dead_code)] // 由部分测试目标引用；support 按目标分别编译
 pub fn json_escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 8);
     for ch in value.chars() {
@@ -59,6 +60,7 @@ pub async fn with_attempt_timeout<F: std::future::Future>(
 /// 参考 Xray 把「配置加载失败」这类**启动期**错误打到 **stdout**
 /// （实测：Windows 上非法 JSON 路径的报错在 `xray-stdout.log` 里，
 /// `xray-stderr.log` 是空的）。只读 stderr 会让排查完全失明 ⇒ 两个都读。
+#[allow(dead_code)] // 由部分测试目标引用；support 按目标分别编译
 pub fn server_logs(dir: &std::path::Path) -> String {
     let mut out = String::new();
     for name in ["xray-stdout.log", "xray-stderr.log"] {
@@ -101,15 +103,33 @@ pub fn paced_sink(
         return;
     };
     let _ = sock.set_nodelay(true);
-    let mut left = warmup;
-    let mut buf = vec![0u8; 256 * 1024];
-    while left > 0 {
-        let cap = left.min(buf.len());
-        match sock.read(&mut buf[..cap]) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => left -= n,
+    // 读与写**并行**：客户端是「先写满请求、再读回程」的顺序流（见 brutal_wire
+    // 的说明——`TcpProxyStream` 不提供 split，无法在同一 conn 上并发读写），
+    // 若回灌端也「先读满 warmup 再回灌」，双方互等 ⇒ 客户端收到的回程只有
+    // 首个窗口那点字节（实测 18854/65536）。故读侧单开一个线程把请求读掉，
+    // 主线程立即按节拍回灌。
+    let mut reader = match sock.try_clone() {
+        Ok(clone) => clone,
+        Err(_) => return,
+    };
+    std::thread::spawn(move || {
+        let mut left = warmup;
+        let mut buf = vec![0u8; 256 * 1024];
+        while left > 0 {
+            let cap = left.min(buf.len());
+            match reader.read(&mut buf[..cap]) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => left -= n,
+            }
         }
-    }
+        // 继续排空，避免客户端写端被回压卡住。
+        let mut drain = vec![0u8; 64 * 1024];
+        while let Ok(n) = reader.read(&mut drain) {
+            if n == 0 {
+                break;
+            }
+        }
+    });
     let block = ((rate / 100.0).max(1.0)) as usize;
     let payload = vec![0xa5u8; block];
     let started = std::time::Instant::now();

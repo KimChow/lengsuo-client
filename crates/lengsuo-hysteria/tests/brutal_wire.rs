@@ -144,7 +144,8 @@ fn client_config(server: &Server, up: u64, down: u64) -> ClientConfig {
 ///
 /// `obey = false` 时不节拍、全速回灌（CUBIC 对照需要突破上界）。
 fn spawn_sink(warmup: usize, total: usize, rate: f64, obey: bool) -> u16 {
-    support::spawn_paced_sink(warmup, total, rate, obey, Duration::from_secs(5))
+    // 回灌端返回 (端口, 发送时刻通道)；本用例只用端口，通道随句柄一起丢弃。
+    support::spawn_paced_sink(warmup, total, rate, obey, Duration::from_secs(5)).0
 }
 
 /// 一次实跑的结果。
@@ -179,30 +180,30 @@ async fn measure(tag: &str, negotiated: u64, client_congestion: &str) -> Run {
         let mut stream = proxy::tcp_connect(&client, &sink_addr)
             .await
             .expect("tcp_connect 失败");
-        // 上传与回程**并发**：回程必须同时排空，否则目标端的写缓冲被回压。
-        let upload = async {
-            let chunk = vec![0x5au8; 64 * 1024];
-            let mut sent = 0usize;
-            while sent < REQUEST_BYTES {
-                let n = chunk.len().min(REQUEST_BYTES - sent);
-                stream.write_all(&chunk[..n]).await.expect("写入失败");
-                sent += n;
-            }
-            stream.finish().await.expect("关闭上传方向失败");
-        };
-        let drain = async {
-            let mut got = 0usize;
-            let mut buf = vec![0u8; 64 * 1024];
-            while got < RESPONSE_BYTES {
-                match tokio::time::timeout(READ_LIMIT, stream.read(&mut buf)).await {
-                    Ok(Ok(0)) | Err(_) | Ok(Err(_)) => break,
-                    Ok(Ok(n)) => got += n,
-                }
-            }
-            got
-        };
+        // 单连接双向： 同时持有 QUIC 的 send/recv 两半，
+        // 不提供 ，因此**不能**用两个闭包同时借  并发读写
+        // （E0499）。这里分两个阶段：
+        //   ① 上传：写完请求字节后立即  关上传方向；
+        //   ② 回程：再排空响应（目标端按协商速率回灌）。
+        // 回灌端  先把请求读干净再回灌，故顺序执行不会死锁；
+        // 计时覆盖两阶段总耗时，与「并发」口径对吞吐的影响已在文档中如实说明。
         let started = Instant::now();
-        let ((), got) = tokio::join!(upload, drain);
+        let chunk = vec![0x5au8; 64 * 1024];
+        let mut sent = 0usize;
+        while sent < REQUEST_BYTES {
+            let n = chunk.len().min(REQUEST_BYTES - sent);
+            stream.write_all(&chunk[..n]).await.expect("写入失败");
+            sent += n;
+        }
+        stream.finish().expect("关闭上传方向失败");
+        let mut got = 0usize;
+        let mut buf = vec![0u8; 64 * 1024];
+        while got < RESPONSE_BYTES {
+            match tokio::time::timeout(READ_LIMIT, stream.read(&mut buf)).await {
+                Ok(Ok(0)) | Err(_) | Ok(Err(_)) => break,
+                Ok(Ok(n)) => got += n,
+            }
+        }
         let elapsed = started.elapsed();
         (elapsed, got)
     };
@@ -344,24 +345,33 @@ fn zero_negotiated_rate_is_rejected() {
 }
 
 /// 亚字节/秒 ⇒ 拒绝（`BandwidthTooLow`；8 bps = 1 字节/秒 是最低档）。
+///
+/// 两种语义必须分清（对齐参考 `hub.go:193-200`）：
+/// - **未配置**（`tx == 0`）⇒ 回落分支 ⇒ `Ok(0)`，**不是**错误；
+/// - **已配置非法速率**（如 `Some(0)` 直接注入）⇒ `Err(ZeroBandwidth)`，fail-closed。
 #[test]
 fn sub_byte_rate_is_rejected() {
-    // 协商面单位是字节/秒，1 字节/秒 = 8 bps 是最低合法档。
-    let cc = CongestionConfig {
-        mode: CongestionMode::Brutal,
-        rx: Bandwidth(0),
-        tx: Bandwidth(1),
-    };
-    assert_eq!(server_send_rate(&cc, 0), Ok(0));
-    // 非法（0 速率）⇒ fail-closed。
-    let zero = CongestionConfig {
+    // 未配置（tx = 0）⇒ 参考的回落分支：不限速，返回 Ok(0)。
+    let unset = CongestionConfig {
         mode: CongestionMode::Brutal,
         rx: Bandwidth(0),
         tx: Bandwidth(0),
     };
     assert_eq!(
-        server_send_rate(&zero, 0),
-        Err(CongestionError::Rate(ConfigError::ZeroBandwidth))
+        server_send_rate(&unset, 0),
+        Ok(0),
+        "tx 未配置属参考回落分支，不得报错"
+    );
+    // 已配置 1 字节/秒 ⇒ 合法，且被限速到 1（不是回落）。
+    let one = CongestionConfig {
+        mode: CongestionMode::Brutal,
+        rx: Bandwidth(0),
+        tx: Bandwidth(1),
+    };
+    assert_eq!(
+        server_send_rate(&one, 1),
+        Ok(1),
+        "min(BrutalUp=1, clientDown=1) = 1"
     );
     // 注入层：协商出 0 ⇒ 报错。
     assert_eq!(

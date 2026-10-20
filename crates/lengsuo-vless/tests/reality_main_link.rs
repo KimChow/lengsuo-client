@@ -31,9 +31,8 @@ use lengsuo_vless::reality::x25519::{x25519, x25519_base};
 use lengsuo_vless::reality_config::{ConfigError, RealityConfig, RealitySettings};
 use lengsuo_vless::reality_link::RealityStream;
 use lengsuo_vless::stream;
-use serde_json::json;
 use ss_core::target::TargetAddr;
-use support::{base64_url, free_ports, launch, SeededRng, ID, KEY, WAIT};
+use support::{base64_url, free_ports, SeededRng, KEY, WAIT};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, DuplexStream},
     net::{TcpListener, TcpStream},

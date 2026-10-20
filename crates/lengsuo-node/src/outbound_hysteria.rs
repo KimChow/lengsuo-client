@@ -78,6 +78,11 @@ pub async fn dial_hysteria(
         auth: config.auth.password.clone(),
         roots_der,
         brutal_down: 0,
+        // 出口运行时暂不协商 Brutal：保持 quinn 默认 CUBIC（空串 = 不注入），
+        // 与本次改动前的行为一致；启用需在节点配置里显式给出带宽。
+        brutal_up: 0,
+        congestion: String::new(),
+        peer_cc_rx: None,
     })
     .await?;
 

@@ -183,7 +183,7 @@ impl HysteriaServer {
                     brutal_down: server.brutal_down,
                     udp_enabled: server.udp_enabled,
                     udp_idle_timeout_secs: server.udp_idle_timeout_secs,
-                    congestion: server.congestion.clone(),
+                    congestion: server.congestion,
                 };
                 let _ = crate::h3_server::serve_connection(conn.clone(), ctx).await;
                 // 对齐 hub.go：ServeQUICConn 返回后 CloseWithError(closeErrCodeOK)

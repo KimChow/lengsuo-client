@@ -6,8 +6,10 @@ use std::{
 };
 use tokio::{net::TcpStream, time::Instant};
 pub const WAIT: Duration = Duration::from_secs(8);
+#[allow(dead_code)]
 pub const ID: &str = "11111111-1111-1111-1111-111111111111";
 pub const KEY: [u8; 16] = [0x11; 16];
+#[allow(dead_code)]
 pub struct Reference {
     child: Child,
     directory: PathBuf,
@@ -134,6 +136,7 @@ fn answer_a(packet: &[u8], name: &str) -> Option<Vec<u8>> {
     Some(response)
 }
 
+#[allow(dead_code)]
 pub async fn launch(config: Value, port: u16) -> Reference {
     let binary = std::env::var("LENGSUO_XRAY").expect("必须显式指定固定版本 Xray");
     let version = Process::new(&binary).arg("version").output().unwrap();
