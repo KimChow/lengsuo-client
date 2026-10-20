@@ -87,7 +87,8 @@ fn montgomery_ladder(k: &[u8; 32], u: &FieldElement) -> FieldElement {
 
 /// 从 `u64` 构造域元素（用于曲线常量 `A24` 与基点 9）。
 impl FieldElement {
-    fn from_u64(v: u64) -> Self {
+    /// 从小整数构造域元素。
+    pub(crate) fn from_u64(v: u64) -> Self {
         Self([v, 0, 0, 0, 0]).reduce_full()
     }
 }

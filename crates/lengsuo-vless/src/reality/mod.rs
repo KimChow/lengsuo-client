@@ -39,9 +39,12 @@
 //! 为 0，这是参考的实际行为，本模块照搬而非「修正」。
 
 pub mod auth;
+pub mod client;
 pub mod hash;
 pub mod server;
+pub mod session;
 pub mod shortid;
+pub mod tls13;
 pub mod x25519;
 
 use thiserror::Error;

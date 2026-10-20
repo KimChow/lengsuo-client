@@ -47,12 +47,32 @@ pub fn hkdf_sha256(salt: Option<&[u8]>, ikm: &[u8], info: &[u8], okm: &mut [u8])
     let prk = hmac.finalize();
 
     // Expand
+    hkdf_expand_sha256(&prk, info, okm);
+}
+
+/// HKDF-SHA256 (RFC 5869) Extract step (section 2.2).
+///
+/// `PRK = HMAC-SHA256(salt, ikm)`. TLS 1.3 key schedule (RFC 8446 section 7.1)
+/// uses it to derive `early_secret` / `handshake_secret` / `master_secret`.
+pub fn hkdf_extract_sha256(salt: &[u8], ikm: &[u8]) -> [u8; 32] {
+    let mut hmac = HmacSha256::new(salt);
+    hmac.update(ikm);
+    hmac.finalize()
+}
+
+/// HKDF-SHA256 (RFC 5869) Expand step (section 2.3).
+///
+/// `OKM = T(1) | T(2) | ...`, `T(i) = HMAC-SHA256(PRK, T(i-1) | info | i)`.
+///
+/// Matches the reference `xtls/reality/tls13` `ExpandLabel`, which uses only
+/// the expand phase (`hkdf.Expand`) and no extract.
+pub fn hkdf_expand_sha256(prk: &[u8], info: &[u8], okm: &mut [u8]) {
     let mut t: [u8; 32] = [0u8; 32];
     let mut t_len = 0usize;
     let mut counter: u8 = 1;
     let mut offset = 0usize;
     while offset < okm.len() {
-        let mut mac = HmacSha256::new(&prk);
+        let mut mac = HmacSha256::new(prk);
         mac.update(&t[..t_len]);
         mac.update(info);
         mac.update(&[counter]);
@@ -63,6 +83,15 @@ pub fn hkdf_sha256(salt: Option<&[u8]>, ikm: &[u8], info: &[u8], okm: &mut [u8])
         offset += take;
         counter = counter.wrapping_add(1);
     }
+}
+
+/// HMAC-SHA256 (RFC 2104). Block length 64 bytes.
+///
+/// TLS 1.3 `Finished` (RFC 8446 section 4.4.4) uses it.
+pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut hmac = HmacSha256::new(key);
+    hmac.update(msg);
+    hmac.finalize()
 }
 
 /// HMAC-SHA256（RFC 2104）。块长 64 字节。

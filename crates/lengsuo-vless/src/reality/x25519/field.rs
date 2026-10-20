@@ -5,10 +5,10 @@
 //! RFC 向量测试与随机化 ECDH 一致性测试覆盖。
 
 /// RFC 7748 §5 的曲线常量 `a24 = (486662 - 2) / 4`。
-pub(super) const A24: u64 = 121665;
+pub(crate) const A24: u64 = 121665;
 
 /// `p - 2 = 2^255 - 21` 的小端 32 字节表示（费马逆元指数）。
-pub(super) const P_MINUS_2_LE: [u8; 32] = {
+pub(crate) const P_MINUS_2_LE: [u8; 32] = {
     let mut e = [0xffu8; 32];
     e[0] = 0xeb;
     e[31] = 0x7f;
@@ -17,15 +17,24 @@ pub(super) const P_MINUS_2_LE: [u8; 32] = {
 
 /// 域元素：5 个 51 位 limb。
 #[derive(Clone, Copy, Debug)]
-pub(super) struct FieldElement(pub(super) [u64; 5]);
+pub(crate) struct FieldElement(pub(crate) [u64; 5]);
+
+/// 域元素相等：逐 limb 比特相等（不是常数时间，但只用于公开值比较）。
+impl PartialEq for FieldElement {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_bytes() == other.to_bytes()
+    }
+}
+
+impl Eq for FieldElement {}
 
 /// `p = 2^255 - 19`，用于条件减法。
 impl FieldElement {
-    pub(super) const ZERO: Self = Self([0, 0, 0, 0, 0]);
-    pub(super) const ONE: Self = Self([1, 0, 0, 0, 0]);
+    pub(crate) const ZERO: Self = Self([0, 0, 0, 0, 0]);
+    pub(crate) const ONE: Self = Self([1, 0, 0, 0, 0]);
 
     /// 从 32 字节小端解码（`u[31] &= 127`，对齐 RFC 7748 §5）。
-    pub(super) fn from_bytes(b: &[u8; 32]) -> Self {
+    pub(crate) fn from_bytes(b: &[u8; 32]) -> Self {
         let mut limbs = [0u64; 5];
         let load = |i: usize| -> u64 {
             let mut v = 0u64;
@@ -43,7 +52,7 @@ impl FieldElement {
     }
 
     /// 编码为 32 字节小端。
-    pub(super) fn to_bytes(self) -> [u8; 32] {
+    pub(crate) fn to_bytes(self) -> [u8; 32] {
         let mut t = self.reduce_full();
         // 条件减去 p，确保 < p。
         t = t.sub_p_if_ge();
@@ -68,7 +77,7 @@ impl FieldElement {
     ///
     /// 输入 limb 允许大于 2^51（ladder 的中间量），但必须 **< 2^63**，
     /// 否则进位链会溢出 `u64`。本模块所有产出都满足该前提。
-    pub(super) fn reduce_full(self) -> Self {
+    pub(crate) fn reduce_full(self) -> Self {
         let mut l = self.0;
         for _ in 0..4 {
             let c0 = l[0] >> 51;
@@ -91,7 +100,7 @@ impl FieldElement {
     }
 
     /// 若 `>= p` 则减 `p`。
-    pub(super) fn sub_p_if_ge(self) -> Self {
+    pub(crate) fn sub_p_if_ge(self) -> Self {
         let mut l = self.0;
         // 计算 l + 19 是否溢出 2^255 来判断 >= p。
         let mut t = [0u64; 5];
@@ -109,7 +118,7 @@ impl FieldElement {
         Self(l)
     }
 
-    pub(super) fn add(self, rhs: Self) -> Self {
+    pub(crate) fn add(self, rhs: Self) -> Self {
         let mut l = [0u64; 5];
         for (i, li) in l.iter_mut().enumerate() {
             *li = self.0[i] + rhs.0[i];
@@ -117,7 +126,7 @@ impl FieldElement {
         Self(l).reduce_full()
     }
 
-    pub(super) fn sub(self, rhs: Self) -> Self {
+    pub(crate) fn sub(self, rhs: Self) -> Self {
         // 加 `p`（不是 `2p`）再减，保证非负。
         //
         // 关键：`2p = 2^256 - 38` **放不进 5×51=255 位**，其低 255 位
@@ -125,7 +134,7 @@ impl FieldElement {
         // 而 `p = 2^255 - 19` 本身恰好放进 5 limbs，
         // 且 `self + p - rhs >= 0`（两侧均 < 2^255，`rhs` 已规约）。
         // 这一结论由本模块的随机化测试与 RFC 7748 向量共同验证。
-        pub(super) const P_LIMBS_5: [u64; 5] = [
+        pub(crate) const P_LIMBS_5: [u64; 5] = [
             0x7ffffffffffed,
             0x7ffffffffffff,
             0x7ffffffffffff,
@@ -141,7 +150,7 @@ impl FieldElement {
         Self(l).reduce_full()
     }
 
-    pub(super) fn mul(self, rhs: Self) -> Self {
+    pub(crate) fn mul(self, rhs: Self) -> Self {
         let a = self.0;
         let b = rhs.0;
         // 预乘 19 便于折叠。
@@ -174,8 +183,14 @@ impl FieldElement {
         Self(l).reduce_full()
     }
 
-    pub(super) fn square(self) -> Self {
+    pub(crate) fn square(self) -> Self {
         self.mul(self)
+    }
+
+    /// 取负：`-a`（Ed25519 的解压需要按符号位翻转 x）。
+    pub(crate) fn negate(self) -> Self {
+        // `0 - a`，复用 `sub` 的「加 p 再减」逻辑。
+        FieldElement::ZERO.sub(self)
     }
 
     /// 乘法逆元：`a^(p-2) mod p`（费马小定理）。
@@ -187,7 +202,7 @@ impl FieldElement {
     /// 只用于 ladder 末端的 `z^-1`，其结果不进入任何与秘密相关的分支
     /// （除倒数本身的取值），且 RFC 7748 的向量测试已覆盖正确性。
     /// 由主理人开基建卡引入成熟实现后可一并替换。
-    pub(super) fn invert(self) -> Self {
+    pub(crate) fn invert(self) -> Self {
         let mut result = Self::ONE;
         let mut started = false;
         for byte in P_MINUS_2_LE.iter().rev() {

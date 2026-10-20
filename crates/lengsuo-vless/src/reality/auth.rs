@@ -43,19 +43,19 @@
 //! 客户端据此确认对端持有同一 `auth_key`（即知服务端私钥），
 //! 避免真证书冲突/MITM 时静默继续。
 
-use aes_gcm::aead::rand_core::{CryptoRng, RngCore};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::Aes256Gcm;
 use thiserror::Error;
-use zeroize::Zeroize;
 
 use super::hash::hkdf_sha256;
-use super::x25519::{x25519, x25519_base};
+use super::x25519::x25519;
 use super::ClientVersion;
 
 mod cert;
+mod keys;
 
 pub use cert::{cert_auth_tag, verify_cert_tag};
+pub use keys::RealityClientKeys;
 
 /// 被 AEAD 加密的认证载荷长度。
 ///
@@ -163,7 +163,8 @@ impl<'a> ClientHelloAuthView<'a> {
 /// 由 `client_random` 前 20 字节与 ECDH 结果派生 32 字节 `auth_key`。
 ///
 /// 对齐参考 `hkdf.New(sha256.New, AuthKey, hello.Random[:20], []byte("REALITY"))`。
-fn derive_auth_key(ecdh: &[u8; 32], random: &[u8]) -> Result<[u8; 32], AuthError> {
+/// 客户端与服务端共用本函数，保证两端派生一致。
+pub fn derive_auth_key(ecdh: &[u8; 32], random: &[u8]) -> Result<[u8; 32], AuthError> {
     if random.len() < RANDOM_LEN {
         return Err(AuthError::BufferTooShort {
             need: RANDOM_LEN,
@@ -173,82 +174,6 @@ fn derive_auth_key(ecdh: &[u8; 32], random: &[u8]) -> Result<[u8; 32], AuthError
     let mut out = [0u8; 32];
     hkdf_sha256(Some(&random[..HKDF_SALT_LEN]), ecdh, HKDF_INFO, &mut out);
     Ok(out)
-}
-
-/// 客户端侧的 REALITY 握手密钥材料。
-///
-/// `Debug` **不输出任何密钥字节**（硬约束：日志/Debug 不得泄漏密钥）。
-/// 临时公钥本就明文上行，可以在 Debug 里出现。
-pub struct RealityClientKeys {
-    ephemeral_public: [u8; X25519_LEN],
-    /// ECDH 共享密钥（即参考里 `AuthKey` 的 HKDF 输入）。
-    shared: [u8; X25519_LEN],
-}
-
-impl Drop for RealityClientKeys {
-    fn drop(&mut self) {
-        // 硬约束：密钥材料用后清零。
-        self.shared.zeroize();
-    }
-}
-
-impl core::fmt::Debug for RealityClientKeys {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("RealityClientKeys")
-            .field("ephemeral_public", &hex(&self.ephemeral_public))
-            .field("shared", &"<redacted>")
-            .finish()
-    }
-}
-
-impl RealityClientKeys {
-    /// 生成临时 X25519 密钥对并与服务端公钥协商共享密钥。
-    ///
-    /// `rng` 注入随机源：真实运行用 `aes_gcm::aead::OsRng`，测试用确定性 RNG。
-    /// 参考用 Go 标准库 `ecdh.X25519()`；本卡无该依赖，改用本 crate 内置的
-    /// [`super::x25519`]（见报告「偏离清单」）。协议字节完全一致：
-    /// 同为 RFC 7748 X25519。
-    pub fn generate<R: RngCore + CryptoRng>(
-        server_public: &[u8; X25519_LEN],
-        rng: &mut R,
-    ) -> Result<Self, AuthError> {
-        let mut seed = [0u8; 32];
-        rng.fill_bytes(&mut seed);
-        let ephemeral_public = x25519_base(&seed);
-        // 对齐参考：全零/低阶点共享密钥必须失败（`X25519` 返回 error、
-        // `AuthKey == nil`），不得当作合法共享密钥继续。
-        let shared = x25519(&seed, server_public).map_err(|_| AuthError::InvalidPublicKey)?;
-        seed.zeroize();
-        Ok(Self {
-            ephemeral_public,
-            shared,
-        })
-    }
-
-    /// 临时公钥（写入 ClientHello 的 key_share）。
-    pub fn ephemeral_public(&self) -> [u8; X25519_LEN] {
-        self.ephemeral_public
-    }
-
-    /// 与 32 字节 `client_random` 一起派生 `auth_key`。
-    ///
-    /// 对齐参考：`AuthKey = X25519(priv, server_pub)` 随后
-    /// `HKDF(ikm = AuthKey, salt = random[:20], info = "REALITY")`。
-    ///
-    /// **`auth_key` 不落地保存**：调用方拿到后自行控制生命周期
-    /// （`seal_auth_payload` 用完即可丢弃）。
-    pub fn derive_auth_key(&self, random: &[u8; RANDOM_LEN]) -> Result<[u8; 32], AuthError> {
-        derive_auth_key(&self.shared, random)
-    }
-}
-
-/// 十六进制小写编码（仅用于 Debug 输出公钥）。
-fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
-    }
-    s
 }
 
 /// 构造认证载荷明文（[`AUTH_PAYLOAD_LEN`] = 16 字节）。

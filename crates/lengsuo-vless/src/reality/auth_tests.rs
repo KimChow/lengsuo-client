@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod cases {
     use super::super::*;
+    use crate::reality::x25519::x25519_base;
     use aes_gcm::aead::rand_core::{CryptoRng, RngCore};
 
     /// 确定性 RNG：`fill_bytes` 依次写入 0,1,2,…（跨调用连续），

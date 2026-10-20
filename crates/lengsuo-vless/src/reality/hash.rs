@@ -18,5 +18,7 @@
 pub mod hmac;
 pub mod sha;
 
-pub use self::hmac::{hkdf_sha256, hmac_sha512};
+pub use self::hmac::{
+    hkdf_expand_sha256, hkdf_extract_sha256, hkdf_sha256, hmac_sha256, hmac_sha512,
+};
 pub use sha::{sha256, sha512, Sha256, Sha512};
