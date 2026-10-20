@@ -100,7 +100,10 @@
         "xray_hysteria",
         "xray_hysteria_server"
       ],
-      "expected_passed": 6
+      "expected_passed": 6,
+      "expected_passed_by_platform": {
+        "windows": 4
+      }
     }
   ]
 }
