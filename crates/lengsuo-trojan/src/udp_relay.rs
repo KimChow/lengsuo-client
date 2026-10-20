@@ -1,41 +1,39 @@
 //! UDP 关联中继：把流上的 Trojan UDP 报文转发到真实 UDP 套接字并回程。
 //!
-//! 语义基线：Xray v26.3.27，`proxy/trojan/server.go` 的 `handleUDPPayload` +
-//! `protocol.go` 的 `PacketReader` / `PacketWriter`。
+//! 语义基线：Xray v26.3.27，`proxy/trojan/server.go:247-320` 的 `handleUDPPayload`
+//! + `protocol.go` 的 `PacketReader` / `PacketWriter`。
 //!
-//! 设计取舍与参考的差异（如实记录，见 `docs/trojan-status.md`）：
-//! - **无会话池**：参考用 `transport/internet/udp` 的会话化调度器按目标多路复用/
-//!   复用出站 UdpConn；本实现**每个目标地址一个独立 `UdpSocket`**（按端口的
-//!   NAT/会话映射本质即是按目标区分；同时上游给**每个包**单独往返，
-//!   「一个数据包一个地址」天然成立，不缓存也不需要缓存首包地址）。
-//! - **请求/响应串行**：上游在回程 socket 上等待响应期间不读下行报文。这正是
-//!   参考默认 `cone=false` 的语义（`s.cone` 默认 false，非 cone 时每个连接只记
-//!   一个 `dest`）；区别在于本实现按目标复用 socket 而非单包即弃。用同步 UDP
-//!   回显即可与参考默认行为逐字节互通。
-//! - **未实现**：cone 模式（`cone=true` 时参考把首包地址固定到整个关联）、
-//!   会话复用与 drain 行为对照（文档「仍未实现项」）。
+//! 出站会话复用对齐 `transport/internet/udp/dispatcher.go`
+//!（落地在 `crate::udp_pool`）。
+//!
 
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+//! 与参考的逐条对应（差异见 `docs/trojan-status.md` 偏离清单）：
+//! - 参考按目标分发到出站链路（`udpServer.Dispatch(currentPacketCtx, *dest, b)`）；
+//!   本实现经 `crate::udp_pool` 按**目标地址**复用出站 socket。
+//! - 参考的 cone 短路（`if !s.cone || dest == nil { dest = &destination }`）由池的
+//!   `cone` 配置承载：cone 开启时首包目标固定到整个关联，**后续包自身的目标被忽略**
+//!   （参考语义，不是 bug）。
+//! - 参考的回程写回失败 ⇒ `cancel()` 整个会话（不是只关这一条）：本实现在回程写
+//!   失败时结束整条关联。
+//! - 参考的空闲计时 `signal.CancelAfterInactivity(..., ConnectionIdle)`：本实现对
+//!   每次读操作套同一 `idle` 截止（逐操作等价，见文档偏离清单）。
+//!
+//! 回程是**异步**的：请求侧与回程侧并行，收到即写回（参考的
+//! `udpServer` 回调也是异步写回），不再逐包串行等待。
+
 use std::time::Duration;
 
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{lookup_host, UdpSocket};
 use tokio::time::timeout;
 
-use crate::udp::{decode_packet, Error as FrameError};
+use crate::udp::{decode_packet, encode_packet, Error as FrameError};
+use crate::udp_pool::{PoolConfig, UdpPool};
 
 /// 上行读缓冲：容纳最长域名地址 + 2 字节长度 + CRLF + 最大载荷（65535）。
 const READ_BUF: usize = 1 + 1 + 255 + 2 + 2 + 2 + crate::udp::MAX_PAYLOAD_LEN;
 
-/// 回程读缓冲：一个 UDP 数据报的载荷上限。
-const RECV_BUF: usize = crate::udp::MAX_PAYLOAD_LEN;
-
-/// 出站 DNS 解析截止上限（解析本身由 `lookup_host` 完成，单次解析不无限等待）。
-const DNS_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// UDP 中继错误。帧格式错误、地址解析、拨号/IO 与超时分区上报，一律 fail-closed。
+/// UDP 中继错误。帧格式错误、池错误、IO 与超时分区上报，一律 fail-closed。
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("截止时间必须大于零")]
@@ -44,14 +42,8 @@ pub enum Error {
     #[error("UDP 报文帧非法：{0}")]
     Frame(#[from] FrameError),
 
-    #[error("目标地址无法解析：{0}")]
-    Address(#[from] ss_core::Error),
-
-    #[error("DNS 解析失败：{0}")]
-    Resolve(#[source] std::io::Error),
-
-    #[error("UDP 套接字绑定/收发失败：{0}")]
-    Socket(#[source] std::io::Error),
+    #[error("UDP 会话池错误：{0}")]
+    Pool(#[from] crate::udp_pool::Error),
 
     #[error("UDP 关联内协议操作超时")]
     Timeout,
@@ -60,26 +52,134 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-/// 单个目标地址绑定的 UDP 套接字，按地址族分别绑定通配源。
-struct Egress {
-    socket: UdpSocket,
+/// 上行帧读取器：把流上的字节流切成 Trojan UDP 报文。
+struct FrameReader<R> {
+    reader: R,
+    buf: Vec<u8>,
+    filled: usize,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Family {
-    V4,
-    V6,
+impl<R: AsyncRead + Unpin> FrameReader<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buf: vec![0u8; READ_BUF],
+            filled: 0,
+        }
+    }
+
+    /// 读下一帧。`Ok(None)` 表示读侧在**帧边界**干净结束（半关闭）。
+    ///
+    /// 流上的一帧可能被 TCP/TLS 切成多块：只要声明长度还没读满，就继续读
+    /// （对齐参考 `protocol.go` 的 `io.ReadFull`：短读不是错误）。只有读侧
+    /// 结束（EOF）时字节仍不足才是协议错误（fail-closed）。
+    async fn next_frame(
+        &mut self,
+        limit: usize,
+        idle: Duration,
+    ) -> Result<Option<(TargetAddr, Vec<u8>)>, Error> {
+        loop {
+            match decode_packet(&self.buf[..self.filled], limit) {
+                Ok(((target, payload), used)) => {
+                    // 载荷必须先复制：后续读会覆写同一缓冲。
+                    let owned = payload.to_vec();
+                    // 本帧之后的字节属于**后续帧**：保留，不丢。
+                    self.buf.copy_within(used..self.filled, 0);
+                    self.filled -= used;
+                    return Ok(Some((target, owned)));
+                }
+                Err(FrameError::Truncated { need, .. }) => {
+                    if need > READ_BUF {
+                        return Err(Error::Frame(FrameError::Oversize(need)));
+                    }
+                    if !self.read_more(idle).await? {
+                        // 读侧结束：缓冲为空 ⇒ 干净 EOF（半关闭），不是协议错误。
+                        // 缓冲非空 ⇒ 残留半帧是协议错误（fail-closed）。
+                        if self.filled == 0 {
+                            return Ok(None);
+                        }
+                        return Err(Error::Frame(FrameError::Truncated {
+                            need,
+                            got: self.filled,
+                        }));
+                    }
+                }
+                Err(FrameError::LengthMismatch {
+                    declared,
+                    available,
+                }) => {
+                    // 流上声明长度大于已到达字节：继续读满（参考 `io.ReadFull`）。
+                    let need = self.filled + (declared - available);
+                    if need > READ_BUF {
+                        return Err(Error::Frame(FrameError::Oversize(declared)));
+                    }
+                    if !self.read_more(idle).await? {
+                        // 读侧结束：缓冲为空 ⇒ 干净 EOF（半关闭），不是协议错误。
+                        if self.filled == 0 {
+                            return Ok(None);
+                        }
+                        // 读侧结束且仍不足 ⇒ 协议错误（fail-closed）。
+                        return Err(Error::Frame(FrameError::LengthMismatch {
+                            declared,
+                            available,
+                        }));
+                    }
+                }
+                Err(other) => return Err(Error::Frame(other)),
+            }
+        }
+    }
+
+    /// 继续读入流上的字节。返回 `false` 表示读侧已结束（EOF）。
+    async fn read_more(&mut self, idle: Duration) -> Result<bool, Error> {
+        if self.filled == READ_BUF {
+            // 缓冲已满却仍缺字节：帧超出可承载上限，fail-closed。
+            return Err(Error::Frame(FrameError::Oversize(READ_BUF)));
+        }
+        let read = timeout(idle, self.reader.read(&mut self.buf[self.filled..]))
+            .await
+            .map_err(|_| Error::Timeout)?
+            .map_err(Error::Io)?;
+        if read == 0 {
+            return Ok(false);
+        }
+        self.filled += read;
+        Ok(true)
+    }
 }
 
-/// 在一条已建立的 UDP 关联上双向中继，直到客户端读侧 EOF（半关闭见文档）。
+/// 在一条已建立的 UDP 关联上双向中继，直到客户端读侧 EOF。
 ///
-/// `payload_limit` 是单包载荷上限（超限 fail-closed）；`idle` 是单个读/写操作
-/// 的空闲截止（参考 `CancelAfterInactivity` 的逐操作等价，见文档偏离清单）。
+/// `payload_limit` 是单包载荷上限（超限 fail-closed）；`idle` 是单个读操作的
+/// 空闲截止（参考 `CancelAfterInactivity` 的逐操作等价，见文档偏离清单）。
 /// 客户端停止发送但仍接收时**不得提前断开**：读侧 EOF 之前，回程照常写出。
 pub async fn relay<R, W>(
-    mut reader: R,
-    mut writer: W,
+    reader: R,
+    writer: W,
     payload_limit: usize,
+    idle: Duration,
+) -> Result<(), Error>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let config = PoolConfig {
+        idle_timeout: idle,
+        max_entries: crate::udp_pool::DEFAULT_MAX_ENTRIES,
+        cone: false,
+        payload_limit,
+    };
+    relay_with(reader, writer, config, idle).await
+}
+
+/// 与 `relay` 相同，但出站会话池的 **cone 模式**可配。
+///
+/// `cone = true` 时首包目标固定到整个关联，后续包自身的目标被忽略
+/// （对齐参考 `server.go` 的 `if !s.cone || dest == nil { dest = &destination }`）。
+pub async fn relay_with<R, W>(
+    reader: R,
+    mut writer: W,
+    config: PoolConfig,
     idle: Duration,
 ) -> Result<(), Error>
 where
@@ -89,120 +189,37 @@ where
     if idle.is_zero() {
         return Err(Error::InvalidDeadline);
     }
-    let mut buf = vec![0u8; READ_BUF];
-    let mut filled = 0usize;
-    let mut egress: HashMap<TargetAddr, Egress> = HashMap::new();
+    let pool = UdpPool::new(config)?;
+    let mut frames = FrameReader::new(reader);
 
     loop {
-        // 有半帧就续读，否则读下一块。limit 者取“本帧完整长度”，超限即 fail-closed。
-        let (frame, used) = match decode_packet(&buf[..filled], payload_limit) {
-            Ok((frame, used)) => (frame, used),
-            Err(FrameError::Truncated { need, .. }) => {
-                if need > READ_BUF {
-                    return Err(Error::Frame(FrameError::Oversize(need)));
-                }
-                let read = timeout(idle, reader.read(&mut buf[filled..]))
-                    .await
-                    .map_err(|_| Error::Timeout)?
-                    .map_err(Error::Io)?;
-                if read == 0 {
-                    // 读侧结束：残留半帧是协议错误，否则是干净半关闭。
-                    return if filled == 0 {
-                        Ok(())
-                    } else {
-                        Err(Error::Frame(FrameError::Truncated { need, got: filled }))
-                    };
-                }
-                filled += read;
-                continue;
-            }
-            Err(other) => return Err(Error::Frame(other)),
-        };
-        debug_assert_eq!(&buf[used..filled], &[]);
-        filled = 0;
-
-        let (target, payload) = frame;
-        let socket = egress_socket(&mut egress, &target).await?;
-        let destination = resolve(&target, idle).await?;
-        timeout(idle, socket.send_to(payload, destination))
-            .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(Error::Socket)?;
-
-        // 回程：参考 cone=false 一律回显给请求方；本实现同步等待单个响应，
-        // 带地址与原长度前缀写回同一关联。
-        let mut recv = vec![0u8; RECV_BUF];
-        let (received, from) = timeout(idle, socket.recv_from(&mut recv))
-            .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(Error::Socket)?;
-        // 只接受来自本次请求目标的响应，避免串包；丢包/错源按上限超时兜底。
-        if from != destination {
-            continue;
-        }
-        // 回程地址用解析后的真实目标（域名解析后与请求包地址一致，逐字节比对成立）。
-        let reply_addr = target_from_socket(from);
-        let reply =
-            crate::udp::encode_packet(&reply_addr, &recv[..received]).map_err(Error::Frame)?;
-        timeout(idle, async {
-            writer.write_all(&reply).await?;
-            writer.flush().await
-        })
-        .await
-        .map_err(|_| Error::Timeout)??;
-    }
-}
-
-/// 取（或按需绑定）目标地址对应的出站 socket，按地址族区分。
-///
-/// 域名目标的地址族由 `resolve` 决定，这里统一按 IPv4 通配源绑定；IPv4 socket
-/// 仅能发往 IPv4 目标，若域名解析到 IPv6 则 `send_to` 会失败——当前用例不涉及
-/// 域名解析到 IPv6（见文档偏离清单）。
-async fn egress_socket<'a>(
-    egress: &'a mut HashMap<TargetAddr, Egress>,
-    target: &TargetAddr,
-) -> Result<&'a UdpSocket, Error> {
-    let family = match target {
-        TargetAddr::V6(..) => Family::V6,
-        TargetAddr::V4(..) | TargetAddr::Domain(..) => Family::V4,
-    };
-    if !egress.contains_key(target) {
-        let bind: SocketAddr = match family {
-            Family::V4 => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
-            Family::V6 => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
-        };
-        let socket = UdpSocket::bind(bind).await.map_err(Error::Socket)?;
-        egress.insert(target.clone(), Egress { socket });
-    }
-    Ok(&egress.get(target).expect("刚插入").socket)
-}
-
-/// 把目标地址解析为一个可 `send_to` 的 `SocketAddr`；域名走 `lookup_host` 取首条。
-async fn resolve(target: &TargetAddr, idle: Duration) -> Result<SocketAddr, Error> {
-    match target {
-        TargetAddr::V4(ip, port) => Ok(SocketAddr::from((*ip, *port))),
-        TargetAddr::V6(ip, port) => Ok(SocketAddr::from((*ip, *port))),
-        TargetAddr::Domain(host, port) => {
-            let deadline = idle.min(DNS_TIMEOUT);
-            let mut addrs = timeout(deadline, lookup_host((host.as_str(), *port)))
+        tokio::select! {
+            // 回程优先：先写回已到达的回程，再读新的请求。
+            biased;
+            inbound = pool.recv() => {
+                let Some(inbound) = inbound else {
+                    // 回程通道关闭（池被关闭）：按参考语义结束整条关联。
+                    return Ok(());
+                };
+                let reply = encode_packet(&inbound.address, &inbound.payload)
+                    .map_err(Error::Frame)?;
+                // 参考：回程写回失败 ⇒ `cancel()` 整个会话。
+                timeout(idle, async {
+                    writer.write_all(&reply).await?;
+                    writer.flush().await
+                })
                 .await
-                .map_err(|_| Error::Timeout)?
-                .map_err(Error::Resolve)?;
-            addrs.next().ok_or_else(|| {
-                Error::Resolve(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "域名无解析结果",
-                ))
-            })
+                .map_err(|_| Error::Timeout)??;
+            }
+            frame = frames.next_frame(config.payload_limit, idle) => {
+                let Some((target, payload)) = frame? else {
+                    // 客户端读侧干净结束：关闭池（释放全部出站 socket）。
+                    pool.close().await;
+                    return Ok(());
+                };
+                pool.dispatch(&target, &payload).await?;
+            }
         }
-    }
-}
-
-/// 把回程源 `SocketAddr` 还原成回给客户端的 `TargetAddr`。
-fn target_from_socket(from: SocketAddr) -> TargetAddr {
-    match from {
-        SocketAddr::V4(addr) => TargetAddr::V4(addr.ip().octets(), addr.port()),
-        SocketAddr::V6(addr) => TargetAddr::V6(addr.ip().octets(), addr.port()),
     }
 }
 

@@ -29,6 +29,7 @@ pub mod session;
 pub mod stream;
 pub mod transport;
 pub mod udp;
+pub mod udp_pool;
 pub mod udp_relay;
 
 pub use codec::{decode, encode, Command, Request};
