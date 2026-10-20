@@ -2,12 +2,14 @@
 //! SIP022 AES 原语：UDP 报文与会话，以及 TCP 双向流编解码；完整运行时尚未完成，不是可用代理服务。
 pub mod crypto;
 pub mod eih;
+pub mod eih_udp;
 pub mod packet;
 pub mod receiver;
 pub mod replay_store;
 pub mod tcp;
 
 pub use eih::{EihHeader, EihServer, IdentityChain, ResolvedIdentity, User, UserTable};
+pub use eih_udp::{EihUdpChain, EihUdpDecoded, EihUdpSender, EihUdpServer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -57,6 +59,8 @@ pub enum Error {
     EihTruncated,
     #[error("身份链超过本实现允许的层数")]
     EihChainTooLong,
+    #[error("身份头层数与服务端期望不一致")]
+    EihChainMismatch,
     #[error("身份头长度或出现方向非法")]
     EihShape,
     #[error("身份头只允许出现在请求方向")]
