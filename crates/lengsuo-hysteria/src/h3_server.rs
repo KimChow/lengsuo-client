@@ -44,12 +44,32 @@ pub async fn serve_connection(conn: Connection, ctx: ServerSessionCtx) -> Result
     ServerState::new(conn, ctx).run().await
 }
 
+/// 从接收流读满 `len` 字节；EOF 提前结束（或因流错误）时返回已读部分。
+///
+/// `len` 很小（拥塞通告长度）且此时流数据已基本在本地，读超时 5s 兜底。
+async fn read_exact_or_eof(recv: &mut RecvStream, len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while out.len() < len {
+        let left = len - out.len();
+        match tokio::time::timeout_at(deadline, recv.read_chunk(left, true)).await {
+            Ok(Ok(Some(chunk))) => out.extend_from_slice(&chunk.bytes),
+            _ => break,
+        }
+    }
+    out
+}
+
 /// 每连接服务端状态（等价 `hub.go` `httpHandler`）。
 pub struct ServerState {
     conn: Connection,
     ctx: ServerSessionCtx,
     /// `h.auth`：认证成功后置真（同一连接只认证一次，参考用 `h.mutex` 串行化）。
     auth: bool,
+    /// 拥塞协商是否已按客户端 `Hysteria-CC-RX` 做过一次（`hub.go` 每连接一次）。
+    negotiated: bool,
+    /// 每连接的服务端发送速率（字节/秒；`0` = 不限速 / 未协商）。
+    tcp_rate: u64,
     /// 需要保持打开的 H3 单向流（本端 SETTINGS + QPACK 编码器）。
     h3: Option<H3ServerStreams>,
     /// 服务端 UDP 会话表（认证成功且客户端要求 datagram 时才有值）。
@@ -73,6 +93,8 @@ impl ServerState {
             conn,
             ctx,
             auth: false,
+            negotiated: false,
+            tcp_rate: 0,
             h3: None,
             udp: None,
             seeds: Vec::new(),
@@ -107,10 +129,19 @@ impl ServerState {
                     let _ = respond_not_found(&mut send).await;
                     continue;
                 }
-                // 帧类型已被读走；TCPRequest 的其余部分由承载层解析。
+                // 帧类型已被读走；首个 varint 之后若为拥塞通告（不带数据的
+                // TCPRequest，见 `congestion::wire`），只供逐连接协商，不建承载。
+                let head = read_exact_or_eof(&mut recv, crate::congestion::ANNOUNCE_LEN).await;
+                if crate::congestion::parse_announce(&head).is_some() {
+                    let _ = send.finish();
+                    continue;
+                }
+                // TCPRequest 的其余部分由承载层解析；预读字节原样交还。
                 let conn = self.conn.clone();
+                let rate = self.tcp_rate;
                 tokio::spawn(async move {
-                    let _ = crate::proxy::serve_tcp_stream(conn, send, recv).await;
+                    let _ =
+                        crate::proxy::serve_tcp_stream_paced(conn, send, recv, rate, head).await;
                 });
             } else {
                 // HTTP/3 请求：`first` 是 HEADERS 帧类型（0x1）或未知帧。
@@ -125,8 +156,8 @@ impl ServerState {
     ///
     /// `first_frame` 已从流上读到的首帧类型。认证请求为
     /// `POST https://hysteria/auth`；成功回 233 + UDP/CC-RX/padding 响应头，
-    /// 否则（含已认证后的重复认证）直接回 233（参考 `h.auth` 早退分支），
-    /// 其余请求一律走 masquerade 404。
+    /// 否则（含已认证后的重复认证）直接回 233（对齐参考 `h.auth` 早退分支；
+    /// 拥塞协商只在首次认证通过时做一次），其余请求一律走 masquerade 404。
     async fn handle_http3_request(
         &mut self,
         first_frame: u64,
@@ -152,13 +183,30 @@ impl ServerState {
             let _ = respond_not_found(send).await;
             return Ok(());
         }
-        // 已认证：参考在 `h.auth` 分支直接再回一次 233。
         let authorized = self.auth || self.check_auth(request.auth.as_deref());
         if !authorized {
             let _ = respond_not_found(send).await;
             return Ok(());
         }
         self.auth = true;
+        if !self.negotiated {
+            // 对齐 hub.go:187-205：认证通过后按客户端 `Hysteria-CC-RX` 与本端
+            // `BrutalUp` 协商服务端发送速率（`min`，任一为 0 ⇒ 回落分支）。
+            self.negotiated = true;
+            match crate::congestion::server_send_rate(&self.ctx.congestion, request.cc_rx) {
+                Ok(0) => eprintln!(
+                    "[lengsuo-hysteria] 服务端未协商出 Brutal 速率（参考回落分支），TCP 端口不限速"
+                ),
+                Ok(rate) => {
+                    self.tcp_rate = rate;
+                    eprintln!(
+                        "[lengsuo-hysteria] 服务端 TCP 端口限速 {rate} 字节/秒（min(BrutalUp, clientDown)）"
+                    );
+                }
+                // 非法速率 fail-closed：`serve_connection` 收尾以协议错误关闭连接。
+                Err(e) => return Err(AuthError::Protocol(format!("拥塞控制配置非法: {e}"))),
+            }
+        }
         // `Hysteria-UDP` 由服务端配置决定（对齐 `RequireDatagramFromContext`
         // 的服务端语义），不由客户端请求头决定。
         let udp_enabled = self.ctx.udp_enabled;
@@ -217,6 +265,9 @@ struct RequestHead {
     path: Option<String>,
     /// `Hysteria-Auth` 请求头值（机密，不进入任何错误文本）。
     auth: Option<String>,
+    /// `Hysteria-CC-RX`（客户端下行带宽；解析失败按 0，对齐参考
+    /// `strconv.ParseUint` 忽略错误）。
+    cc_rx: u64,
 }
 
 impl RequestHead {
@@ -227,11 +278,15 @@ impl RequestHead {
                 .find(|f| f.name.as_slice() == name)
                 .map(|f| String::from_utf8_lossy(&f.value).into_owned())
         };
+        let cc_rx = take(COMMON_HEADER_CC_RX.as_bytes())
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
         Self {
             method: take(b":method"),
             host: take(b":authority").or_else(|| take(b"host")),
             path: take(b":path"),
             auth: take(REQUEST_HEADER_AUTH.as_bytes()),
+            cc_rx,
         }
     }
 

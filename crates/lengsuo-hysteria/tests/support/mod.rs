@@ -77,3 +77,74 @@ pub fn server_logs(dir: &std::path::Path) -> String {
     }
     out
 }
+
+/// 回灌端：接受一条 TCP 连接，读满 `warmup` 字节后按 `obey` 决定是否以
+/// `rate`（字节/秒）节拍回灌 `total` 字节（`!obey` = 全速，作对照组）。
+///
+/// 独立线程实现（阻塞 IO，不占用测试运行时）；`linger` 让写端在灌完后
+/// 保持打开，避免对端先见到 FIN 而提前结束计数。
+///
+/// 通过 `ready` 回报「已读满 `warmup`、此刻开始回灌」：回灌的节拍从**此刻**
+/// 起算，两端秒表对齐，免得开局窗口爬升算进上游上传的耗时。
+#[allow(dead_code)] // 仅 brutal_wire 测试目标引用
+pub fn paced_sink(
+    listener: std::net::TcpListener,
+    warmup: usize,
+    total: usize,
+    rate: f64,
+    obey: bool,
+    linger: std::time::Duration,
+    ready: std::sync::mpsc::SyncSender<std::time::Instant>,
+) {
+    use std::io::{Read, Write};
+    let Ok((mut sock, _)) = listener.accept() else {
+        return;
+    };
+    let _ = sock.set_nodelay(true);
+    let mut left = warmup;
+    let mut buf = vec![0u8; 256 * 1024];
+    while left > 0 {
+        let cap = left.min(buf.len());
+        match sock.read(&mut buf[..cap]) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => left -= n,
+        }
+    }
+    let block = ((rate / 100.0).max(1.0)) as usize;
+    let payload = vec![0xa5u8; block];
+    let started = std::time::Instant::now();
+    let _ = ready.send(started);
+    let mut sent = 0;
+    while sent < total {
+        let n = block.min(total - sent);
+        if sock.write_all(&payload[..n]).is_err() {
+            return;
+        }
+        sent += n;
+        if obey {
+            let deadline = started + std::time::Duration::from_secs_f64(sent as f64 / rate);
+            while let Some(wait) = deadline.checked_duration_since(std::time::Instant::now()) {
+                std::thread::sleep(wait.min(std::time::Duration::from_millis(5)));
+            }
+        }
+    }
+    let _ = sock.flush();
+    std::thread::sleep(linger);
+    let _ = sock.shutdown(std::net::Shutdown::Both);
+}
+
+/// 在后台线程上启动 [`paced_sink`]；先绑定 `127.0.0.1:0` 并返回实际端口。
+#[allow(dead_code)] // 同上
+pub fn spawn_paced_sink(
+    warmup: usize,
+    total: usize,
+    rate: f64,
+    obey: bool,
+    linger: std::time::Duration,
+) -> (u16, std::sync::mpsc::Receiver<std::time::Instant>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("回灌端绑定 127.0.0.1:0");
+    let port = listener.local_addr().expect("回灌端地址").port();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || paced_sink(listener, warmup, total, rate, obey, linger, tx));
+    (port, rx)
+}

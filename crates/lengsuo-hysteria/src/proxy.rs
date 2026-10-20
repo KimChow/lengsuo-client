@@ -301,12 +301,29 @@ pub async fn udp_recv(
 /// 失败语义与参考一致：请求解析失败即回 status=1 的响应并结束该流；
 /// 出站失败同样回 status=1（消息为空，对齐参考只回 `WriteTCPResponse`）。
 pub async fn serve_tcp_stream(
+    conn: quinn::Connection,
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
+) -> Result<(), ProxyError> {
+    serve_tcp_stream_paced(conn, send, recv, 0, Vec::new()).await
+}
+
+/// 同 [`serve_tcp_stream`]，但下行按 `rate`（字节/秒，`0` = 不限速）节流，
+/// 且 `prefix` 是调用方已从流上预读、原样应交还的字节（TCPRequest 解析输入）。
+///
+/// `rate` 来自服务端拥塞协商 `min(BrutalUp, clientDown)`（hub.go 194-200）：
+/// quinn 服务端的 `TransportConfig` 是端点级、握手前固定，无法为单条连接换
+/// 拥塞器，故服务端发送方向在承载层执行同一速率（见 `congestion::wire`）。
+pub async fn serve_tcp_stream_paced(
     _conn: quinn::Connection,
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
+    rate: u64,
+    prefix: Vec<u8>,
 ) -> Result<(), ProxyError> {
     // 增量读 TCPRequest（帧类型已被调用方读走，这里从地址长度开始）。
-    let mut buf: Vec<u8> = Vec::with_capacity(1024);
+    let mut buf: Vec<u8> = prefix;
+    buf.reserve(1024);
     let mut chunk = [0u8; 2048];
     let request = loop {
         match server_read_tcp_request(&buf) {
@@ -345,16 +362,17 @@ pub async fn serve_tcp_stream(
     write_server_response(&mut send, true, "").await?;
     let (orx, otx) = outbound.into_split();
     let leftover = buf; // 请求帧之后同包到达的目标数据
-    relay(send, recv, orx, otx, leftover).await
+    relay(send, recv, orx, otx, leftover, rate).await
 }
 
 /// 服务端双向中继：QUIC 流 ↔ 出站 TCP。
 async fn relay(
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
-    mut orx: tokio::net::tcp::OwnedReadHalf,
+    orx: tokio::net::tcp::OwnedReadHalf,
     mut otx: tokio::net::tcp::OwnedWriteHalf,
     mut leftover: Vec<u8>,
+    rate: u64,
 ) -> Result<(), ProxyError> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     // 上行：QUIC 流 → 出站 TCP
@@ -373,11 +391,12 @@ async fn relay(
         let _ = otx.shutdown().await;
         Ok::<(), ProxyError>(())
     };
-    // 下行：出站 TCP → QUIC 流
+    // 下行：出站 TCP → QUIC 流（`rate != 0` 时经节拍器）。
     let down = async {
+        let mut paced = crate::congestion::PacedReader::new(orx, rate);
         let mut chunk = [0u8; 16 * 1024];
         loop {
-            match orx.read(&mut chunk).await {
+            match paced.read(&mut chunk).await {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     if send.write_all(&chunk[..n]).await.is_err() {

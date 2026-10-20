@@ -9,17 +9,22 @@
 //! - 协商结果推导（`negotiate_*`），复刻参考 `switch congestion` 分支。
 //!
 //! # 本层**不**做什么（必须如实声明）
-//! **它不改变 QUIC 拥塞器实现。** 本仓未 fork quinn，实际拥塞器仍为
-//! quinn 默认 CUBIC；BBR 与 Brutal 内核算法均未移植。`CongestionConfig`
-//! 只是**参数承载 + 校验**，`quic/mod.rs` 接收它仅用于校验与可观测性，
-//! 不会调用 `SetCongestionControl` 之类的替换入口（quinn 未暴露等价 API）。
-//! 详见 `docs/hysteria-status.md` 的「Brutal 参数与配置面」与偏离清单。
+//! **它不改变 QUIC 拥塞器实现。** 拥塞器内核见 `lengsuo-congestion`
+//! （quinn `Controller` / `ControllerFactory`）；本层只承载**参数 + 协商**，
+//! 协商结果经子模块 `wire`（[`inject`]）注入 `TransportConfig`。
+//! **默认**路径仍为 quinn 默认 CUBIC。**BBR 仍未移植。**
+//! 接线落点与偏离清单见 `docs/congestion-status.md`。
 
 pub mod bandwidth;
 pub mod header;
+pub mod wire;
 
 pub use bandwidth::{Bandwidth, BandwidthError, BRUTAL_MIN_BPS};
 pub use header::{CcHeader, HeaderError, CC_AUTO, HEADER_CC_RX, HEADER_CC_TX};
+pub use wire::{
+    announce_frame, client_rate, inject, parse_announce, parse_mode, server_send_rate,
+    CongestionError, PacedReader, Pacer, ANNOUNCE_LEN,
+};
 
 /// 拥塞控制模式，对齐参考 `quicParams.Congestion` 的取值集
 /// （`infra/conf/transport_internet.go` 行 1913-1920）：

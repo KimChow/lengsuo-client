@@ -21,6 +21,9 @@ use quinn::VarInt;
 use tokio::sync::mpsc;
 
 use super::early::{self, EarlyDataConfig, MemorySessionCache, SessionCache, ZeroRttStatus};
+use lengsuo_congestion::Mode;
+
+use crate::congestion::{Bandwidth, CcHeader};
 use crate::h3_auth::{self, AuthOutcome, H3ControlStreams, SeedFiller};
 
 /// QUIC datagram 上的会话 ID 长度（字节），对齐 `InterUdpConn.Write` 的前缀。
@@ -41,8 +44,34 @@ pub struct ClientConfig {
     pub auth: String,
     /// 追加受信根证书（DER）。证书验证始终开启，不提供跳过校验选项。
     pub roots_der: Vec<Vec<u8>>,
-    /// `Hysteria-CC-RX` 请求头取值（Brutal 下行带宽；0 表示未设置）。
+    /// `Hysteria-CC-RX` 请求头取值（Brutal 下行带宽，字节/秒；0 = 未设置）。
     pub brutal_down: u64,
+    /// 本端发送速率（参考 `BrutalUp`，字节/秒；0 = 未配置 ⇒ 参考回落分支）。
+    pub brutal_up: u64,
+    /// 拥塞模式字符串（配置里的 `"congestion"`）。空串 = quinn 默认 CUBIC；
+    /// `"brutal"` = 按其协商结果注入 Brutal；未识别值 **fail-closed**。
+    pub congestion: String,
+    /// 服务端 `Hysteria-CC-RX`（字节/秒，= 参考 `BrutalDown`）：由
+    /// [`HysteriaClient::probe`] 在一条探测连接上取得后回填到本配置。
+    /// `None` ⇒ 未探测 ⇒ 参考回落分支（不注入 Brutal，沿用 CUBIC）。
+    pub peer_cc_rx: Option<CcHeader>,
+}
+
+impl Default for ClientConfig {
+    /// 仅供测试/结构体更新语法（`..Default::default()`）：**不**建连，
+    /// 也**不**提供凭据；地址为回环 :0，`congestion` 为空（CUBIC）。
+    fn default() -> Self {
+        Self {
+            server_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+            server_name: "localhost".to_string(),
+            auth: String::new(),
+            roots_der: Vec::new(),
+            brutal_down: 0,
+            brutal_up: 0,
+            congestion: String::new(),
+            peer_cc_rx: None,
+        }
+    }
 }
 
 /// 建连/会话错误。错误文本不包含认证密码。
@@ -60,6 +89,8 @@ pub enum ConnectError {
     UdpUnsupported,
     #[error("0-RTT 配置失败: {0}")]
     EarlyData(#[from] early::EarlyDataError),
+    #[error("拥塞控制配置非法: {0}")]
+    Congestion(#[from] crate::congestion::CongestionError),
 }
 
 impl ConnectError {
@@ -114,6 +145,44 @@ impl HysteriaClient {
         Self::connect_inner(config, &early, Some(cache)).await
     }
 
+    /// 探测连接：用缺省配置建连并认证，读服务端 `Hysteria-CC-RX` 后立即关闭，
+    /// 返回该值（字节/秒）。供 [`Self::connect_with_negotiated`] 的回填路径
+    /// （`Hysteria-CC-RX` 要认证后才拿到，而 quinn 的拥塞器只能建连前装配）。
+    pub async fn probe_peer_cc_rx(
+        config: &ClientConfig,
+        early: EarlyDataConfig,
+    ) -> Result<CcHeader, ConnectError> {
+        let probe = Self::connect_with_early_data(config.clone(), early).await?;
+        let header = CcHeader::Bps(Bandwidth(probe.server_cc_rx()));
+        probe.connection().close(VarInt::from_u32(0), b"probe");
+        Ok(header)
+    }
+
+    /// 建连后通告本端下行容量（对齐 dialer.go 274：每个 TCP 请求头都带
+    /// `Hysteria-CC-RX: BrutalDown`）。`congestion = "brutal"` 时在认证连接上
+    /// 发一条**不带数据**的 TCPRequest（`congestion::announce_frame`），
+    /// 服务端据此逐连接协商其发送速率 `min(BrutalUp, clientDown)`
+    /// （hub.go 194-200）。其余模式不发送，行为与改动前一致。
+    pub async fn connect_with_negotiated(
+        config: ClientConfig,
+        early: EarlyDataConfig,
+    ) -> Result<Self, ConnectError> {
+        if crate::congestion::parse_mode(&config.congestion)? != Some(Mode::Brutal) {
+            return Self::connect_with_early_data(config, early).await;
+        }
+        let client = Self::connect_with_early_data(config.clone(), early).await?;
+        let (mut send, _recv) = client.open_tcp().await?;
+        if let Err(e) = send
+            .write_all(&crate::congestion::announce_frame(config.brutal_down))
+            .await
+        {
+            // 通告失败不致命：服务端按 `clientDown = 0` 回落（CUBIC）。
+            eprintln!("[lengsuo-hysteria] 下行容量通告失败（服务端回落 CUBIC）：{e}");
+        }
+        let _ = send.finish();
+        Ok(client)
+    }
+
     async fn connect_inner(
         config: ClientConfig,
         early: &EarlyDataConfig,
@@ -133,6 +202,15 @@ impl HysteriaClient {
                 .map_err(|e| ConnectError::Tls(e.to_string()))?,
         ));
         let mut transport = quinn::TransportConfig::default();
+        // 拥塞器（客户端发送方向，对齐 dialer.go 297-315）：模式未识别 ⇒
+        // fail-closed；Brutal 取 `min(本端 up, 服务端 Hysteria-CC-RX)`。
+        // quinn 只能在建连前装配 ⇒ 该头由 [`Self::probe`] 在探测连接上取得，
+        // 由调用方回填 `config.peer_cc_rx`；未回填 ⇒ 参考回落分支（CUBIC）。
+        let mode = crate::congestion::parse_mode(&config.congestion)?;
+        if let Some(peer) = config.peer_cc_rx {
+            let rate = crate::congestion::client_rate(config.brutal_up, peer)?;
+            crate::congestion::inject(&mut transport, mode, rate)?;
+        }
         // EnableDatagrams: true（quinn 侧：声明接收缓冲即启用 datagram；
         // 发送上限由对端传输参数协商，超限返回 TooLarge 错误）
         transport.datagram_receive_buffer_size(Some(64 * 1024));
