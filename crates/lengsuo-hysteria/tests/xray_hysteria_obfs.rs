@@ -21,6 +21,8 @@ use lengsuo_hysteria::proxy;
 use lengsuo_hysteria::quic::{ClientConfig, HysteriaClient};
 use lengsuo_hysteria::transport::OsRng;
 
+mod support;
+
 const AUTH: &str = "lengsuo-interop-password";
 const SERVER_NAME: &str = "localhost";
 
@@ -108,8 +110,8 @@ fn xray_config(port: u16, cert: &std::path::Path, key: &std::path::Path, _psk: &
   }}],
   "outbounds": [{{"protocol": "freedom"}}]
 }}"#,
-        cert.display(),
-        key.display()
+        support::json_escape(&cert.to_string_lossy()),
+        support::json_escape(&key.to_string_lossy())
     )
 }
 
@@ -155,17 +157,20 @@ async fn start_world(tag: &str) -> World {
         cert_der: der,
         dir,
     };
+    // 单次尝试自带墙钟上限：Windows 上向未监听端口发 UDP 是**静默丢弃**，
+    // `connect()` 会无限等待，把 20s 总预算架空 ⇒ 用例永久挂起。
     let mut last = String::new();
     for _ in 0..80 {
-        match connect(&world, AUTH).await {
-            Ok(_) => return world,
-            Err(e) => last = format!("{e}"),
+        match support::with_attempt_timeout(connect(&world, AUTH)).await {
+            Ok(Ok(_)) => return world,
+            Ok(Err(e)) => last = format!("{e}"),
+            Err(_) => last = format!("单次建连超过 {}s 无响应", support::PROBE_ATTEMPT_TIMEOUT.as_secs()),
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     panic!(
-        "xray 20s 内未就绪；最后错误 {last}；stderr: {}",
-        std::fs::read_to_string(world.dir.join("xray-stderr.log")).unwrap_or_default()
+        "xray 20s 内未就绪；最后错误 {last}；参考服务端日志:\n{}",
+        support::server_logs(&world.dir)
     );
 }
 

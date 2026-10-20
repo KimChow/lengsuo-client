@@ -25,6 +25,8 @@ use std::time::Duration;
 
 use lengsuo_hysteria::quic::server::{HysteriaServer, ServerConfig};
 
+mod support;
+
 const AUTH: &str = "lengsuo-interop-password";
 const SERVER_NAME: &str = "localhost";
 
@@ -134,7 +136,7 @@ fn xray_client_config(socks_port: u16, server_port: u16, auth: &str, cert: &Path
     }}
   }}]
 }}"#,
-        cert = cert.display()
+        cert = support::json_escape(&cert.to_string_lossy())
     )
 }
 
@@ -207,8 +209,8 @@ async fn start_world(tag: &str, server_auth: &str, client_auth: &str) -> World {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     panic!(
-        "xray socks 端口 20s 内未就绪；stderr: {}",
-        std::fs::read_to_string(world.dir.join("xray-stderr.log")).unwrap_or_default()
+        "xray socks 端口 20s 内未就绪；参考服务端日志:\n{}",
+        support::server_logs(&world.dir)
     );
 }
 

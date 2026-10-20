@@ -11,6 +11,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+mod support;
+
 use lengsuo_hysteria::quic::{
     configure_tls, run_early, EarlyDataConfig, EarlyDataError, EarlyError, MemorySessionCache,
     OperationKind, SessionCache, ZeroRttOutcome, ZeroRttRejected, ZeroRttStatus,
@@ -350,8 +352,8 @@ mod xray {
   }}],
   "outbounds": [{{"protocol": "freedom"}}]
 }}"#,
-            cert.display(),
-            key.display()
+            crate::support::json_escape(&cert.to_string_lossy()),
+            crate::support::json_escape(&key.to_string_lossy())
         )
     }
 
@@ -403,15 +405,19 @@ mod xray {
             cert_der: der,
             dir,
         };
+        // 单次尝试自带墙钟上限：Windows 上向未监听端口发 UDP 是**静默丢弃**，
+        // `connect()` 会无限等待，把 20s 总预算架空 ⇒ 用例永久挂起。
         for _ in 0..80 {
-            if HysteriaClient::connect(config(&world)).await.is_ok() {
-                return world;
+            match crate::support::with_attempt_timeout(HysteriaClient::connect(config(&world))).await {
+                Ok(Ok(_)) => return world,
+                Ok(Err(_)) => {}
+                Err(_) => {}
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
         panic!(
-            "xray 20s 内未就绪；stderr: {}",
-            std::fs::read_to_string(world.dir.join("xray-stderr.log")).unwrap_or_default()
+            "xray 20s 内未就绪；参考服务端日志:\n{}",
+            crate::support::server_logs(&world.dir)
         );
     }
 
