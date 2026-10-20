@@ -40,6 +40,7 @@
 
 pub mod auth;
 pub mod hash;
+pub mod server;
 pub mod shortid;
 pub mod x25519;
 
