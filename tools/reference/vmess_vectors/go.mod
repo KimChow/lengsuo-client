@@ -20,4 +20,6 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/xtls/xray-core => /home/ubuntu/ref/xray
+// 参考检出路径不硬编码：复制本文件为 go.local.mod 后用 -modfile 指定。
+// 详见 README.md。默认占位 ./xray-core-checkout（非自洽，仅占位）。
+replace github.com/xtls/xray-core => ./xray-core-checkout
