@@ -50,10 +50,21 @@ fn json_str(value: &str) -> String {
 }
 
 /// 生成 VMess 入站配置文件内容（inbound vmess，clients=[{id,alterId:0}]，network tcp）。
+#[allow(dead_code)] // 夹具被 xray_tcp / xray_udp 两个编译单元共享，默认路径只在旧单元用。
 fn config_json(port: u16, uuid: &str, dir: &Path) -> String {
+    config_json_with_idle(port, uuid, dir, None)
+}
+
+/// 同上，可选 `policy.levels.0.connIdle`（秒）。VMess 夹具用 `None` 保持
+/// xray_tcp.rs 既有行为不变；UDP 截断用例用它把活动链收回窗口压到判据内。
+fn config_json_with_idle(port: u16, uuid: &str, dir: &Path, idle_secs: Option<u64>) -> String {
     let access = json_str(&dir.join("access.log").to_string_lossy());
     let error = json_str(&dir.join("error.log").to_string_lossy());
     let uuid = json_str(uuid);
+    let policy = match idle_secs {
+        Some(secs) => format!(",\"policy\":{{\"levels\":{{\"0\":{{\"connIdle\":{secs}}}}}}}"),
+        None => String::new(),
+    };
     format!(
         concat!(
             "{{\"log\":{{\"loglevel\":\"warning\",\"access\":{access},\"error\":{error}}},",
@@ -61,12 +72,14 @@ fn config_json(port: u16, uuid: &str, dir: &Path) -> String {
             "\"protocol\":\"vmess\",\"settings\":{{\"clients\":[{{\"id\":{uuid},\"alterId\":0}}]}},",
             "\"streamSettings\":{{\"network\":\"tcp\"}}}}],",
             "\"outbounds\":[{{\"tag\":\"direct\",\"protocol\":\"freedom\",\"settings\":{{}}}}],",
-            "\"routing\":{{\"rules\":[{{\"type\":\"field\",\"inboundTag\":[\"vmess-in\"],\"outboundTag\":\"direct\"}}]}}}}"
+            "\"routing\":{{\"rules\":[{{\"type\":\"field\",\"inboundTag\":[\"vmess-in\"],\"outboundTag\":\"direct\"}}]}}",
+            "{policy}}}"
         ),
         access = access,
         error = error,
         port = port,
         uuid = uuid,
+        policy = policy,
     )
 }
 
@@ -98,6 +111,8 @@ pub struct XrayFixture {
     dir: PathBuf,
     cfg_path: PathBuf,
     uuid: String,
+    /// 仅用于复现配置诊断（`None` = 参考默认 300s）。
+    idle_secs: Option<u64>,
     child: Option<Child>,
 }
 
@@ -105,6 +120,17 @@ impl XrayFixture {
     /// 启动 xray：写配置、spawn `xray run -c <cfg>`，轮询端口就绪（有超时）。
     /// 任何一步失败都会 kill 子进程并返回含诊断的 `Err`。
     pub fn start(bin: &Path, uuid: &str) -> Result<Self, String> {
+        Self::start_inner(bin, uuid, None)
+    }
+
+    /// 同 [`Self::start`]，但显式设置 `policy.levels.0.connIdle`（秒）。
+    /// 仅供 UDP 截断用例把 inactivity 回收压进判据窗口；缺省仍为参考默认 300s。
+    #[allow(dead_code)] // 仅 xray_udp 用；xray_tcp 编译单元不引用。
+    pub fn start_with_idle_timeout(bin: &Path, uuid: &str, idle_secs: u64) -> Result<Self, String> {
+        Self::start_inner(bin, uuid, Some(idle_secs))
+    }
+
+    fn start_inner(bin: &Path, uuid: &str, idle_secs: Option<u64>) -> Result<Self, String> {
         let port = reserve_free_port().ok_or("无法在 127.0.0.1 探测到空闲端口")?;
 
         let suffix = NEXT_SUFFIX.fetch_add(1, Ordering::Relaxed);
@@ -121,7 +147,7 @@ impl XrayFixture {
 
         let cfg_path = dir.join("config.json");
         let process_log = dir.join("process.log");
-        let generated = config_json(port, uuid, &dir);
+        let generated = config_json_with_idle(port, uuid, &dir, idle_secs);
         fs::write(&cfg_path, &generated).map_err(|e| format!("写配置失败: {e}"))?;
 
         let log_file = fs::OpenOptions::new()
@@ -149,6 +175,7 @@ impl XrayFixture {
             dir,
             cfg_path,
             uuid: uuid.to_string(),
+            idle_secs,
             child: Some(child),
         };
 
@@ -191,7 +218,8 @@ impl XrayFixture {
 
     /// 失败诊断：打码后的配置 + 各日志尾部。
     pub fn report(&self) -> String {
-        let masked_cfg = config_json(self.port, &mask_uuid(&self.uuid), &self.dir);
+        let masked_cfg =
+            config_json_with_idle(self.port, &mask_uuid(&self.uuid), &self.dir, self.idle_secs);
         let error_tail = read_log_tail(&self.dir.join("error.log"), 40);
         let process_tail = read_log_tail(&self.dir.join("process.log"), 40);
         let access_tail = read_log_tail(&self.dir.join("access.log"), 20);
