@@ -435,9 +435,15 @@ async fn server_close_after_dial_failure_is_prompt() {
         // 服务端拨号失败 → 主动关闭；客户端读侧必须在观察上限内结束（EOF/Err），
         // 不能挂死到总预算耗尽。
         assert_peer_closed(&mut stream, CLOSE_BOUND).await;
+        // 不变式：**拨号没有成功**。具体错误分类随平台而异，不得绑定单一取值：
+        // - Linux：回环已释放端口 → 立即 ECONNREFUSED → `Error::Dial`。
+        // - Windows 实机（2026-10-20 取证）：同场景被本机防火墙/安全软件静默丢弃
+        //   SYN → 表现为 `Error::Timeout`。两者都证明「未建立到目标的连接」，
+        //   且上面已断言客户端侧及时收到关闭。
         match timeout(WAIT, task).await.unwrap().unwrap() {
             Err(Error::Dial(_)) => {}
-            other => panic!("期望拨号失败，得到 {other:?}"),
+            Err(Error::Timeout) => {}
+            other => panic!("期望拨号未成功（Dial 或 Timeout），得到 {other:?}"),
         }
     })
     .await

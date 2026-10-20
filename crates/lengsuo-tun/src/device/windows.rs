@@ -190,23 +190,59 @@ impl Device {
         wrap(self.adapter.get_adapter_index())
     }
 
-    /// 设置 MTU。wintun 内部通过 `netsh` 修改接口，属于系统状态变更，
-    /// 只在调用方显式请求时执行；成功后同步进配置。
+    /// 设置 MTU。属于系统状态变更，只在调用方显式请求时执行；成功后同步进配置。
+    ///
+    /// ⚠️ **实机取证（2026-10-20，本机 Windows 管理员）**：wintun 0.5.1 的
+    /// `Adapter::set_mtu` 只执行 `netsh interface ipv4 set subinterface`，**不设 IPv6**；
+    /// 而 `Adapter::get_mtu` 遍历 `MIB_IF_ROW2` 表时对同一 LUID 的 v4/v6 两行
+    /// **取先命中者**（实测取到未设置的 IPv6 行 → 恒为 65535）。
+    /// 因此直接转发会让「写入 1400 读回 65535」，语义不成立。
+    ///
+    /// 本层改为：**IPv4 与 IPv6 同时设置**，任一侧失败即返回错误（fail-closed）。
+    /// 这样 [`mtu`](Self::mtu) 的回读在两个协议族上一致。
     pub fn set_mtu(&mut self, mtu: u16) -> Result<()> {
         self.ensure_open()?;
         self.config.validate_mtu(mtu)?;
-        wrap(self.adapter.set_mtu(usize::from(mtu)))?;
+        let name = self.config.adapter_name.clone();
+        let value = usize::from(mtu);
+        // 先走绑定（IPv4），再补 IPv6；两侧都必须成功，避免只改一半。
+        wrap(self.adapter.set_mtu(value))?;
+        set_adapter_mtu_for(&name, "ipv6", value)?;
         self.config.mtu = mtu;
         Ok(())
     }
 
     /// 读取系统侧当前 MTU。
+    ///
+    /// 返回 **IPv4 与 IPv6 中较小且已显式设置的那个**：双栈不一致时不得声称
+    /// 「MTU = X」。两族都读到且相等时直接返回该值；不等时取较小值（数据面更保守）。
+    ///
+    /// 实测口径见 [`set_mtu`](Self::set_mtu) 的取证说明。
     pub fn mtu(&self) -> Result<u16> {
         self.ensure_open()?;
-        let mtu = wrap(self.adapter.get_mtu())?;
-        u16::try_from(mtu).map_err(|_| Error::Device {
-            reason: format!("系统 MTU {mtu} 超出 16 位单包上限 {MAX_PACKET_BYTES}"),
-        })
+        let name = self.config.adapter_name.clone();
+        let v4 = query_adapter_mtu(&name, "ipv4")?;
+        let v6 = query_adapter_mtu(&name, "ipv6")?;
+        let (Some(v4), Some(v6)) = (v4, v6) else {
+            // 至少一族没有 MTU 行：退回绑定读回，但要求它落在 16 位内。
+            let mtu = wrap(self.adapter.get_mtu())?;
+            return u16::try_from(mtu).map_err(|_| Error::Device {
+                reason: format!("系统 MTU {mtu} 超出 16 位单包上限 {MAX_PACKET_BYTES}"),
+            });
+        };
+        Ok(v4.min(v6))
+    }
+
+    /// 分别读取 IPv4 / IPv6 的系统 MTU（未设置该协议族时为 `None`）。
+    ///
+    /// 供实机验收与排障使用：它能揭示「只设了 v4、v6 仍是默认」这类双栈不一致。
+    pub fn mtu_per_family(&self) -> Result<(Option<u16>, Option<u16>)> {
+        self.ensure_open()?;
+        let name = self.config.adapter_name.clone();
+        Ok((
+            query_adapter_mtu(&name, "ipv4")?,
+            query_adapter_mtu(&name, "ipv6")?,
+        ))
     }
 
     /// 在 `timeout` 内接收一个原始 IP 报文（返回堆拷贝，不借用驱动内存）。
@@ -337,4 +373,72 @@ fn map_io_error(io: std::io::Error) -> Error {
             ),
         },
     }
+}
+
+/// 运行 `netsh` 并返回 stdout；非 0 退出码转为类型化错误。
+///
+/// 与 wintun 绑定的 `run_command` 同为「只看退出码」的语义，但本层保留
+/// stderr 文案便于实机排障。**不写入系统目录、不改路由、不碰非本适配器接口。**
+fn run_netsh(args: &[&str]) -> Result<String> {
+    let output = std::process::Command::new("netsh")
+        .args(args)
+        .output()
+        .map_err(|io| Error::Device {
+            reason: format!("调用 netsh 失败：{io}"),
+        })?;
+    if !output.status.success() {
+        let text = String::from_utf8_lossy(if output.stderr.is_empty() {
+            &output.stdout
+        } else {
+            &output.stderr
+        });
+        return Err(Error::Device {
+            reason: format!("netsh {} 失败：{}", args.join(" "), text.trim()),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// 按协议族设置适配器 MTU（`family` 为 `"ipv4"` 或 `"ipv6"`）。
+///
+/// 存在的理由：wintun 绑定的 `set_mtu` **只设 IPv4**（见 [`Device::set_mtu`] 取证），
+/// 双栈环境必须补设 IPv6，否则 [`Device::mtu`] 的回读不可信。
+fn set_adapter_mtu_for(name: &str, family: &str, mtu: usize) -> Result<()> {
+    let quoted = format!("\"{name}\"");
+    run_netsh(&[
+        "interface",
+        family,
+        "set",
+        "subinterface",
+        &quoted,
+        &format!("mtu={mtu}"),
+        "store=persistent",
+    ])
+    .map(|_| ())
+}
+
+/// 按协议族读取适配器 MTU；该协议族没有对应行时返回 `None`。
+///
+/// 解析 `netsh interface <family> show subinterfaces` 的表格行，
+/// 匹配适配器名后取首列 MTU。**读不到或格式变化时返回 `None` 而非猜测值**，
+/// 由调用方决定回退策略。
+fn query_adapter_mtu(name: &str, family: &str) -> Result<Option<u16>> {
+    let text = run_netsh(&["interface", family, "show", "subinterfaces"])?;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("---") {
+            continue;
+        }
+        // 只认含本适配器名的行；表头行不含适配器名，自然跳过。
+        if !trimmed.contains(name) {
+            continue;
+        }
+        // 首列是 MTU；按空白切分，第一段必须是十进制整数。
+        if let Some(first) = trimmed.split_whitespace().next() {
+            if let Ok(value) = first.parse::<u16>() {
+                return Ok(Some(value));
+            }
+        }
+    }
+    Ok(None)
 }

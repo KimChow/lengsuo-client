@@ -204,6 +204,16 @@ fn relay_ipv6_target() {
             Err(_) => return, // 无 IPv6 回环能力的环境跳过（不冒充通过）
         };
         let echo6 = listener.local_addr().expect("IPv6 echo 地址");
+
+        // ⚠️ 实机取证（2026-10-20，本机 Windows）：bind 成功**不代表**能连。
+        // 本机 `::1` 可绑定，但 connect 被系统策略拒绝（WinSock 10013
+        // `WSAEACCES`，Windows 默认 `DisabledComponents`/防火墙策略会拦回环 v6）。
+        // 若只探测 bind，本用例会在无 v6 回环的环境里必然失败并看起来像代码缺陷。
+        // 因此在**真正要用的 connect 路径**上探测：不可达即跳过，且不冒充通过。
+        if let Err(err) = TcpStream::connect(echo6).await {
+            println!("skip relay_ipv6_target：IPv6 回环不可连接（{err}）");
+            return;
+        }
         spawn_echo(listener).await;
         let (relay, handle) = start_relay("chacha20-ietf-poly1305", None).await;
         let v6 = TargetAddr::V6(Ipv6Addr::LOCALHOST.octets(), echo6.port());
