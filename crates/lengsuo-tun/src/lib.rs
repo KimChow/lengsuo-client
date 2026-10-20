@@ -28,6 +28,7 @@ pub mod dns;
 pub mod mtu;
 pub mod packet;
 pub mod session;
+pub mod tcp;
 
 pub use mtu::{
     carried_prefix, decide, decide_from, error_packet, Decision, Direction, Error as MtuError,

@@ -162,8 +162,17 @@ impl Connection {
     pub fn peer_window(&self) -> u16 {
         self.peer_window
     }
+    /// 本端当前应通告的接收窗口（由接收缓冲余量推导，见 `advertise_window`）。
+    pub fn advertised_window(&self) -> u16 {
+        self.advertise_window()
+    }
     pub fn delivered_bytes(&self) -> u64 {
         self.delivered
+    }
+    /// 推进发送端序号：上层已用 `snd_nxt()` 作为起点发出了 `bytes` 字节的应用载荷。
+    /// 本内核不持有发送缓冲，也不做重传，因此这里只做序号记账（无回绕之外的语义）。
+    pub fn advance_snd(&mut self, bytes: u32) {
+        self.snd_nxt = self.snd_nxt.wrapping_add(bytes);
     }
     pub fn discarded_segments(&self) -> u64 {
         self.discarded
@@ -386,7 +395,7 @@ pub fn seq_in(a: u32, start: u32, end: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tcp_tmp::segment::{self, Flags};
+    use crate::tcp::segment::{self, Flags};
     const NOW: Clock = 0;
 
     /// 经 `segment::build` 生成真字节再 `parse` 回来，用例走生产解析入口。
