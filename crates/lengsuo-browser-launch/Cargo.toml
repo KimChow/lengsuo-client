@@ -1,0 +1,14 @@
+[package]
+name = "lengsuo-browser-launch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lengsuo-browser-lifecycle = { path = "../lengsuo-browser-lifecycle" }
+lengsuo-browser-profile = { path = "../lengsuo-browser-profile" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
