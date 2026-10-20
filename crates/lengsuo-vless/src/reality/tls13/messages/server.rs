@@ -59,6 +59,16 @@ pub enum ServerKeyShare {
 ///     readUint16LengthPrefixed(&extData, &m.serverShare.data)
 /// }
 /// ```
+///
+/// # fail-closed 强化（缺陷 D-1）
+///
+/// 参考的 cryptobyte 解析在扩展体内**不检查尾部剩余字节**；本仓额外要求
+/// 单值 `KeyShareEntry` 恰好消耗完整个扩展体。这样即使调用方误把
+/// ClientHello 的 `client_shares` **列表**喂进来（历史上 D-1 的根因），
+/// 也会在解析器边界被拒绝，而不是把 `uint16 列表长度` 当成 `group`
+/// 静默解出一个错误的条目。RFC 8446 §4.2.8 规定 ServerHello 的
+/// `extension_data` 就是一条 `KeyShareEntry`，尾部多余字节本身即畸形。
+/// `key_exchange` 按 RFC 8446 §4.2.8 是 `opaque<1..2^16-1>`，长度为 0 同样拒绝。
 pub fn parse_server_key_share(data: &[u8]) -> Result<ServerKeyShare, MessageError> {
     if data.len() == 2 {
         let mut cursor = Cursor::new(data);
@@ -68,6 +78,13 @@ pub fn parse_server_key_share(data: &[u8]) -> Result<ServerKeyShare, MessageErro
     let mut cursor = Cursor::new(data);
     let group = cursor.u16()?;
     let key = cursor.u16_vec()?;
+    if !cursor.is_empty() {
+        // 单值布局之外还有字节：典型是把 ClientHello 的列表布局喂了进来。
+        return Err(MessageError::LengthMismatch);
+    }
+    if key.is_empty() {
+        return Err(MessageError::MalformedExtension);
+    }
     Ok(ServerKeyShare::Share {
         group,
         key: key.to_vec(),
