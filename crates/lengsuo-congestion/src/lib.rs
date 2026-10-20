@@ -16,6 +16,8 @@
 /// Brutal 拥塞器（固定速率 + 窗口上限）。
 pub mod brutal;
 
+pub use brutal::{Brutal, BrutalConfig, ConfigError};
+
 /// 拥塞控制模式（与 Hysteria2 的 `CongestionMode` 语义对齐）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
