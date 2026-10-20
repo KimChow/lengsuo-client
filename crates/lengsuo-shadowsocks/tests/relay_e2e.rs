@@ -211,14 +211,15 @@ fn relay_ipv6_target() {
         // 2. **探测连接不能打向 echo**：`spawn_echo` 只 accept 一条连接，探测连接会
         //    把它占掉，真正的中继连接无 echo 可接 → 「回程为空」假失败。
         // 定稿方案：起一个**一次性探测 listener**（自带 accept，用完即弃），
-        // 向它 connect 一次验证 v6 回环可连性；通过后才起真正的 echo 并继续。
+        // 主动向它 connect 一次来验证 v6 回环可连性；通过后才起真正的 echo 并继续。
+        // 这条探测连接只落在探测 listener 上，绝不会占掉 echo 的 accept。
         let probe = match TcpListener::bind("[::1]:0").await {
             Ok(probe) => probe,
             Err(_) => return,
         };
         let probe_addr = probe.local_addr().expect("探测地址");
         let probe_ok = tokio::select! {
-            accepted = probe.accept() => accepted.is_ok(),
+            connect = TcpStream::connect(probe_addr) => connect.is_ok(),
             _ = tokio::time::sleep(Duration::from_secs(2)) => false,
         };
         drop(probe);
