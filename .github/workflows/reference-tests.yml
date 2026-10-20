@@ -7,7 +7,9 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/run_reference_tests.py'
+      - 'scripts/reference_fixtures.py'
       - 'scripts/reference_manifest.json'
+      - 'tools/reference/**'
       - '.github/workflows/reference-tests.yml'
   pull_request:
     paths:
@@ -15,7 +17,9 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/run_reference_tests.py'
+      - 'scripts/reference_fixtures.py'
       - 'scripts/reference_manifest.json'
+      - 'tools/reference/**'
       - '.github/workflows/reference-tests.yml'
   workflow_dispatch:
 permissions:
@@ -30,7 +34,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
@@ -39,6 +43,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # wireguard-go 参考适配器需要 Go 工具链；版本与官方检出 go.mod 要求一致。
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.1'
+          cache: false
       - name: Environment and packet checks
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/lengsuo-reference/target

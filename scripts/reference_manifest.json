@@ -13,6 +13,29 @@
       "sha256": "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad"
     }
   },
+  "anytls": {
+    "repo": "anytls/anytls-go",
+    "tag": "v0.0.13",
+    "commit": "9666872946857b50a74fdb692896d77b53773cb2",
+    "platforms": {
+      "linux": {
+        "asset": "anytls_0.0.13_linux_amd64.zip",
+        "client_member": "anytls-client",
+        "server_member": "anytls-server",
+        "sha256": "7e80fc099ea54a71110d256dd60648c47c63c70a3c499eb1f6d7aaa4edb7016f"
+      },
+      "windows": {
+        "asset": "anytls_0.0.13_windows_amd64.zip",
+        "client_member": "anytls-client.exe",
+        "server_member": "anytls-server.exe",
+        "sha256": "d64996e745ac00f4bba0058163777e5dc70bc38224d836ae445ca493a2fb6c77"
+      }
+    }
+  },
+  "wireguard_go": {
+    "repo": "https://github.com/WireGuard/wireguard-go.git",
+    "commit": "2631ce99a06f27120d581611cf125d68bc6aa565"
+  },
   "tests": [
     {
       "crate": "lengsuo-vless",
