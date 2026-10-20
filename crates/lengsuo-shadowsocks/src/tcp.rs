@@ -38,54 +38,30 @@
 //! UDP 中继、真实服务与跨平台互通验收。入站 salt 防重放已接入
 //! [`Reader::recv_guarded`]（窗口见 `crate::replay`，密钥化状态持久化见
 //! `crate::persist`；密钥轮换见 [`crate::ReplayFilter::load_with_keys`]）。
+//! 记忆池的**持久化运行时接线**（启动加载 → 运行时记录 → 收尾回写）见
+//! [`crate::salt_store`] 与 [`Reader::recv_guarded_store`]。
 //! 状态见 `docs/shadowsocks-status.md`。
 
 use std::time::Duration;
 
-use ss_core::chunk::{read_chunk, write_chunk, MAX_CHUNK_PAYLOAD, SIZE_WIRE_LEN};
+use ss_core::chunk::{read_chunk, MAX_CHUNK_PAYLOAD, SIZE_WIRE_LEN};
 use ss_core::crypto::{CipherSuite, SessionAead, TAG_LEN};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::time::timeout;
-
-use std::sync::{Arc, Mutex};
 
 use crate::drain::{BehaviorSeedLimitedDrainer, BehaviorSeedSource, HandshakeError};
 use crate::key::{KeyError, MasterKey};
 use crate::replay::{Error as ReplayError, ReplayFilter};
+use crate::salt_store::{SaltStore, SaltStoreError};
 
-/// 跨连接共享的重放过滤器句柄。用 `Arc<Mutex<..>>`（**Send + Sync**）：`record`
-/// 是同步方法，锁只在这一次调用内持有，不跨 await。
-pub type ReplayFilterShared = Arc<Mutex<ReplayFilter>>;
+/// 跨连接共享的重放过滤器句柄（定义在 `crate::replay`，此处再导出保持既有路径）。
+pub use crate::replay::{shared_replay, ReplayFilterShared};
 
-/// 构造一个共享句柄。
-#[must_use]
-pub fn shared_replay(filter: ReplayFilter) -> ReplayFilterShared {
-    Arc::new(Mutex::new(filter))
-}
+mod filter;
+mod writer;
 
-/// 重放判定句柄：一次性可变借用或跨连接共享句柄二选一。
-///
-/// 用枚举而非 trait object，避免在热路径上引入动态分发；两种形态都只是借用，
-/// 不改变 `Reader` 各 future 的 `Send`/`Sync` 性质（`&Arc<Mutex<..>>` 是 `Send`）。
-pub enum FilterRef<'a> {
-    /// 调用方持有唯一可变引用（单连接测试路径）。
-    Unique(&'a mut ReplayFilter),
-    /// 跨连接共享句柄（中继服务路径）。
-    Shared(&'a ReplayFilterShared),
-}
-
-impl FilterRef<'_> {
-    fn record(&mut self, salt: &[u8], now_millis: u64) -> std::result::Result<(), Error> {
-        let outcome = match self {
-            Self::Unique(filter) => filter.record(salt, now_millis),
-            Self::Shared(shared) => shared
-                .lock()
-                .expect("重放窗口锁中毒")
-                .record(salt, now_millis),
-        };
-        outcome.map_err(Error::Replay)
-    }
-}
+pub use filter::FilterRef;
+pub use writer::Writer;
 
 /// 单个 chunk 载荷明文上限，与参考实现 `writeStream` 的分段大小一致：
 /// `buf.Size(8192) - Overhead(16) - sizeBytes(18)` = 8158。
@@ -125,6 +101,9 @@ pub enum Error {
     #[error("salt 重放拒绝：{0}")]
     Replay(#[from] ReplayError),
 
+    #[error("salt 记忆池持久化失败：{0}")]
+    SaltStore(#[from] SaltStoreError),
+
     #[error("共享协议原语拒绝：{0}")]
     Protocol(ss_core::Error),
 
@@ -163,159 +142,6 @@ fn read_io(err: std::io::Error, expect: &'static str) -> Error {
         Error::Truncated { expect }
     } else {
         Error::Io(err)
-    }
-}
-
-/// 一个方向的发送端：写出随机 salt 与后续 AEAD chunk，不读取、不等对端回复。
-///
-/// 持有 salt 派生出的 subkey 与 nonce 序列，因此**故意不实现 `Debug`**，
-/// 避免密钥材料进入日志或调试输出。
-pub struct Writer<W> {
-    inner: W,
-    suite: CipherSuite,
-    aead: SessionAead,
-    salt: Vec<u8>,
-    salt_sent: bool,
-    closed: bool,
-    poisoned: bool,
-    wait: Duration,
-}
-
-impl<W: AsyncWrite + Unpin> Writer<W> {
-    /// 检查参数、取新随机 salt 并派生本方向会话。空口令、套件参数不符、零截止
-    /// 时间都在返回 `Err` 时失败，不写出任何字节，也不留半构造状态。
-    /// salt 在此刻生成，但直到首次 `send` 才上线；`new` 本身不做 I/O。
-    pub fn new(write: W, suite: CipherSuite, password: &[u8], wait: Duration) -> Result<Self> {
-        check_timeout(wait)?;
-        let key = MasterKey::new(suite, password)?;
-        let salt = key.new_salt().map_err(|_| Error::Entropy)?;
-        let aead = key.session(&salt)?;
-        Ok(Self {
-            inner: write,
-            suite,
-            aead,
-            salt,
-            salt_sent: false,
-            closed: false,
-            poisoned: false,
-            wait,
-        })
-    }
-
-    #[must_use]
-    pub fn suite(&self) -> CipherSuite {
-        self.suite
-    }
-
-    /// 本套件 salt 长度。
-    #[must_use]
-    pub fn salt_len(&self) -> usize {
-        self.suite.salt_len()
-    }
-
-    /// salt 是否已上线（首次成功的 `send` 之后为真）。
-    #[must_use]
-    pub fn salt_sent(&self) -> bool {
-        self.salt_sent
-    }
-
-    /// 底层写端引用（例如查询 `TcpStream` 状态）。
-    #[must_use]
-    pub fn get_ref(&self) -> &W {
-        &self.inner
-    }
-
-    /// 底层写端可变引用。绕过本类型直接写字节会破坏帧边界，仅供非协议用途
-    /// （如查询能力、设置 socket 选项）。
-    #[must_use]
-    pub fn get_mut(&mut self) -> &mut W {
-        &mut self.inner
-    }
-
-    /// 交出底层写端。若本方向已失效，流上字节位置不可恢复，调用方仍须关闭连接。
-    pub fn into_inner(self) -> W {
-        self.inner
-    }
-
-    /// 把 `payload` 作为若干 chunk 写出：首次调用先把 salt 写出，随后按
-    /// `MAX_SEGMENT_PAYLOAD` 分块，最后 flush。不等待也不读取对端任何字节。
-    ///
-    /// 空载荷不发送任何 chunk 帧（尤其不发送 size 明文为 0 的终止帧）；首次
-    /// 空载荷仍会把 salt 上线，使该方向成为一个已建立、零 chunk 的空流。
-    /// 一次调用是一个整体：单个 `wait` 覆盖 salt 与全部分块。
-    /// 任何错误之后本方向永久失效，调用方必须关闭连接。
-    pub async fn send(&mut self, payload: &[u8]) -> Result<()> {
-        self.usable()?;
-        let outcome = self.send_inner(payload).await;
-        if outcome.is_err() {
-            self.poisoned = true;
-        }
-        outcome
-    }
-
-    /// 正常收尾：flush 后对底层做写半关闭（TCP 上是 `SHUT_WR`），让对端恰好在
-    /// chunk 边界看到 EOF。不发送终止帧，因此不消耗 nonce。可重复调用；
-    /// 之后 `send` 报 `Closed`。超时或 I/O 失败同样永久失效本方向。
-    pub async fn shutdown(&mut self) -> Result<()> {
-        if self.poisoned {
-            return Err(Error::Poisoned);
-        }
-        if self.closed {
-            return Ok(());
-        }
-        let wait = self.wait;
-        let inner = &mut self.inner;
-        let outcome = timeout(wait, async move {
-            inner.flush().await?;
-            inner.shutdown().await
-        })
-        .await;
-        match outcome {
-            Ok(Ok(())) => {
-                self.closed = true;
-                Ok(())
-            }
-            Ok(Err(io)) => {
-                self.poisoned = true;
-                Err(Error::Io(io))
-            }
-            Err(_) => {
-                self.poisoned = true;
-                Err(Error::Timeout)
-            }
-        }
-    }
-
-    async fn send_inner(&mut self, payload: &[u8]) -> Result<()> {
-        let wait = self.wait;
-        let need_salt = !self.salt_sent;
-        // 逐字段借用：salt 只读，inner/aead 可变，三者互不重叠。
-        let salt = &self.salt;
-        let inner = &mut self.inner;
-        let aead = &mut self.aead;
-        timeout(wait, async move {
-            if need_salt {
-                inner.write_all(salt).await.map_err(Error::Io)?;
-            }
-            for piece in payload.chunks(MAX_SEGMENT_PAYLOAD) {
-                write_chunk(inner, aead, piece).await.map_err(core_error)?;
-            }
-            inner.flush().await.map_err(Error::Io)
-        })
-        .await
-        .map_err(|_| Error::Timeout)??;
-        self.salt_sent = true;
-        Ok(())
-    }
-
-    fn usable(&self) -> Result<()> {
-        if self.poisoned {
-            return Err(Error::Poisoned);
-        }
-        if self.closed {
-            return Err(Error::Closed);
-        }
-        Ok(())
     }
 }
 
@@ -434,6 +260,16 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         filter: &ReplayFilterShared,
     ) -> Result<Option<Vec<u8>>> {
         self.drive(Some(FilterRef::Shared(filter))).await
+    }
+
+    /// 与 [`Reader::recv`] 相同的读取语义，但把本连接的 salt 交给**持久化的
+    /// salt 记忆池**（[`SaltStore`]）判定：同 salt 在窗口内第二次出现报
+    /// [`Error::Replay`]；记录成功后由持有者按回写策略把窗口落盘
+    /// （重启后仍能识别重放）。
+    ///
+    /// 记忆池**跨连接共享**（中继服务只有一个），不每连接新建过滤器。
+    pub async fn recv_guarded_store(&mut self, store: &SaltStore) -> Result<Option<Vec<u8>>> {
+        self.drive(Some(FilterRef::Store(store))).await
     }
 
     async fn drive(&mut self, filter: Option<FilterRef<'_>>) -> Result<Option<Vec<u8>>> {

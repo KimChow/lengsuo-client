@@ -15,6 +15,9 @@
 //! 完整性校验由 `persist` 模块的 [`MacKey`]（HMAC-SHA256）提供：`ReplayFilter` 的
 //! 内存重放判定逻辑不变，`save_with_key` / `load_with_keys` 接受调用方注入的密钥，
 //! 校验失败 fail-closed；加载时同时接受上一代密钥并支持升级重写（密钥轮换）。
+//! **`salt_store` 模块把持久化接进入站运行时**（[`SaltStore`]）：启动加载 → 运行时
+//! 记录 → 收尾/停止回写；中继侧用 [`SaltStateConfig`] 挂上状态文件路径，
+//! **不配置路径则行为与现状一致**。
 //! 状态见 `docs/shadowsocks-status.md`。
 
 pub mod address;
@@ -24,6 +27,7 @@ pub mod padding;
 mod persist;
 mod relay;
 mod replay;
+pub mod salt_store;
 pub mod tcp;
 mod tcp_drain;
 pub mod udp;
@@ -40,6 +44,7 @@ pub use padding::{
 pub use persist::MacKey;
 pub use relay::{RelayConfig, RelayConfigParts, RelayHandle, RelayService};
 pub use replay::{Error as ReplayError, LoadedState, ReplayFilter};
+pub use salt_store::{FlushPolicy, SaltStateConfig, SaltStore, SaltStoreConfig, SaltStoreError};
 pub use ss_core::crypto::CipherSuite;
 pub use ss_core::target::TargetAddr;
 pub use tcp::Error as TcpError;

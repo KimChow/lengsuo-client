@@ -92,6 +92,11 @@ impl MasterKey {
         &self.key
     }
 
+    /// 派生出的主密钥字节（crate 内复用：salt 状态文件的 MAC 密钥由此派生）。
+    pub(crate) fn master_bytes(&self) -> &[u8] {
+        &self.key
+    }
+
     /// 用系统随机源取一个新 salt（长度取套件定义）。
     pub(crate) fn new_salt(&self) -> Result<Vec<u8>, EntropyError> {
         let mut salt = vec![0u8; self.suite.salt_len()];
