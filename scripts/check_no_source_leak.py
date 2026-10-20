@@ -347,13 +347,20 @@ def check_content(repo: Path, terms: list[str], local_dirs: tuple[str, ...]) -> 
 
 
 def check_history(repo: Path, terms: list[str]) -> list[str]:
-    """已提交历史里也不该有来源标识。"""
+    """已提交历史里也不该有来源标识。
+
+    排除 ``.gitignore``：该文件天然必须写出本地工具目录名（入库边界），
+    属于机制配置而非借鉴来源标识，与内容侧检查保持一致。
+    """
     problems = []
     for term in terms:
         if not term:
             continue
         try:
-            out = run_git(repo, "log", "--all", "--oneline", "-S", term)
+            out = run_git(
+                repo, "log", "--all", "--oneline", "-S", term,
+                "--", ".", ":(exclude).gitignore",
+            )
         except (subprocess.CalledProcessError, FileNotFoundError):
             continue
         hits = [ln for ln in out.splitlines() if ln.strip()]
