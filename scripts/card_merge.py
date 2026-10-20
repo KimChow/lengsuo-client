@@ -301,10 +301,14 @@ def _perform(led, task: str, root: Path, ctx: dict, attempt: str) -> dict:
     merge_sha = _commit(candidate, "HEAD")
     ctx["merge_sha"] = ctx["candidate_sha"] = merge_sha
     parents = _git(candidate, "rev-list", "--parents", "-n", "1", merge_sha).split()
-    if merge_sha == ctx["main_before"]:
+    if merge_sha == ctx["main_before"] and sha != ctx["main_before"]:
         # `git merge --no-ff <sha>` 报 "Already up to date"：source 已在 main 里
         # （上一次 merge 已落盘，只是台账在末尾读写失败/进程被杀）。这不是失败，
         # 而是幂等重入；直接按已验证状态收口，不再重跑 gates。
+        #
+        # 必须排除 `sha == main_before` 的情况：那说明**卡根本没有任何提交**
+        # （verify 把 main 自身当成 source 绑定了），这时报"已合并"是空转通过
+        # ——实测踩过，卡被标 merged 但一行代码都没进 main。
         _source(source, sha, fp)
         with led.lock():
             led.update(task, **ctx, state="merged", held=False,
