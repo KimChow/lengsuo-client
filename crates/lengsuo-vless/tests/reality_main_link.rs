@@ -328,37 +328,31 @@ async fn reality_main_link_roundtrip_to_own_server() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn main_link_without_reality_stays_bare_tcp() {
     timeout(DEADLINE, async {
-        // 回环 echo 作为参考端的 freedom 目标。
-        let echo = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let echo_port = echo.local_addr().unwrap().port();
-        let echo_task = tokio::spawn(async move {
-            let (mut socket, _) = echo.accept().await.unwrap();
-            let mut payload = vec![0u8; PAYLOAD.len()];
-            socket.read_exact(&mut payload).await.unwrap();
-            socket.write_all(&payload).await.unwrap();
-            payload
+        // 裸 TCP 对端：只做「按 VLESS 头读请求 → 回响应头 → 回显载荷」。
+        // 不依赖参考二进制（`LENGSUO_XRAY`）——本用例验证的是**默认路径不变**，
+        // 即不配置 REALITY 时主链路仍是「调用方给定裸连接 + 既有 stream 读写」。
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server_task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = stream::receive_request(&mut socket, &KEY, WAIT)
+                .await
+                .expect("读 VLESS 请求头");
+            assert!(matches!(request.command, Command::Tcp));
+            let mut received = vec![0u8; PAYLOAD.len()];
+            socket.read_exact(&mut received).await.expect("读载荷");
+            stream::send_response(&mut socket, WAIT)
+                .await
+                .expect("写 VLESS 响应头");
+            socket.write_all(&received).await.expect("回显载荷");
+            socket.flush().await.expect("flush");
+            received
         });
-        let port = free_ports(1)[0];
-        let reference = launch(
-            json!({
-                "log": {"loglevel": "warning"},
-                "inbounds": [{
-                    "listen": "127.0.0.1",
-                    "port": port,
-                    "protocol": "vless",
-                    "settings": {"clients": [{"id": ID}], "decryption": "none"},
-                    "streamSettings": {"security": "none"}
-                }],
-                "outbounds": [{"protocol": "freedom"}]
-            }),
-            port,
-        )
-        .await;
-        // 不经 REALITY：裸 TCP 直接交给主链路。
+        // 不经 REALITY：调用方直接给出裸 TCP 连接交给主链路。
         let mut plain = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         let request = Request {
             command: Command::Tcp,
-            target: TargetAddr::V4([127, 0, 0, 1], echo_port),
+            target: TargetAddr::V4([127, 0, 0, 1], 9),
         };
         stream::send_request(&mut plain, &request, &KEY, WAIT)
             .await
@@ -370,10 +364,12 @@ async fn main_link_without_reality_stays_bare_tcp() {
             .await
             .expect("读载荷超时")
             .unwrap();
-        assert_eq!(received, PAYLOAD);
-        assert_eq!(echo_task.await.unwrap(), PAYLOAD);
-        drop(reference);
-        println!("未配置 REALITY：主链路按裸 TCP 走通（默认路径零变化）");
+        assert_eq!(received, PAYLOAD, "默认路径载荷必须逐字节一致");
+        assert_eq!(server_task.await.unwrap(), PAYLOAD);
+        println!(
+            "默认路径（无 REALITY）：裸 TCP 逐字节一致 {}",
+            received.len()
+        );
     })
     .await
     .expect("用例总超时");
