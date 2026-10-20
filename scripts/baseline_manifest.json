@@ -1,0 +1,42 @@
+[
+  {
+    "crate": "lengsuo-vless",
+    "targets": ["reality_main_link"],
+    "expected_passed": 3
+  },
+  {
+    "crate": "lengsuo-trojan",
+    "targets": ["server_roundtrip"],
+    "expected_passed": 6
+  },
+  {
+    "crate": "lengsuo-vmess",
+    "targets": ["server_decode"],
+    "expected_passed": 10
+  },
+  {
+    "crate": "lengsuo-shadowsocks",
+    "targets": ["relay_e2e"],
+    "expected_passed": 6
+  },
+  {
+    "crate": "lengsuo-ss2022",
+    "targets": ["eih"],
+    "expected_passed": 9
+  },
+  {
+    "crate": "lengsuo-wireguard",
+    "targets": ["handshake"],
+    "expected_passed": 6
+  },
+  {
+    "crate": "lengsuo-hysteria",
+    "targets": ["rust_roundtrip"],
+    "expected_passed": 3
+  },
+  {
+    "crate": "lengsuo-anytls",
+    "targets": ["server_roundtrip"],
+    "expected_passed": 8
+  }
+]
