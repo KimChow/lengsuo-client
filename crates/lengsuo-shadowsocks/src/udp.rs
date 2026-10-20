@@ -109,9 +109,7 @@ impl UdpCodec {
     /// 用 [`UdpCodec::open_guarded`]。
     pub fn open(&self, packet: &[u8]) -> Result<(TargetAddr, Vec<u8>), Error> {
         let (_, plaintext) = self.authenticate(packet)?;
-        // 认证通过之后才信任明文里的地址字节。
-        let (target, consumed) = TargetAddr::decode(&plaintext)?;
-        Ok((target, plaintext[consumed..].to_vec()))
+        Self::decode_plaintext(plaintext)
     }
 
     /// 与 [`UdpCodec::open`] 相同的解密语义，但在**认证通过后**把包内 salt 交给
@@ -125,7 +123,17 @@ impl UdpCodec {
     ) -> Result<(TargetAddr, Vec<u8>), Error> {
         let (salt, plaintext) = self.authenticate(packet)?;
         filter.record(&salt, ReplayFilter::system_now_millis())?;
-        // 认证通过之后才信任明文里的地址字节。
+        Self::decode_plaintext(plaintext)
+    }
+
+    /// 认证通过后解析目标地址。参考 `protocol.go:264` 在解密后立即执行
+    /// `payload[0] &= 0x0F`，地址解析器自身也按 `&0x0F` 查表
+    /// （`protocol.go:26-28`）：高位只是标志位，ATYP=0x13 必须当作域名 0x03。
+    /// 掩码只作用于地址解析，不影响 salt/重放判定与载荷字节。
+    fn decode_plaintext(mut plaintext: Vec<u8>) -> Result<(TargetAddr, Vec<u8>), Error> {
+        if let Some(first) = plaintext.first_mut() {
+            *first &= 0x0F;
+        }
         let (target, consumed) = TargetAddr::decode(&plaintext)?;
         Ok((target, plaintext[consumed..].to_vec()))
     }
