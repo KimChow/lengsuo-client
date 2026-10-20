@@ -65,6 +65,58 @@ impl Key {
         hasher.finalize_xof().fill(&mut result);
         result
     }
+    /// SIP023 身份子密钥：上下文与会话子密钥不同，`key_material = 本层 PSK || salt`。
+    /// 与参考 `shadowaead_2022` 的 `blake3.DeriveKey(..., "shadowsocks 2022 identity
+    /// subkey", psk || salt)` 逐字节一致。
+    pub(crate) fn identity_subkey(&self, salt: &[u8]) -> Vec<u8> {
+        let mut hasher = blake3::Hasher::new_derive_key("shadowsocks 2022 identity subkey");
+        hasher.update(&self.psk);
+        hasher.update(salt);
+        let mut result = vec![0; self.method.key_len()];
+        hasher.finalize_xof().fill(&mut result);
+        result
+    }
+
+    /// 线上身份指纹：`BLAKE3-512(PSK)` 前 16 字节。参考实现用
+    /// `blake3.Sum512(key)` 后取 `hash[:16]`，与 BLAKE3 XOF 前 16 字节相同。
+    pub(crate) fn identity_hash(&self) -> [u8; 16] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&self.psk);
+        let mut hash = [0u8; 16];
+        hasher.finalize_xof().fill(&mut hash);
+        hash
+    }
+
+    /// 身份头 AES 块原语：`subkey` 必须是 16 或 32 字节（由套件密钥长度决定）。
+    /// ChaCha 套件不使用身份头，调用方应在更上层拒绝。
+    pub(crate) fn identity_block(
+        subkey: &[u8],
+        block: [u8; 16],
+        encrypt: bool,
+    ) -> Result<[u8; 16], Error> {
+        let mut block = block.into();
+        match subkey.len() {
+            16 => {
+                let cipher = Aes128::new_from_slice(subkey).map_err(|_| Error::KeyLength)?;
+                if encrypt {
+                    cipher.encrypt_block(&mut block)
+                } else {
+                    cipher.decrypt_block(&mut block)
+                }
+            }
+            32 => {
+                let cipher = Aes256::new_from_slice(subkey).map_err(|_| Error::KeyLength)?;
+                if encrypt {
+                    cipher.encrypt_block(&mut block)
+                } else {
+                    cipher.decrypt_block(&mut block)
+                }
+            }
+            _ => return Err(Error::KeyLength),
+        }
+        Ok(block.into())
+    }
+
     /// AES 系列 UDP separate header（16 字节，块加密）；ChaCha 无此原语。
     pub(crate) fn header(&self, bytes: [u8; 16], encrypt: bool) -> Result<[u8; 16], Error> {
         let mut block = bytes.into();

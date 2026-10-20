@@ -12,13 +12,15 @@ use super::{
     header::FixedHeader, map_core, random_bytes, suite, write_chunk, Direction, Opening,
     MAX_CHUNK_PAYLOAD, MAX_VAR_HEADER_LEN, PADDING_FIELD_LEN,
 };
-use crate::{crypto::Key, Error};
+use crate::{crypto::Key, eih::IDENTITY_HEADER_LEN, Error};
 
 /// 一条流的发送侧状态。
 pub struct Writer {
     aead: SessionAead,
     opening: Opening,
     direction: Direction,
+    /// SIP023 身份头；只在请求方向、且位于 salt 与 AEAD 固定头之间。
+    identity_headers: Vec<u8>,
     headers_written: bool,
     poisoned: bool,
 }
@@ -32,9 +34,38 @@ impl Writer {
             aead: SessionAead::new(suite(key.method()), subkey),
             opening,
             direction,
+            identity_headers: Vec::new(),
             headers_written: false,
             poisoned: false,
         })
+    }
+
+    /// 挂上 SIP023 身份头（`layers * 16` 字节，由 [`crate::eih::IdentityChain::headers`]
+    /// 按**本 Writer 的 salt** 生成）。只允许请求方向；空或长度非 16 的整数倍拒绝。
+    /// 必须在 [`Writer::write_request_header`] 之前调用。
+    pub fn with_identity_headers(mut self, headers: Vec<u8>) -> Result<Self, Error> {
+        self.set_identity_headers(headers)?;
+        Ok(self)
+    }
+
+    /// 同 [`Writer::with_identity_headers`]，就地设置。
+    pub fn set_identity_headers(&mut self, headers: Vec<u8>) -> Result<(), Error> {
+        if self.direction != Direction::Request {
+            return Err(Error::EihDirection);
+        }
+        if self.headers_written {
+            return Err(Error::SessionPolicy);
+        }
+        if headers.is_empty() || !headers.len().is_multiple_of(IDENTITY_HEADER_LEN) {
+            return Err(Error::EihShape);
+        }
+        self.identity_headers = headers;
+        Ok(())
+    }
+
+    /// 已挂载的身份头（诊断用；不实现 Debug，避免进入日志）。
+    pub fn identity_headers(&self) -> &[u8] {
+        &self.identity_headers
     }
     /// 用系统随机数生成 salt。
     pub fn random(key: &Key, direction: Direction) -> Result<Self, Error> {
@@ -138,6 +169,10 @@ impl Writer {
         if self.direction != Direction::Response {
             return Err(self.fail(Error::Direction));
         }
+        // SIP023 身份头只出现在请求方向；响应方向即使误设也必须 fail-closed。
+        if !self.identity_headers.is_empty() {
+            return Err(self.fail(Error::EihDirection));
+        }
         if payload.len() > MAX_CHUNK_PAYLOAD {
             return Err(self.fail(Error::Length));
         }
@@ -197,8 +232,12 @@ impl Writer {
             .map_err(map_core)?;
         let var_ct = self.aead.seal(&var_plain).map_err(map_core)?;
         let salt = self.opening.salt();
-        let mut wire = Vec::with_capacity(salt.len() + fixed_ct.len() + var_ct.len());
+        let mut wire = Vec::with_capacity(
+            salt.len() + self.identity_headers.len() + fixed_ct.len() + var_ct.len(),
+        );
         wire.extend_from_slice(salt);
+        // SIP023：身份头紧跟在 salt 后、AEAD 固定头前，不参与 AEAD nonce 计数。
+        wire.extend_from_slice(&self.identity_headers);
         wire.extend_from_slice(&fixed_ct);
         wire.extend_from_slice(&var_ct);
         Ok(wire)
