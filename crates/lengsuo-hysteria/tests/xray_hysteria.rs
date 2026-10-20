@@ -18,6 +18,8 @@ use std::time::Duration;
 use lengsuo_hysteria::proxy;
 use lengsuo_hysteria::quic::{ClientConfig, ConnectError, HysteriaClient};
 
+mod support;
+
 const AUTH: &str = "lengsuo-interop-password";
 const SERVER_NAME: &str = "localhost";
 /// 用例 A 的三档 echo 载荷。
@@ -117,8 +119,11 @@ fn xray_config(port: u16, cert: &Path, key: &Path) -> String {
   }}],
   "outbounds": [{{"protocol": "freedom"}}]
 }}"#,
-        cert.display(),
-        key.display()
+        // ⚠️ 必须 JSON 转义：Windows 路径 `C://Users//...` 的反斜杠
+        // 未转义会让 Xray 直接拒绝配置（`invalid character 'U' in string
+        // escape code`）⇒ 服务端根本没起来，Linux 路径无反斜杠所以一直掩盖。
+        support::json_escape(&cert.to_string_lossy()),
+        support::json_escape(&key.to_string_lossy())
     )
 }
 
@@ -138,7 +143,7 @@ impl Drop for World {
     }
 }
 
-async fn start_world(tag: &str) -> World {
+async fn start_world(tag: &str) -> (World, HysteriaClient) {
     let dir = test_dir(tag);
     let (cert, key) = gen_cert(&dir);
     let der = cert_der(&cert, &dir);
@@ -161,18 +166,34 @@ async fn start_world(tag: &str) -> World {
         cert_der: der,
         dir,
     };
-    // 就绪探测：用正确 auth 反复完整建连（握手 + H3 认证）
+    // 就绪探测：用正确 auth 反复完整建连（握手 + H3 认证）。
+    //
+    // ⚠️ 单次尝试自带墙钟上限：Windows 上向未监听端口发 UDP 是**静默丢弃**
+    // （不是 ECONNREFUSED），`connect()` 会无限等一个不会到的回应，把 20s
+    // 总预算完全架空 ⇒ 整条用例永久挂起（CI 表现：600s 超时）。
+    //
+    // ⚠️⚠️ 探测成功的那条连接**必须复用**，不能丢掉重建：
+    // `HysteriaClient` 持有 `quinn::Endpoint`，而 quinn 的 `Endpoint` 是
+    // **spawn 型任务**——被 drop 时会把该 endpoint 上所有连接的收发任务一起
+    // 终止。第一版把探测结果丢进 `Ok(_)` 就返回，等于刚连上就掐断，
+    // 后续 `tcp_connect` 永远等不到服务端。
     let mut last_err = String::new();
     for _ in 0..80 {
-        match connect_with(&world, AUTH).await {
-            Ok(_) => return world,
-            Err(e) => last_err = format!("{e}"),
+        match support::with_attempt_timeout(connect_with(&world, AUTH)).await {
+            Ok(Ok(client)) => return (world, client),
+            Ok(Err(e)) => last_err = format!("{e}"),
+            Err(_) => {
+                last_err = format!(
+                    "单次建连超过 {}s 无响应",
+                    support::PROBE_ATTEMPT_TIMEOUT.as_secs()
+                )
+            }
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     panic!(
-        "xray 20s 内未就绪；最后一次探测错误: {last_err}；stderr: {}",
-        std::fs::read_to_string(world.dir.join("xray-stderr.log")).unwrap_or_default()
+        "xray 20s 内未就绪；最后一次探测错误: {last_err}；参考服务端日志:\n{}",
+        support::server_logs(&world.dir)
     );
 }
 
@@ -191,7 +212,14 @@ async fn connect_with(world: &World, auth: &str) -> Result<HysteriaClient, Conne
 }
 
 /// 本地 TCP echo 服务器（freedom 出站的真实回环目标）。
-async fn spawn_tcp_echo() -> SocketAddr {
+///
+/// **自终止形状**：收满 `expected` 字节 → 原样回写 → `shutdown`。
+/// 不依赖「客户端 FIN 能传到本 echo」——参考 Xray 的 freedom `requestDone`
+/// 在入站流 EOF 时**只结束拷贝，不对目标 TCP 调 `CloseWrite`**
+/// （`proxy/freedom/freedom.go` 的 `requestDone` 结尾只有 `return nil`），
+/// 所以 FIN 到不了 echo；若 echo 等客户端关闭才收工，回程就永远收不到 EOF，
+/// 用例必然超时。这正是「跟参考实现一致」的语义要求。
+async fn spawn_tcp_echo(expected: usize) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("绑定 echo 端口");
@@ -204,14 +232,22 @@ async fn spawn_tcp_echo() -> SocketAddr {
             };
             tokio::spawn(async move {
                 let mut buf = [0u8; 16 * 1024];
+                let mut got = 0usize;
                 loop {
-                    match sock.read(&mut buf).await {
+                    if got >= expected {
+                        let _ = sock.shutdown().await;
+                        return;
+                    }
+                    let want = expected.saturating_sub(got).min(buf.len());
+                    match sock.read(&mut buf[..want]).await {
                         Ok(0) | Err(_) => {
                             let _ = sock.shutdown().await;
                             return;
                         }
                         Ok(n) => {
+                            got += n;
                             if sock.write_all(&buf[..n]).await.is_err() {
+                                let _ = sock.shutdown().await;
                                 return;
                             }
                         }
@@ -231,12 +267,10 @@ fn pattern(len: usize) -> Vec<u8> {
 #[tokio::test]
 #[ignore = "需要 LENGSUO_XRAY 指向参考 xray 二进制"]
 async fn a_tcp_echo_through_xray() {
-    let world = start_world("tcp-a").await;
-    let client = connect_with(&world, AUTH)
-        .await
-        .expect("正确 auth 建连失败");
-    let echo_addr = spawn_tcp_echo().await;
+    // 就绪探测成功的那条连接直接复用（端点被 drop 会连带杀掉连接）。
+    let (_world, client) = start_world("tcp-a").await;
     for size in TCP_ECHO_SIZES {
+        let echo_addr = spawn_tcp_echo(size).await;
         let payload = pattern(size);
         let fut = async {
             let mut stream = proxy::tcp_connect(&client, &echo_addr.to_string())
@@ -269,10 +303,8 @@ async fn a_tcp_echo_through_xray() {
 #[tokio::test]
 #[ignore = "需要 LENGSUO_XRAY 指向参考 xray 二进制"]
 async fn b_udp_roundtrip_through_xray() {
-    let world = start_world("udp-b").await;
-    let client = connect_with(&world, AUTH)
-        .await
-        .expect("正确 auth 建连失败");
+    // 复用就绪探测成功的那条连接（端点被 drop 会连带杀掉连接）。
+    let (_world, client) = start_world("udp-b").await;
     let echo = tokio::net::UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("绑定本地 UDP echo");
@@ -310,7 +342,8 @@ async fn b_udp_roundtrip_through_xray() {
 #[tokio::test]
 #[ignore = "需要 LENGSUO_XRAY 指向参考 xray 二进制"]
 async fn c_wrong_auth_rejected() {
-    let world = start_world("auth-c").await;
+    // `_ready` 只是就绪探测留下的健康连接；错误 auth 必须**新开**一条。
+    let (world, _ready) = start_world("auth-c").await;
     let err = match connect_with(&world, "definitely-wrong-password").await {
         Err(e) => e,
         Ok(_) => panic!("错误 auth 不应建连成功"),
