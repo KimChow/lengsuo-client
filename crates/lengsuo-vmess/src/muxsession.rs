@@ -505,26 +505,38 @@ impl StreamSender {
 
     /// `writeFirstPayload`：`payload == None` 表示 100ms 内没有首包
     /// （参考 `ErrNotTimeoutReader` / `ErrReadTimeout`）→ 只发 New 元数据帧。
-    /// `Some(bytes)` 按 8KiB 切分（`buf.SplitSize(mb, 8*1024)`）。
+    ///
+    /// 参考 `writeMetaOnly`（`writer.go:62-69`）走 `getNextFrameMeta()`，
+    /// 其 `Option` 为 0：**元数据帧不得带 `OptionData`**，否则对端会把下一帧
+    /// 的长度字段误当作本帧数据长度读走（本卡实跑证据：Xray 报
+    /// `unknown status: 108`）。
+    ///
+    /// `Some(bytes)` 对 Stream 按 8KiB 切分，且**每片各自成帧**
+    /// （`WriteMultiBuffer` → 每片一次 `writeData`：首片 New，其余 Keep）；
+    /// 对 UDP（Packet）一次调用即一个数据报、一帧。
     pub fn send_new(
         &mut self,
         out: &mut Vec<u8>,
         payload: Option<&[u8]>,
     ) -> Result<(), FrameError> {
+        let pieces = payload.map_or_else(Vec::new, |bytes| self.frame_payloads(bytes));
         let meta = FrameMetadata {
             session_id: self.id,
             status: SessionStatus::New,
-            option: OPTION_DATA,
+            option: if pieces.is_empty() { 0 } else { OPTION_DATA },
             target: Some((self.target.clone(), self.network)),
             source: None,
             local: None,
         };
         meta.encode_into(out)?;
         self.new_sent = true;
-        match payload {
-            None => Ok(()),
-            Some(bytes) => self.append_chunks(out, bytes),
+        if let Some(first) = pieces.first().copied() {
+            encode_data_into(out, first)?;
+            for piece in &pieces[1..] {
+                self.write_keep_data(out, piece)?;
+            }
         }
+        Ok(())
     }
 
     /// `writeData`：后续数据一律 Keep 帧（`getNextFrameMeta` 的 followup 分支）。
@@ -532,24 +544,18 @@ impl StreamSender {
         if !self.new_sent {
             return self.send_new(out, Some(payload));
         }
-        let meta = FrameMetadata {
-            session_id: self.id,
-            status: SessionStatus::Keep,
-            option: OPTION_DATA,
-            target: None,
-            source: None,
-            local: None,
-        };
-        meta.encode_into(out)?;
-        self.append_chunks(out, payload)
+        for piece in self.frame_payloads(payload) {
+            self.write_keep_data(out, piece)?;
+        }
+        Ok(())
     }
 
-    /// 空 `WriteMultiBuffer`：只发元数据，不发数据段。
+    /// 空 `WriteMultiBuffer`：只发元数据，不发数据段（`writeMetaOnly`，Option=0）。
     pub fn send_keep_meta_only(&mut self, out: &mut Vec<u8>) -> Result<(), FrameError> {
         let meta = FrameMetadata {
             session_id: self.id,
             status: SessionStatus::Keep,
-            option: OPTION_DATA,
+            option: 0,
             target: None,
             source: None,
             local: None,
@@ -563,11 +569,33 @@ impl StreamSender {
         ServerSession::encode_frame(out, self.id, SessionStatus::End, option, None)
     }
 
-    fn append_chunks(&self, out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), FrameError> {
-        for chunk in bytes.chunks(crate::muxframe::SESSION_CHUNK_SIZE) {
-            encode_data_into(out, chunk)?;
+    /// 参考 `Writer.WriteMultiBuffer` 的分片：Stream 用
+    /// `buf.SplitSize(mb, 8*1024)`（每片一帧），Packet 用 `SplitFirst`
+    /// （每次一个数据报、一帧）。
+    fn frame_payloads<'a>(&self, payload: &'a [u8]) -> Vec<&'a [u8]> {
+        if payload.is_empty() {
+            Vec::new()
+        } else if self.network == TargetNetwork::Udp {
+            vec![payload]
+        } else {
+            payload
+                .chunks(crate::muxframe::SESSION_CHUNK_SIZE)
+                .collect()
         }
-        Ok(())
+    }
+
+    /// 一个 Keep 元数据 + 单段数据的完整帧。
+    fn write_keep_data(&self, out: &mut Vec<u8>, payload: &[u8]) -> Result<(), FrameError> {
+        let meta = FrameMetadata {
+            session_id: self.id,
+            status: SessionStatus::Keep,
+            option: OPTION_DATA,
+            target: None,
+            source: None,
+            local: None,
+        };
+        meta.encode_into(out)?;
+        encode_data_into(out, payload)
     }
 }
 
