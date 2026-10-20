@@ -126,6 +126,20 @@ pub enum AuthError {
     Rejected { status: u16 },
 }
 
+impl AuthError {
+    /// 是否为「0-RTT 被服务端拒绝」导致的失败。此时连接仍可继续用于
+    /// 1-RTT，调用方应在同一连接上重放认证请求（参考 quinn 文档：
+    /// 早数据流上的读写返回 `ZeroRttRejected`）。
+    #[must_use]
+    pub fn is_zero_rtt_rejected(&self) -> bool {
+        matches!(
+            self,
+            AuthError::Write(WriteError::ZeroRttRejected)
+                | AuthError::Read(ReadError::ZeroRttRejected)
+        )
+    }
+}
+
 /// 认证成功后从响应头提取的信息。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthOutcome {
@@ -180,8 +194,12 @@ pub async fn authenticate(
     match authenticate_inner(conn, auth, cc_rx).await {
         Ok(v) => Ok(v),
         Err(e) => {
-            // 对齐 dialer.go：RoundTrip 失败与状态码非 233 都以 0x101 关闭
-            conn.close(quinn::VarInt::from_u32(CLOSE_ERR_CODE_PROTOCOL_ERROR), b"");
+            // 0-RTT 被拒不是协议错误：连接仍可用于 1-RTT，调用方需在同一
+            // 连接上显式重放认证请求；此时绝不能按协议错误关闭连接。
+            if !e.is_zero_rtt_rejected() {
+                // 对齐 dialer.go：RoundTrip 失败与状态码非 233 都以 0x101 关闭
+                conn.close(quinn::VarInt::from_u32(CLOSE_ERR_CODE_PROTOCOL_ERROR), b"");
+            }
             Err(e)
         }
     }

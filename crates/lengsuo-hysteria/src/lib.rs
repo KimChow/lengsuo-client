@@ -17,9 +17,15 @@
 //! UDP 中继报文本身的消息层字节编解码见 `udp.rs`；分片重组与切片见
 //! `fragment.rs`。
 //!
+//! 0-RTT：客户端已接入 quinn `into_0rtt`（`quic/early.rs`，默认关闭；
+//! 有会话票据时尝试早数据，拒绝路径可观测并经显式入口回退 1-RTT）。
+//! 与参考 Xray 服务端的 0-RTT **互通尚未打通**：Xray `hub.go` 的
+//! `quic.Config` 未设 `Allow0RTT`，其下发票据的早数据上限为 0，rustls 因此
+//! 无法产生早数据（详见 `docs/hysteria-status.md`）。
+//!
 //! 尚未实现（不宣称）：**拥塞器内核替换**（Brutal/BBR 算法本身未移植，
 //! 实际仍为 quinn 默认 CUBIC；`congestion` 模块只做参数/协商面）、
-//! 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
+//! 服务端接受 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
 //! 状态、验收命令与偏离清单见 `docs/hysteria-status.md`。
 
 pub mod congestion;

@@ -18,10 +18,16 @@
 //! QUIC 的发送节奏。
 
 pub mod client;
+pub mod early;
 pub mod server;
 
 /// 拥塞参数配置（参数面；**不**替换 quinn 拥塞器，见模块级说明）。
 pub use crate::congestion::CongestionConfig;
 
 pub use client::{ClientConfig, ConnectError, HysteriaClient, UdpSendError, UdpSession};
+pub use early::{
+    configure_tls, run_early, EarlyBudget, EarlyBudgetExceeded, EarlyDataConfig, EarlyDataError,
+    EarlyError, MemorySessionCache, OperationKind, SessionCache, ZeroRttOutcome, ZeroRttRejected,
+    ZeroRttStatus,
+};
 pub use server::{HysteriaServer, ServerConfig, ServerError, ServerSessionCtx, UdpInboundSession};
