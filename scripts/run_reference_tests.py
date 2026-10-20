@@ -36,12 +36,45 @@ EXTRA_TESTS = [
                  "xray_multitier", "xray_multitier_server"],
      "expected_passed": 24},
     {"crate": "lengsuo-anytls",
-     "targets": ["interop_client", "interop_server", "interop_udp"],
-     "expected_passed": 6, "requires_commands": ["openssl"],
+     "targets": ["interop_client", "interop_server", "interop_udp", "interop"],
+     "expected_passed": 7, "requires_commands": ["openssl"],
      "requires_files": anytls_files(),
      "env": {"LENGSUO_ANYTLS": str(ANYTLS_CLIENT),
              "LENGSUO_ANYTLS_SERVER": str(ANYTLS_SERVER)}},
+    # hysteria 混淆（ Salamander）互通：需要**参考生成的确定性向量**做逐字节对照。
+    # 生成器已收进仓内 tools/reference/gen_salamander_vector.py（纯 Python，
+    # 只依赖 hashlib），因此门禁可自洽生成，不依赖仓外夹具。
+    {"crate": "lengsuo-hysteria",
+     "targets": ["xray_hysteria_obfs"],
+     "expected_passed": 2,
+     "env": {"LENGSUO_OBFS_VECTOR": "@@SALAMANDER_VECTOR@@"}},
 ]
+
+
+# hysteria 混淆（Salamander）互通条目需要**参考生成的确定性向量**做逐字节对照。
+# 生成器已收进仓内 tools/reference/gen_salamander_vector.py（纯 Python，只依赖
+# hashlib），因此门禁可自洽生成，不依赖仓外夹具 —— 与 WireGuard 适配器同一范式。
+SALAMANDER_GENERATOR = ROOT / "tools" / "reference" / "gen_salamander_vector.py"
+
+
+def build_salamander_vectors(work):
+    """生成 Salamander 混淆的确定性参考向量文件，返回其路径。
+
+    生成器缺失 / 执行失败 / 产物为空一律显式报错退出，绝不静默跳过，
+    也不把「缺失」当通过。
+    """
+    if not SALAMANDER_GENERATOR.is_file():
+        raise RuntimeError(
+            "Salamander 向量生成器不存在：{}（--test xray_hysteria_obfs 需要）".format(
+                SALAMANDER_GENERATOR))
+    out_path = work / "salamander_vectors.txt"
+    command = [sys.executable, str(SALAMANDER_GENERATOR), str(out_path)]
+    result = subprocess.run(command, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=120)
+    if result.returncode != 0 or not out_path.is_file() or out_path.stat().st_size == 0:
+        raise RuntimeError("生成 Salamander 参考向量失败（{}）：\n{}{}".format(
+            " ".join(command), result.stdout, result.stderr))
+    return out_path
 
 
 # WireGuard 条目（--test wireguard_go）用官方 wireguard-go 核心当真实参考：跑之前
@@ -180,6 +213,10 @@ def execute(manifest, work, archive, report):
         log = work / (case["crate"] + ".log")
         case_env = env.copy()
         case_env.update(case.get("env", {}))
+        # 占位符替换：需要运行时生成产物的条目（如 Salamander 混淆向量）
+        # 在这里注入真实路径，生成失败一律显式报错，绝不静默跳过。
+        if case_env.get("LENGSUO_OBFS_VECTOR") == "@@SALAMANDER_VECTOR@@":
+            case_env["LENGSUO_OBFS_VECTOR"] = str(build_salamander_vectors(work))
         try:
             result = subprocess.run(command, cwd=ROOT, env=case_env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
