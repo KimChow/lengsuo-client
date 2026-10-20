@@ -14,17 +14,18 @@
 //! - 任一方向结束/出错即中断另一方向并回收连接（参考 `common.Interrupt`）。
 //! - 每个连接有独立截止时间；参考用的是策略超时（`ConnectionIdle` 等），本端用
 //!   [`RelayConfig::idle_timeout`] 覆盖整个会话，超时即关连接（fail-closed）。
+//! - 入站 salt 记忆池**跨连接共享**（`Arc<Mutex<ReplayFilter>>`），可选挂上
+//!   持久化状态文件（[`crate::salt_store::SaltStateConfig`]）：启动加载、运行时记录、收尾/停止回写，
+//!   使「重启后仍能识别重放的 salt」成为运行时可观察的事实（见 `crate::salt_store`）。
 //!
 //! 未实现（见 `docs/shadowsocks-status.md` 偏离清单）：参考的
 //! `drain.BehaviorSeedLimitedDrainer` 行为探测缓解、分块 padding、真实 policy
 //! 管理器级别的超时分级（本端用一个统一的会话超时近似）。
 
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ss_core::crypto::CipherSuite;
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -33,102 +34,15 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::address::AddressReader;
-use crate::replay::ReplayFilter;
-use crate::tcp::{
-    shared_replay, Error as TcpError, Reader as TcpReader, ReplayFilterShared, Writer as TcpWriter,
-};
+use crate::replay::{shared_replay, ReplayFilter};
+use crate::salt_store::SaltStore;
+use crate::tcp::{Error as TcpError, Reader as TcpReader, ReplayFilterShared, Writer as TcpWriter};
 
-/// 中继失败原因。所有变体都不含口令、主密钥、salt 或 subkey，可安全落日志。
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// 配置非法（空口令、零截止时间、零容量等）。
-    #[error("中继配置非法：{0}")]
-    Config(String),
+mod config;
+mod error;
 
-    /// 监听器绑定/接受失败，或服务无法继续。
-    #[error("监听失败：{0}")]
-    Listen(#[source] io::Error),
-
-    /// 请求方向握手（salt + 地址）失败。失败即关连接，不重试、不直连。
-    #[error("握手失败：{0}")]
-    Handshake(#[source] TcpError),
-
-    /// 拨号目标失败（连接被拒/超时/域名解析失败）。**不直连、不降级**。
-    #[error("目标不可达：{0}")]
-    Unreachable(String),
-
-    /// 中继过程中某一方向失败。
-    #[error("中继失败：{0}")]
-    Stream(#[source] TcpError),
-
-    /// 会话超过截止时间。
-    #[error("会话超时")]
-    Timeout,
-
-    /// 连接的底层读写失败。
-    #[error("连接 I/O 失败：{0}")]
-    Io(#[source] io::Error),
-
-    /// 重放窗口构造失败（配置容量/时间窗非法）。
-    #[error("重放窗口非法：{0}")]
-    Replay(#[source] crate::replay::Error),
-}
-
-/// 中继服务配置。口令以 `Arc<Vec<u8>>` 共享，避免每个连接复制一份；从不落日志。
-pub struct RelayConfig {
-    pub suite: CipherSuite,
-    password: Arc<Vec<u8>>,
-    /// 每次握手与每个方向的 I/O 截止时间（必须大于零）。
-    pub idle_timeout: Duration,
-    /// 单方向最大载荷字节数（同时充当接口契约与测试断言值）。
-    pub max_payload: usize,
-    /// 入站 salt 重放窗口：`None` 表示关闭（与参考基线行为一致，见 `crate::replay`）。
-    pub replay: Option<(usize, Duration)>,
-}
-
-/// 必需字段用构造器收口并在 [`RelayConfig::validate`] 里检查，可选字段默认关闭。
-#[derive(Clone, Copy)]
-pub struct RelayConfigParts {
-    pub suite: CipherSuite,
-    pub idle_timeout: Duration,
-    pub replay: Option<(usize, Duration)>,
-}
-
-impl RelayConfig {
-    /// 单方向载荷上限（与参考 `buf.Size` 一致的 64 KiB 量级；仅作接口契约）。
-    pub const DEFAULT_MAX_PAYLOAD: usize = 65_536;
-
-    #[must_use]
-    pub fn new(parts: RelayConfigParts, password: &[u8]) -> Self {
-        Self {
-            suite: parts.suite,
-            password: Arc::new(password.to_vec()),
-            idle_timeout: parts.idle_timeout,
-            max_payload: Self::DEFAULT_MAX_PAYLOAD,
-            replay: parts.replay,
-        }
-    }
-
-    /// 空口令、零截止时间与零容量窗口都在这里拒绝（fail-closed）。
-    pub fn validate(&self) -> Result<(), Error> {
-        if self.password.is_empty() {
-            return Err(Error::Config("口令为空".into()));
-        }
-        if self.idle_timeout.is_zero() {
-            return Err(Error::Config("截止时间必须大于零".into()));
-        }
-        if self.max_payload == 0 {
-            return Err(Error::Config("载荷上限必须大于零".into()));
-        }
-        match self.replay {
-            Some((0, _)) => Err(Error::Config("重放窗口容量必须大于零".into())),
-            Some((_, window)) if window.is_zero() => {
-                Err(Error::Config("重放窗口时间窗必须大于零".into()))
-            }
-            _ => Ok(()),
-        }
-    }
-}
+pub use config::{RelayConfig, RelayConfigParts};
+pub use error::Error;
 
 /// 已绑定但未启动的中继服务。绑定与运行分开，测试可以先取到真实端口再启动。
 pub struct RelayService {
@@ -170,6 +84,19 @@ impl RelayService {
             )),
             None => None,
         };
+        // 持久化的 salt 记忆池：启动时加载状态文件（**损坏 ⇒ fail-closed 拒绝启动**），
+        // 运行时记录，收尾/停止时回写。不配置路径 ⇒ 不建持有者（行为与现状一致）。
+        let store: Option<Arc<SaltStore>> = match &config.salt_state {
+            Some(state) => Some(Arc::new(
+                SaltStore::open(
+                    &crate::salt_store::store_config(config.replay, state),
+                    config.suite,
+                    config.password(),
+                )
+                .map_err(Error::SaltStore)?,
+            )),
+            None => None,
+        };
         let join = tokio::task::spawn_local(async move {
             let config = shared_config;
             let shared = replay;
@@ -188,8 +115,9 @@ impl RelayService {
                         let config = Arc::clone(&config);
                         // 只克隆 Rc 句柄（廉价），不跨 await 持有 RefCell 借用。
                         let replay = shared.clone();
+                        let store = store.clone();
                         connections.spawn_local(async move {
-                            let _ = handle_connection(stream, config, replay.as_ref()).await;
+                            let _ = handle_connection(stream, config, replay.as_ref(), store.as_deref()).await;
                         });
                     }
                     changed = stop_rx.changed() => {
@@ -202,6 +130,11 @@ impl RelayService {
             }
             // 中断所有在途连接：drop JoinSet 会 abort 尚未完成的任务，随后等待回收。
             connections.shutdown().await;
+            // **服务停止时回写**：把最后的记忆池状态落盘（重启后仍能识别重放）。
+            // 写盘失败必须让停止流程可见（返回错误），不吞。
+            if let Some(store) = store {
+                store.flush().map_err(Error::SaltStore)?;
+            }
             Ok(())
         });
         // 重放窗口的合法性已在上面构造共享句柄时校验：非法配置必须在 start 就失败，
@@ -257,11 +190,12 @@ async fn handle_connection(
     mut stream: TcpStream,
     config: Arc<RelayConfig>,
     replay: Option<&ReplayFilterShared>,
+    store: Option<&SaltStore>,
 ) -> Result<(), Error> {
     let wait = config.idle_timeout;
     let outcome = timeout(wait, async {
         let (read_half, write_half) = stream.split();
-        let mut reader = TcpReader::new(read_half, config.suite, &config.password, wait)
+        let mut reader = TcpReader::new(read_half, config.suite, config.password(), wait)
             .map_err(Error::Handshake)?;
         // 地址读取借下游读半（与 reader 同一底层流，不会双读）；地址读完即丢弃。
         let mut target: Option<TargetAddr> = None;
@@ -272,9 +206,11 @@ async fn handle_connection(
             // 不直接读底层流（避免与 reader 的读半双读/借用冲突）。
             let mut address = AddressReader::from_pending();
             while target.is_none() {
-                let chunk = match replay {
-                    Some(filter) => reader.recv_guarded_shared(filter).await,
-                    None => reader.recv().await,
+                // 持久化记忆池优先（记录后按策略回写）；未配置 ⇒ 纯内存共享窗口。
+                let chunk = match (store, replay) {
+                    (Some(store), _) => reader.recv_guarded_store(store).await,
+                    (None, Some(filter)) => reader.recv_guarded_shared(filter).await,
+                    (None, None) => reader.recv().await,
                 }
                 .map_err(Error::Handshake)?;
                 match chunk {
@@ -295,14 +231,21 @@ async fn handle_connection(
         let target = target.expect("循环条件保证地址已解出");
         // 拨号必须在地址通过认证并解出之后；失败即关连接，没有任何直连回退。
         let upstream = dial(&target, wait).await?;
-        let writer = TcpWriter::new(write_half, config.suite, &config.password, wait)
+        let writer = TcpWriter::new(write_half, config.suite, config.password(), wait)
             .map_err(Error::Handshake)?;
         relay_both_ways(reader, writer, upstream, head_payload).await
     })
     .await;
-    match outcome {
+    // **连接收尾时回写**：把本连接记下的 salt 落盘（重启后仍能识别重放）。
+    // 回写失败要可见（返回错误），不吞 —— 但**不覆盖**握手/中继本身的失败原因。
+    let flush_result = store.map(|store| store.flush_on_close().map_err(Error::SaltStore));
+    let outcome = match outcome {
         Ok(result) => result,
         Err(_) => Err(Error::Timeout),
+    };
+    match (outcome, flush_result) {
+        (Ok(()), Some(Err(err))) => Err(err),
+        (result, _) => result,
     }
 }
 

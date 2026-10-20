@@ -27,9 +27,20 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::persist::{self, MacKey};
+
+/// 跨连接共享的重放过滤器句柄。用 `Arc<Mutex<..>>`（**Send + Sync**）：`record`
+/// 是同步方法，锁只在这一次调用内持有，不跨 await。
+pub type ReplayFilterShared = Arc<Mutex<ReplayFilter>>;
+
+/// 构造一个共享句柄。
+#[must_use]
+pub fn shared_replay(filter: ReplayFilter) -> ReplayFilterShared {
+    Arc::new(Mutex::new(filter))
+}
 
 /// 持久化格式把 salt 长度限制在单个字节（≤255，协议套件只用到 16/32）。
 const MAX_SALT_LEN: usize = u8::MAX as usize;
@@ -173,7 +184,7 @@ impl ReplayFilter {
 
     /// 状态体（`capacity | window_ms | body`，见 [`Self::parse_body`]）：把当前窗口内
     /// 尚未过期的条目序列化到字节串，不改变内存状态。`now_millis` 决定哪些条目已过期。
-    fn encode_body(&self, now_millis: u64) -> Result<Vec<u8>, Error> {
+    pub(crate) fn encode_body(&self, now_millis: u64) -> Result<Vec<u8>, Error> {
         let window_millis = self.window_millis();
         let mut body = Vec::new();
         for entry in &self.order {
@@ -285,6 +296,30 @@ impl ReplayFilter {
 
     fn window_millis(&self) -> u64 {
         self.window.as_millis() as u64
+    }
+
+    /// 把容量与时间窗改为配置取值（配置权威：文件里记的是上一份配置的取值）。
+    /// 过期条目按新时间窗清除；容量收缩时 FIFO 逐出最旧；参数非法即 `Err`。
+    pub(crate) fn retarget(
+        mut self,
+        capacity: usize,
+        window: Duration,
+        now_millis: u64,
+    ) -> Result<Self, Error> {
+        if capacity == 0 {
+            return Err(Error::InvalidCapacity { capacity });
+        }
+        if window.is_zero() {
+            return Err(Error::InvalidWindow);
+        }
+        self.capacity = capacity;
+        self.window = window;
+        self.prune_expired(now_millis);
+        while self.order.len() > self.capacity {
+            let oldest = self.order.pop_front().expect("队列必然非空");
+            self.index.remove(&oldest.salt);
+        }
+        Ok(self)
     }
 
     /// 从队首逐出已过期条目。队列按插入序（时间序）排列；单调时钟下队首即最旧。
