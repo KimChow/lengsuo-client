@@ -1,4 +1,5 @@
-//! 路径 MTU 判定与 PMTUD 错误报文生成原语。
+//! 路径 MTU 判定与 PMTUD 错误报文生成原语；子模块 `probe` 提供 MSS clamp 与
+//! 按 ICMP 过大通告下调路径 MTU 的状态机（纯逻辑，不探测真实网卡）。
 //!
 //! 输入只有接口 MTU、报文总长与方向，输出「可发 / 过大」决策；判定不依赖系统调用、
 //! 不分片、不重组，也不发送任何报文——生成的错误报文以字节数组返回，是否写出由
@@ -21,6 +22,13 @@ use std::net::IpAddr;
 
 use crate::checksum;
 use crate::packet;
+
+mod probe;
+
+pub use probe::{
+    MssClamp, MtuError, PmtudState, IPV4_HEADER_BYTES, IPV6_HEADER_BYTES, MAX_MSS_V4, MAX_MSS_V6,
+    MAX_MTU, MIN_MSS_V4, MIN_MSS_V6, MIN_MTU, RFC1191_PLATEAUS, TCP_HEADER_BYTES,
+};
 
 /// IPv4 协议字段偏移。
 const IPV4_PROTOCOL: usize = 9;
