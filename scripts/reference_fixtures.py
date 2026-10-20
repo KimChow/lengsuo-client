@@ -48,6 +48,7 @@ def download_verified(url, dest, expected_sha256):
     _reject_symlink(dest, "下载目标")
     if dest.exists() and sha256(dest) == expected_sha256:
         return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(dest.name + ".part")
     _reject_symlink(partial, "临时文件")
     with urllib.request.urlopen(url, timeout=180) as response:
@@ -107,9 +108,8 @@ def prepare_anytls(manifest, work):
             return client, server
 
     home = Path.home() / "ref" / "bin" / "anytls"
-    suffix = ".exe" if platform_key() == "windows" else ""
-    home_client = home / ("anytls-client" + suffix)
-    home_server = home / ("anytls-server" + suffix)
+    home_client = home / "anytls-client"
+    home_server = home / "anytls-server"
     if home_client.is_file() and home_server.is_file():
         return home_client, home_server
 
@@ -121,8 +121,13 @@ def prepare_anytls(manifest, work):
         work / selected["asset"], selected["sha256"])
     out_dir = work / "anytls"
     out_dir.mkdir(parents=True, exist_ok=True)
-    client = out_dir / selected["client_member"]
-    server = out_dir / selected["server_member"]
+    # 落盘名固定为**无扩展名**的 anytls-client / anytls-server：
+    # 仓内测试用 `dir.join("anytls-server")` 定位夹具（不带 .exe），
+    # Windows 上若落盘为 `anytls-server.exe` 则 `fs::read` 找不到文件。
+    # Windows 的 CreateProcess 对无扩展名的 PE 仍可执行（已实测），
+    # 因此统一用无扩展名落盘，两个平台的定位语义一致。
+    client = out_dir / "anytls-client"
+    server = out_dir / "anytls-server"
     with zipfile.ZipFile(archive) as source:
         for member, target in ((selected["client_member"], client),
                                (selected["server_member"], server)):

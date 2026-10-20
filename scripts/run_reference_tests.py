@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reference_fixtures as fixtures
 
+platform_key = fixtures.platform_key
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # 清单文件（reference_manifest.json）由基建卡独占维护，本卡新增条目就地登记，
@@ -24,9 +26,13 @@ EXTRA_TESTS = [
      "targets": ["xray_tcp", "xray_vmess_server", "xray_udp", "xray_mux",
                  "xray_multitier", "xray_multitier_server"],
      "expected_passed": 24},
+    # AnyTLS：Windows 上 `interop_udp` 的 2 个用例**不编译**——官方 anytls-go
+    # v0.0.13 服务端在该平台自身崩溃（上游缺陷，见 docs/anytls-status.md
+    # 偏离清单「平台差异」条）。按平台如实登记通过数，**不冒充通过**。
     {"crate": "lengsuo-anytls",
      "targets": ["interop_client", "interop_server", "interop_udp", "interop"],
-     "expected_passed": 7, "requires_commands": ["openssl"]},
+     "expected_passed": 7, "requires_commands": ["openssl"],
+     "expected_passed_by_platform": {"windows": 5}},
     # hysteria 混淆（ Salamander）互通：需要**参考生成的确定性向量**做逐字节对照。
     # 生成器已收进仓内 tools/reference/gen_salamander_vector.py（纯 Python，
     # 只依赖 hashlib），因此门禁可自洽生成，不依赖仓外夹具。
@@ -115,8 +121,10 @@ def execute(manifest, work, archive, report):
         for target in case["targets"]:
             command.extend(["--test", target])
         command.extend(["--", "--ignored", "--nocapture"])
+        expected = case.get("expected_passed_by_platform", {}).get(
+            platform_key(), case["expected_passed"])
         entry = {"crate": case["crate"], "command": command,
-                 "expected_passed": case["expected_passed"]}
+                 "expected_passed": expected}
         report["results"].append(entry)
         log = work / (case["crate"] + ".log")
         case_env = env.copy()
@@ -141,7 +149,7 @@ def execute(manifest, work, archive, report):
             r"test result: ok\. (\d+) passed;", result.stdout))
         entry.update(exit_code=result.returncode, passed=passed, log=log.name)
         print(case["crate"], "exit", result.returncode, "passed", passed, flush=True)
-        if result.returncode != 0 or passed != case["expected_passed"]:
+        if result.returncode != 0 or passed != expected:
             raise RuntimeError("参考矩阵失败或实际通过数量与清单不一致：" + case["crate"])
 
 

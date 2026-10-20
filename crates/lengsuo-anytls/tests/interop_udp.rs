@@ -307,6 +307,18 @@ async fn run_case(label: &str, is_connect: bool, version: UdpVersion) {
 }
 
 /// 主用例：connect 模式（报文不带地址）——参考 `DialEarlyConn(conn, true, dest)`。
+/// **Windows 上不编译本用例**：官方 anytls-go v0.0.13 服务端在该平台**自身崩溃**
+/// （上游缺陷，非本仓偏差）——`cmd/server/outbound_tcp.go:39` 用
+/// `net.ListenPacket("udp", "")`（空本地地址）在 Windows 上非法，随后 sing
+/// `common/uot` 路径解引用空指针（`panic: ... nil pointer dereference` +
+/// `[signal 0xc0000005]`）。Linux 上同一点由 Go 的 `recover()` 兜住；Windows 的
+/// 内存访问违例**不可恢复**，官方服务端进程直接崩溃，回程读帧随即报
+/// `os error 10054`。本仓客户端侧首组载荷的逐字节回显**已成功**，崩溃发生在
+/// 官方服务端侧 ⇒ 责任在参考实现。
+/// 用 `cfg` 排除而不是「跑完再跳过」：这样 Windows 上的**实际通过数更少**，
+/// 门禁的 `expected_passed` 按平台如实登记，**不冒充通过**。
+/// 详见 `docs/anytls-status.md` 偏离清单「平台差异」条。
+#[cfg(not(windows))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "需要 LENGSUO_ANYTLS_SERVER 与 openssl（UDP-over-TCP v2 真实互通）"]
 async fn udp_over_tcp_v2_connect_mode_echoes_every_datagram() {
@@ -314,6 +326,10 @@ async fn udp_over_tcp_v2_connect_mode_echoes_every_datagram() {
 }
 
 /// 非 connect 模式（每个报文自带地址）——参考 `DialEarlyConn(conn, false, dest)`。
+///
+/// Windows 上不编译，原因同 `udp_over_tcp_v2_connect_mode_echoes_every_datagram`
+/// （官方 anytls-go v0.0.13 服务端在该平台崩溃的上游缺陷）。
+#[cfg(not(windows))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "需要 LENGSUO_ANYTLS_SERVER 与 openssl（UDP-over-TCP v2 真实互通）"]
 async fn udp_over_tcp_v2_non_connect_mode_echoes_every_datagram() {
