@@ -47,9 +47,10 @@
         "xray_udp",
         "xray_errors",
         "xray_tcp_matrix",
-        "xray_eih"
+        "xray_eih",
+        "xray_udp_eih"
       ],
-      "expected_passed": 16
+      "expected_passed": 17
     },
     {
       "crate": "lengsuo-shadowsocks",
