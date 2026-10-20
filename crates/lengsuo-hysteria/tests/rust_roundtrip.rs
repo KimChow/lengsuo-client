@@ -121,8 +121,10 @@ async fn start_server(tag: &str) -> Server {
         key_der,
         auth: AUTH.to_string(),
         brutal_down: 0,
+        brutal_up: 0,
         udp_enabled: true,
         udp_idle_timeout_secs: 60,
+        congestion: String::new(),
     };
     let server = Arc::new(HysteriaServer::bind(config).expect("服务端绑定失败"));
     let addr = server.local_addr().expect("读取监听地址");
@@ -143,6 +145,9 @@ fn client_config(server: &Server, auth: &str) -> ClientConfig {
         auth: auth.to_string(),
         roots_der: vec![server.cert_der.clone()],
         brutal_down: 0,
+        brutal_up: 0,
+        congestion: String::new(),
+        peer_cc_rx: None,
     }
 }
 

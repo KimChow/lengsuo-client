@@ -170,8 +170,10 @@ async fn start_world(tag: &str, server_auth: &str, client_auth: &str) -> World {
         key_der: key_der(&key),
         auth: server_auth.to_string(),
         brutal_down: 0,
+        brutal_up: 0,
         udp_enabled: true,
         udp_idle_timeout_secs: 60,
+        congestion: String::new(),
     };
     let server = Arc::new(HysteriaServer::bind(config).expect("服务端绑定失败"));
     let server_port = server.local_addr().expect("读取监听地址").port();

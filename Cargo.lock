@@ -708,6 +708,7 @@ version = "0.1.0"
 dependencies = [
  "h3",
  "h3-quinn",
+ "lengsuo-congestion",
  "quinn",
  "ss-core",
  "thiserror 2.0.21",

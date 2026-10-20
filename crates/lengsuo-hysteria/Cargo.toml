@@ -14,3 +14,5 @@ ss-core = { path = "../ss-core" }
 quinn = { workspace = true }
 h3 = { workspace = true }
 h3-quinn = { workspace = true }
+# Brutal 拥塞器内核（独立 crate；quinn `ControllerFactory` 注入，无依赖环）
+lengsuo-congestion = { path = "../lengsuo-congestion" }

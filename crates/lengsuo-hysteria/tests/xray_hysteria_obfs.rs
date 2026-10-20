@@ -189,6 +189,9 @@ async fn connect(
         auth: auth.to_string(),
         roots_der: vec![world.cert_der.clone()],
         brutal_down: 0,
+        brutal_up: 0,
+        congestion: String::new(),
+        peer_cc_rx: None,
     })
     .await
 }

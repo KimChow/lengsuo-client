@@ -7,7 +7,8 @@
 //! 每连接一个 HTTP/3 服务例程（见 `h3_auth::serve_connection`）。
 //!
 //! 与参考的实现性差异（详见 docs 偏离清单）：
-//! - 拥塞控制用 quinn 默认（BBR/Brutal 不移植）；
+//! - 拥塞控制：`congestion` 非空时经 `lengsuo-congestion` 注入 Brutal，
+//!   否则沿用 quinn 默认 CUBIC（BBR 不移植）；
 //! - UDP 发送经 `h3_auth::SeedFiller` 桥（依赖冻结拿不到 `bytes` crate，
 //!   `send_datagram` 只接受 `Bytes`；复用接收路径返回的独占缓冲，见
 //!   `h3_auth` 模块文档）；
@@ -50,14 +51,22 @@ pub struct ServerConfig {
     pub key_der: Vec<u8>,
     /// 认证口令（对齐 `Config.Auth`）。
     pub auth: String,
-    /// 服务端 Brutal 下行带宽（bps），回给客户端的 `Hysteria-CC-RX`
+    /// 服务端 Brutal 下行带宽（字节/秒），回给客户端的 `Hysteria-CC-RX`
     /// 即 `quicParams.BrutalDown`。
     pub brutal_down: u64,
+    /// 服务端 Brutal 上行带宽（字节/秒），即 `quicParams.BrutalUp`：服务端
+    /// **发送方向**的速率，与客户端 `Hysteria-CC-RX` 取 `min`
+    /// （hub.go 194-200）。`0` = 未配置 ⇒ 参考回落分支。
+    pub brutal_up: u64,
     /// 是否开放 UDP datagram（对齐 `hyCtx.RequireDatagramFromContext` 的
     /// 服务端侧配置：由入站设置决定，不由客户端请求头决定）。
     pub udp_enabled: bool,
     /// UDP 会话空闲超时（秒），对齐 `Config.UdpIdleTimeout`。
     pub udp_idle_timeout_secs: u64,
+    /// 拥塞控制模式字符串（配置里的 `"congestion"`）。空串 = quinn 默认
+    /// CUBIC；`"brutal"` = 按 `brutal_down` 静态装配发送方向 Brutal；未识别值
+    /// **fail-closed**（`bind` 报错），不静默回落 CUBIC。
+    pub congestion: String,
 }
 
 impl ServerConfig {
@@ -75,8 +84,10 @@ impl ServerConfig {
             key_der,
             auth,
             brutal_down: 0,
+            brutal_up: 0,
             udp_enabled: true,
             udp_idle_timeout_secs: DEFAULT_UDP_IDLE_TIMEOUT_SECS,
+            congestion: String::new(),
         }
     }
 }
@@ -90,6 +101,8 @@ pub enum ServerError {
     Tls(String),
     #[error("证书或私钥缺失/非法")]
     MissingCredentials,
+    #[error("拥塞控制配置非法: {0}")]
+    Congestion(#[from] crate::congestion::CongestionError),
 }
 
 /// 已绑定的 Hysteria2 服务端（等价 `hub.go` `Listener`）。
@@ -99,11 +112,19 @@ pub struct HysteriaServer {
     brutal_down: u64,
     udp_enabled: bool,
     udp_idle_timeout_secs: u64,
+    /// 拥塞模式 + 本端发送速率（`bind` 期已 fail-closed 校验模式串）。
+    congestion: crate::congestion::CongestionConfig,
 }
 
 impl HysteriaServer {
     /// 绑定端点（不开始 accept）：`EndpointConfig` + 自签 TLS + ALPN=h3。
     pub fn bind(config: ServerConfig) -> Result<Self, ServerError> {
+        // 配置校验先于任何 IO：未识别/非法值 fail-closed，且不受运行时约束。
+        // 端点级 `TransportConfig` 保持 quinn 默认 CUBIC：参考在认证后按
+        // `min(BrutalUp, clientDown)` 逐连接装配（hub.go 187-205），quinn 0.11
+        // 没有连接期替换入口 ⇒ 由本端 TCP 端口做用户态节流（见 `wire`）。
+        crate::congestion::parse_mode(&config.congestion)?;
+        let server_config = build_server_config(&config)?;
         if config.cert_chain_der.is_empty() || config.key_der.is_empty() {
             return Err(ServerError::MissingCredentials);
         }
@@ -115,13 +136,17 @@ impl HysteriaServer {
             quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime)
                 .map_err(|e| ServerError::Bind(e.to_string()))?;
 
-        endpoint.set_server_config(Some(build_server_config(&config)?));
+        endpoint.set_server_config(Some(server_config));
+        // `tx` = 本端发送速率 = 参考 `BrutalUp`（hub.go:187-205 的协商对象）。
+        let congestion =
+            crate::congestion::wire::local_config(&config.congestion, config.brutal_up)?;
         Ok(Self {
             endpoint,
             auth: Arc::new(config.auth),
             brutal_down: config.brutal_down,
             udp_enabled: config.udp_enabled,
             udp_idle_timeout_secs: config.udp_idle_timeout_secs,
+            congestion,
         })
     }
 
@@ -158,6 +183,7 @@ impl HysteriaServer {
                     brutal_down: server.brutal_down,
                     udp_enabled: server.udp_enabled,
                     udp_idle_timeout_secs: server.udp_idle_timeout_secs,
+                    congestion: server.congestion.clone(),
                 };
                 let _ = crate::h3_server::serve_connection(conn.clone(), ctx).await;
                 // 对齐 hub.go：ServeQUICConn 返回后 CloseWithError(closeErrCodeOK)
@@ -180,6 +206,9 @@ pub struct ServerSessionCtx {
     pub udp_enabled: bool,
     /// UDP 会话空闲超时（秒）。
     pub udp_idle_timeout_secs: u64,
+    /// 拥塞参数载体（`tx` = 服务端发送速率 = 参考 `BrutalUp`），供逐连接
+    /// 协商 `min(BrutalUp, clientDown)`（hub.go 194-200）。
+    pub congestion: crate::congestion::CongestionConfig,
 }
 
 /// 构造 quinn 服务端配置：ALPN=h3、TLS1.3、无客户端证书验证。
@@ -218,6 +247,9 @@ fn build_server_config(config: &ServerConfig) -> Result<quinn::ServerConfig, Ser
     transport.stream_receive_window(VarInt::from_u32(8 * 1024 * 1024));
     transport.receive_window(VarInt::from_u32(8 * 1024 * 1024 * 5 / 2));
     transport.max_concurrent_bidi_streams(VarInt::from_u32(DEFAULT_MAX_INCOMING_STREAMS));
+    // 服务端发送方向：参考在认证后逐连接 `UseBrutal(min(BrutalUp, clientDown))`
+    // （hub.go:187-205）；quinn 端点级 `TransportConfig` 先于该头到达、也没有
+    // 连接期替换入口 ⇒ 由 TCP 端口按同一协商结果节流（`congestion::wire`）。
     quic.transport_config(Arc::new(transport));
     Ok(quic)
 }
