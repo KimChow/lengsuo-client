@@ -62,8 +62,15 @@ SEMANTIC_HINTS = (
 
 # 结构性禁词：即使不在词表里，这些形态也高度可疑
 # （对标产品常见形态 + 仓外绝对路径）
+#
+# ⚠️ 中性代号（NEUTRAL_ALIASES）会让整行豁免，所以**这里绝不能放任何
+# 中性代号本身**——放了就是死代码，规则永远不触发，而它本该拦下的
+# 仓外路径会原样进仓。要新增模式，先确认它不在别名表里。
 STRUCTURAL_PATTERNS = (
-    re.compile(r"本地对照资料（不入库）"),
+    # 仓外 Linux 绝对路径（构建机上的对照资料目录）。
+    # 用户段泛化、只锁 ref/reference 目录段：既不写死整条路径
+    # （否则脚本自身成了路径泄漏源），也不误伤 /home/<用户>/本项目/...。
+    re.compile(r"/home/[A-Za-z0-9_.-]+/(?:ref|reference)[A-Za-z0-9_.-]*/?"),
     re.compile(r"[A-Za-z]:/OneDrive/project/"),
     re.compile(r"\b(?:ref|reference)/[A-Za-z0-9_.-]*(?:docs?|devguide|samples?)\b"),
 )
@@ -96,6 +103,11 @@ SKIP_DIRS = {
     ".git", "target", "node_modules", "dist", "build", "out", ".venv",
     "__pycache__", ".claude", ".next", ".cache",
 }
+
+# 泄漏检查器自己的测试：它**必须**构造泄漏样本才能验证规则，
+# 所以其中的路径/词都是故意写的，不算泄漏。
+# 排除规则只对这一份文件生效，不扩大到整个 tests/ 目录。
+SELF_TEST_FILES = frozenset({"tests/test_no_source_leak.py"})
 
 # 本地工作区状态目录：内容不入库，其中的来源标识**不算泄漏**
 # （但仍需保证它被 .gitignore 覆盖，故单独检查 ignore 状态）
@@ -295,6 +307,8 @@ def check_content(repo: Path, terms: list[str], local_dirs: tuple[str, ...]) -> 
     problems = []
     for abs_path, rel in iter_targets(repo, local_dirs):
         if not is_probably_text(abs_path):
+            continue
+        if rel.replace("\\", "/") in SELF_TEST_FILES:
             continue
         try:
             text = abs_path.read_text(encoding="utf-8", errors="replace")
