@@ -106,19 +106,44 @@ pub const AUTH_RESPONSE_IV_SALT: &[u8] = b"chkv9mg3p6omkmu";
 /// MD5 链式派生输出的认证密钥长度（旧客户端使用 8 字节，而非 Go 的 16 字节）。
 pub const AUTH_RESPONSE_AUTH_KEY_LEN: usize = 8;
 
-// ---- 选项字节（protocol.go 的 Option*）----
+// ---- 选项字节（`common/protocol/headers.go` 的 `RequestOption*` 位掩码）----
+//
+// 现行参考（固定 commit d2758a02）用 0x01/0x04/0x08/0x10 四位；0x02 是历史
+// 遗留位（参考注释 "0x02 legacy setting"），0x04 不是旧版的 http-upgrade。
 
-pub const OPTION_HTTP_UPGRADE: u8 = 0x04;
-pub const OPTION_GLOBAL_ADDITIONAL_DATA: u8 = 0x01;
-pub const OPTION_ONE_TIME_AUTHENTICATION: u8 = 0x02;
-
-/// 本实现写出的选项字节。
+/// `RequestOptionChunkStream`：载荷按 chunk 分帧（参考 0x01）。
+pub const OPTION_CHUNK_STREAM: u8 = 0x01;
+/// `RequestOptionChunkMasking`：长度段用 SHA3-Shake128 掩码（参考 0x04）。
+pub const OPTION_CHUNK_MASKING: u8 = 0x04;
+/// `RequestOptionGlobalPadding`：每帧追加明文随机 padding（参考 0x08）。
 ///
-/// TODO(互通): 参考在 `auth.go`/`client.go` 当前提交里已**不再发送**
-/// GlobalAdditionAuthentication（0x01）与 OneTimeAuthentication（0x02）选项字节，
-/// 仅在 `additionalDataReader` 侧保留兼容解析。本层暂按任务单保留 0x03 以便自建
-/// 解码器往返校验；正式与 Xray 互通前需重新核定（见 docs/vmess-status.md）。
-pub const REQUEST_OPTIONS: u8 = OPTION_ONE_TIME_AUTHENTICATION | OPTION_GLOBAL_ADDITIONAL_DATA;
+/// 参考要求同时开启 `ChunkMasking`（padding 长度取自同一条 Shake 流），
+/// 否则参考直接报 `invalid option: RequestOptionGlobalPadding`。
+pub const OPTION_GLOBAL_PADDING: u8 = 0x08;
+/// `RequestOptionAuthenticatedLength`：长度段本身走 AEAD（参考 0x10）。
+///
+/// 长度段密钥 = `KDF16(requestBodyKey, "auth_len")` 再按安全档派生
+/// （AES 直接用 16B；ChaCha 走 MD5 链扩展成 32B），nonce 基值取**请求方向**的
+/// requestBodyIV，计数器与载荷段各自独立。
+pub const OPTION_AUTHENTICATED_LENGTH: u8 = 0x10;
+
+/// 参考出口对 AES-128-GCM / ChaCha20-Poly1305 / none 的默认选项组合
+/// （`proxy/vmess/outbound/outbound.go`：ChunkStream | ChunkMasking |
+/// GlobalPadding）。
+pub const REQUEST_OPTIONS: u8 = OPTION_CHUNK_STREAM | OPTION_CHUNK_MASKING | OPTION_GLOBAL_PADDING;
+
+// ---- 旧版选项位（仅历史参考，仓库内无使用点）----
+//
+// 旧版 VMess 曾用 0x01/0x02/0x04 表示 additional-data / one-time-auth /
+// http-upgrade。现行参考已不再发送这些位（见 `proxy/vmess/encoding/client.go`
+// 的 `EncodeRequestHeader`），保留常量仅供历史对照，不得用于新代码。
+
+/// 旧版：全局附加数据。
+pub const OPTION_GLOBAL_ADDITIONAL_DATA: u8 = 0x01;
+/// 旧版：一次性认证。
+pub const OPTION_ONE_TIME_AUTHENTICATION: u8 = 0x02;
+/// 旧版：HTTP 升级。
+pub const OPTION_HTTP_UPGRADE: u8 = 0x04;
 
 /// 短 ID 长度（`id.go` 的 GenerateID 取 MD5(UUID)[:8]）。
 pub const SHORT_ID_LEN: usize = 8;

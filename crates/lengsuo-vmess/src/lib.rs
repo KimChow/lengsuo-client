@@ -32,7 +32,9 @@
 
 mod address;
 pub mod aead;
+pub mod aead_chacha;
 pub mod authid;
+pub mod bodyframe;
 pub mod chunkframe;
 pub mod consts;
 pub mod kdf;
@@ -53,13 +55,19 @@ pub use crate::consts::{
 };
 pub use aead::{
     open_response_header_length, open_response_header_payload, open_vmess_aead_header,
-    parse_auth_id_from_header, response_header_length_key_iv, response_header_payload_key_iv,
-    seal_header_with, seal_vmess_aead_header, HEADER_NONCE_LEN, RESPONSE_AUTH_LEN,
+    open_vmess_aead_header_with, parse_auth_id_from_header, response_header_length_key_iv,
+    response_header_payload_key_iv, seal_header_with, seal_vmess_aead_header,
+    seal_vmess_aead_header_with, HeaderSuite, HEADER_NONCE_LEN, RESPONSE_AUTH_LEN,
     RESPONSE_AUTH_SALT,
 };
+pub use aead_chacha::{expand_key as expand_chacha_key, expand_key16 as expand_chacha_key16};
 pub use authid::{
     auth_id_aes_key, create_auth_id, create_auth_id_with, decode_auth_id, decode_auth_id_bytes,
     time_in_window, AuthId, TIME_WINDOW_SECS,
+};
+pub use bodyframe::{
+    size_mode_for_options, BodyCipher, BodyFrame, BodySuite, SizeMode, KDF_PATH_AUTH_LEN,
+    MAX_FRAME_PAYLOAD,
 };
 pub use chunkframe::{
     generate_chacha20_poly1305_key, md5_digest, new_data_aead, open_data_chunk, plain_size_encode,

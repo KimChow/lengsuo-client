@@ -7,6 +7,7 @@
 //! 会触发 lock 变更，违反本卡「不改 Cargo.lock」的约束。
 
 pub mod codec;
+pub mod tiercodec;
 
 use std::fs;
 use std::io::Read as _;
@@ -58,6 +59,29 @@ fn config_json(port: u16, uuid: &str, dir: &Path) -> String {
 /// 同上，可选 `policy.levels.0.connIdle`（秒）。VMess 夹具用 `None` 保持
 /// xray_tcp.rs 既有行为不变；UDP 截断用例用它把活动链收回窗口压到判据内。
 fn config_json_with_idle(port: u16, uuid: &str, dir: &Path, idle_secs: Option<u64>) -> String {
+    config_json_full(port, uuid, dir, idle_secs, None, false)
+}
+
+/// 生成 VMess 入站配置文件内容。
+///
+/// `security` 为 `Some("chacha20-poly1305")` 之类的账号安全档字符串时写进
+/// `clients[0].security`（参考 `infra/conf/vmess.go` 的 `VMessAccount.Security`
+/// 取值：`aes-128-gcm` / `chacha20-poly1305` / `auto` / `none` / `zero`）。
+/// `None` 时**不写该字段**，走参考默认（`auto` ⇒ 有 AES-GCM 硬件支持时解析成
+/// AES-128-GCM）。
+///
+/// `auth_len` 为真时写 `experiments: "AuthenticatedLength"`（参考
+/// `proxy/vmess/account.go` 的 `AuthenticatedLengthExperiment`），让参考出口
+/// 打开 `RequestOptionAuthenticatedLength`。
+#[allow(dead_code)] // 夹具被多个测试编译单元共享，各单元只用自己的子集。
+fn config_json_full(
+    port: u16,
+    uuid: &str,
+    dir: &Path,
+    idle_secs: Option<u64>,
+    security: Option<&str>,
+    auth_len: bool,
+) -> String {
     let access = json_str(&dir.join("access.log").to_string_lossy());
     let error = json_str(&dir.join("error.log").to_string_lossy());
     let uuid = json_str(uuid);
@@ -65,11 +89,21 @@ fn config_json_with_idle(port: u16, uuid: &str, dir: &Path, idle_secs: Option<u6
         Some(secs) => format!(",\"policy\":{{\"levels\":{{\"0\":{{\"connIdle\":{secs}}}}}}}"),
         None => String::new(),
     };
+    let security_field = match security {
+        Some(name) => format!(",\"security\":{}", json_str(name)),
+        None => String::new(),
+    };
+    let experiments = if auth_len {
+        ",\"experiments\":\"AuthenticatedLength\""
+    } else {
+        ""
+    };
     format!(
         concat!(
             "{{\"log\":{{\"loglevel\":\"warning\",\"access\":{access},\"error\":{error}}},",
             "\"inbounds\":[{{\"tag\":\"vmess-in\",\"listen\":\"127.0.0.1\",\"port\":{port},",
-            "\"protocol\":\"vmess\",\"settings\":{{\"clients\":[{{\"id\":{uuid},\"alterId\":0}}]}},",
+            "\"protocol\":\"vmess\",\"settings\":{{\"clients\":[{{\"id\":{uuid},\"alterId\":0",
+            "{security_field}{experiments}}}]}},",
             "\"streamSettings\":{{\"network\":\"tcp\"}}}}],",
             "\"outbounds\":[{{\"tag\":\"direct\",\"protocol\":\"freedom\",\"settings\":{{}}}}],",
             "\"routing\":{{\"rules\":[{{\"type\":\"field\",\"inboundTag\":[\"vmess-in\"],\"outboundTag\":\"direct\"}}]}}",
@@ -79,6 +113,8 @@ fn config_json_with_idle(port: u16, uuid: &str, dir: &Path, idle_secs: Option<u6
         error = error,
         port = port,
         uuid = uuid,
+        security_field = security_field,
+        experiments = experiments,
         policy = policy,
     )
 }
@@ -113,24 +149,58 @@ pub struct XrayFixture {
     uuid: String,
     /// 仅用于复现配置诊断（`None` = 参考默认 300s）。
     idle_secs: Option<u64>,
+    /// 入站账号的安全档（`None` = 不写该字段，走参考默认）。
+    security: Option<String>,
+    /// 是否打开了参考的 `AuthenticatedLength` 实验开关。
+    auth_len: bool,
     child: Option<Child>,
 }
 
 impl XrayFixture {
     /// 启动 xray：写配置、spawn `xray run -c <cfg>`，轮询端口就绪（有超时）。
     /// 任何一步失败都会 kill 子进程并返回含诊断的 `Err`。
+    #[allow(dead_code)] // 夹具被多个测试编译单元共享，默认入口只在旧单元用。
     pub fn start(bin: &Path, uuid: &str) -> Result<Self, String> {
-        Self::start_inner(bin, uuid, None)
+        Self::start_inner(bin, uuid, None, None, false)
     }
 
     /// 同 [`Self::start`]，但显式设置 `policy.levels.0.connIdle`（秒）。
     /// 仅供 UDP 截断用例把 inactivity 回收压进判据窗口；缺省仍为参考默认 300s。
     #[allow(dead_code)] // 仅 xray_udp 用；xray_tcp 编译单元不引用。
     pub fn start_with_idle_timeout(bin: &Path, uuid: &str, idle_secs: u64) -> Result<Self, String> {
-        Self::start_inner(bin, uuid, Some(idle_secs))
+        Self::start_inner(bin, uuid, Some(idle_secs), None, false)
     }
 
-    fn start_inner(bin: &Path, uuid: &str, idle_secs: Option<u64>) -> Result<Self, String> {
+    /// 同 [`Self::start`]，但入站账号带**安全档**（参考 `infra/conf/vmess.go` 的
+    /// `clients[0].security`：`aes-128-gcm` / `chacha20-poly1305` / `none`）。
+    ///
+    /// 注意参考的**入站**并不按账号档位分派数据段（`proxy/vmess/encoding/server.go`
+    /// 的 `parseSecurityType` 只看请求头里的 security 字节），账号档位只影响
+    /// 参考**出口**的行为。本夹具用于让两种形态都出现在配置里，便于观察。
+    #[allow(dead_code)] // 仅 xray_multitier 用；其他编译单元不引用。
+    pub fn start_with_security(bin: &Path, uuid: &str, security: &str) -> Result<Self, String> {
+        Self::start_inner(bin, uuid, None, Some(security), false)
+    }
+
+    /// 同 [`Self::start_with_security`]，并打开参考的 `AuthenticatedLength`
+    /// 实验开关（`experiments: "AuthenticatedLength"`），让参考出口置上
+    /// `RequestOptionAuthenticatedLength`（长度段走 AEAD 认证）。
+    #[allow(dead_code)] // 仅 xray_multitier 用；其他编译单元不引用。
+    pub fn start_with_security_and_auth_len(
+        bin: &Path,
+        uuid: &str,
+        security: &str,
+    ) -> Result<Self, String> {
+        Self::start_inner(bin, uuid, None, Some(security), true)
+    }
+
+    fn start_inner(
+        bin: &Path,
+        uuid: &str,
+        idle_secs: Option<u64>,
+        security: Option<&str>,
+        auth_len: bool,
+    ) -> Result<Self, String> {
         let port = reserve_free_port().ok_or("无法在 127.0.0.1 探测到空闲端口")?;
 
         let suffix = NEXT_SUFFIX.fetch_add(1, Ordering::Relaxed);
@@ -147,7 +217,7 @@ impl XrayFixture {
 
         let cfg_path = dir.join("config.json");
         let process_log = dir.join("process.log");
-        let generated = config_json_with_idle(port, uuid, &dir, idle_secs);
+        let generated = config_json_full(port, uuid, &dir, idle_secs, security, auth_len);
         fs::write(&cfg_path, &generated).map_err(|e| format!("写配置失败: {e}"))?;
 
         let log_file = fs::OpenOptions::new()
@@ -176,6 +246,8 @@ impl XrayFixture {
             cfg_path,
             uuid: uuid.to_string(),
             idle_secs,
+            security: security.map(str::to_string),
+            auth_len,
             child: Some(child),
         };
 
@@ -212,14 +284,21 @@ impl XrayFixture {
 
     /// 入站监听地址。
     #[must_use]
+    #[allow(dead_code)]
     pub fn address(&self) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], self.port))
     }
 
     /// 失败诊断：打码后的配置 + 各日志尾部。
     pub fn report(&self) -> String {
-        let masked_cfg =
-            config_json_with_idle(self.port, &mask_uuid(&self.uuid), &self.dir, self.idle_secs);
+        let masked_cfg = config_json_full(
+            self.port,
+            &mask_uuid(&self.uuid),
+            &self.dir,
+            self.idle_secs,
+            self.security.as_deref(),
+            self.auth_len,
+        );
         let error_tail = read_log_tail(&self.dir.join("error.log"), 40);
         let process_tail = read_log_tail(&self.dir.join("process.log"), 40);
         let access_tail = read_log_tail(&self.dir.join("access.log"), 20);

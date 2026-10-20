@@ -15,6 +15,14 @@
 //! 分别用 `KDF16(responseBodyKey, "AEAD Resp Header Len Key")` 等；无 AAD、
 //! nonce 为 KDF 截 12 字节。本模块同时提供主线响应头两段解密所需的全部派生。
 //!
+//! **头部 AEAD 不按安全档分派。** 参考 `proxy/vmess/aead/encrypt.go` 的
+//! `SealVMessAEADHeader` / `OpenVMessAEADHeader` 两侧都写死 `crypto.NewAesGcm`：
+//! 安全档（`SecurityType`）只作用于**数据段**（body），由
+//! [`crate::bodyframe`] 负责。因此本模块的两段头部 AEAD 恒为 AES-128-GCM，
+//! 逐字节与参考一致。`seal_vmess_aead_header_with` /
+//! `open_vmess_aead_header_with` 接受显式档位参数，但 ChaCha 档会
+//! **fail-closed**（[`Error::Unsupported`]），不会静默按 AES 处理。
+//!
 //! fail-closed：任何解密失败都是 [`Error::AuthFailed`]，调用方必须弃用连接。
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
@@ -46,6 +54,25 @@ pub const RESPONSE_AUTH_SALT: &[u8] = AUTH_RESPONSE_ID_SALT;
 /// （版本+IV+key+响应种子+选项+安全+命令+地址+padding+FNV1a 校验，见
 /// [`crate::request`]）。返回完整线上字节。
 pub fn seal_vmess_aead_header(cmd_key: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
+    seal_vmess_aead_header_with(cmd_key, payload, HeaderSuite::Aes128Gcm)
+}
+
+/// **显式安全档**的请求头封装入口。
+///
+/// ⚠️ **安全档不改变头部 AEAD 的算法**——参考
+/// `proxy/vmess/aead/encrypt.go` 的 `SealVMessAEADHeader` 与
+/// `OpenVMessAEADHeader` 两侧都写死 `crypto.NewAesGcm`，头部两段恒为
+/// AES-128-GCM；安全档只作用于**数据段**（见 [`crate::bodyframe`]）。
+/// 本函数因此只接受 `HeaderSuite::Aes128Gcm`；`ChaCha20Poly1305` 显式拒绝
+/// （fail-closed），**不会**把头部悄悄降级成 ChaCha 或明文。
+///
+/// `None` 档同样不影响头部（参考的 `SecurityType_NONE` 只改数据段）。
+pub fn seal_vmess_aead_header_with(
+    cmd_key: &[u8],
+    payload: &[u8],
+    suite: HeaderSuite,
+) -> Result<Vec<u8>> {
+    suite.require_supported()?;
     if payload.len() > u16::MAX as usize {
         return Err(Error::BadLength {
             declared: payload.len(),
@@ -68,6 +95,32 @@ pub fn seal_vmess_aead_header(cmd_key: &[u8], payload: &[u8]) -> Result<Vec<u8>>
         &connection_nonce,
         payload,
     ))
+}
+
+/// 头部 AEAD 的算法档位。
+///
+/// 参考把头部 AEAD 写死为 AES-128-GCM（`proxy/vmess/aead/encrypt.go`），
+/// 因此本枚举只有「支持」与「显式拒绝 ChaCha」两态：列出 ChaCha 是为了让
+/// 调用方**显式**表达「我以为头部也走 ChaCha」，从而得到一条清晰的
+/// fail-closed 错误，而不是一次静默的算法错配。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeaderSuite {
+    /// AES-128-GCM（参考唯一支持的档位）。
+    Aes128Gcm,
+    /// ChaCha20-Poly1305：参考**不支持**用于头部。
+    ChaCha20Poly1305,
+}
+
+impl HeaderSuite {
+    /// 校验该档位是否被参考支持；不支持即 fail-closed。
+    pub fn require_supported(self) -> Result<()> {
+        match self {
+            Self::Aes128Gcm => Ok(()),
+            Self::ChaCha20Poly1305 => Err(Error::Unsupported {
+                feature: "chacha20-poly1305 for vmess header AEAD (reference uses AES-128-GCM)",
+            }),
+        }
+    }
 }
 
 /// 确定性封装（测试/向量）：AuthID 与连接 nonce 由调用方提供。
@@ -123,6 +176,28 @@ pub fn seal_header_with(
 /// 成功返回明文；任何认证失败 fail-closed。`read_exact` 式截断用
 /// [`Error::Truncated`] 报告（need/got 均为线上字节计数）。
 pub fn open_vmess_aead_header(cmd_key: &[u8], auth_id: &[u8; 16], wire: &[u8]) -> Result<Vec<u8>> {
+    open_vmess_aead_header_with(cmd_key, auth_id, wire, HeaderSuite::Aes128Gcm)
+}
+
+/// **显式安全档**的请求头解封装入口。
+///
+/// 同 [`seal_vmess_aead_header_with`]：参考头部 AEAD 恒为 AES-128-GCM，
+/// `ChaCha20Poly1305` 显式 fail-closed，不会静默按 AES 解。
+pub fn open_vmess_aead_header_with(
+    cmd_key: &[u8],
+    auth_id: &[u8; 16],
+    wire: &[u8],
+    suite: HeaderSuite,
+) -> Result<Vec<u8>> {
+    suite.require_supported()?;
+    open_vmess_aead_header_inner(cmd_key, auth_id, wire)
+}
+
+fn open_vmess_aead_header_inner(
+    cmd_key: &[u8],
+    auth_id: &[u8; 16],
+    wire: &[u8],
+) -> Result<Vec<u8>> {
     const LENGTH_CT: usize = 18;
     if wire.len() < LENGTH_CT + HEADER_NONCE_LEN {
         return Err(Error::Truncated {

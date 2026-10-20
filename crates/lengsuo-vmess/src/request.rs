@@ -68,15 +68,31 @@ impl Command {
 }
 
 /// 安全选项（本层支持的子集）。
+///
+/// 语义来源：参考 `common/protocol/headers.pb.go` 的 `SecurityType`
+/// （UNKNOWN=0、AUTO=2、AES128_GCM=3、CHACHA20_POLY1305=4、NONE=5、ZERO=6）
+/// 与 `infra/conf/vmess.go` 的配置取值（`aes-128-gcm` / `chacha20-poly1305` /
+/// `auto` / `none` / `zero`）。
+///
+/// **作用范围**：安全档只作用于**数据段**（body）的 AEAD 与长度段；请求头
+/// 与响应头两段的 AEAD 在参考里恒为 AES-128-GCM
+/// （`proxy/vmess/aead/encrypt.go` 两侧都写死 `crypto.NewAesGcm`），
+/// 与安全档无关。详见 [`crate::bodyframe`]。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityOption {
-    /// 明文（chunkStream 之下仍可被 chunk 掩码保护）。
+    /// 无 AEAD（载荷明文 + chunk 掩码；参考 `SecurityType_NONE`）。
     None,
-    /// AES-128-GCM。
+    /// AES-128-GCM（数据段密钥 = 16B bodyKey）。
     Aes128Gcm,
-    /// ChaCha20-Poly1305（密钥由 MD5 扩展）。
+    /// ChaCha20-Poly1305（数据段密钥 = `MD5(b) || MD5(MD5(b))` 扩展出的 32B）。
     ChaCha20Poly1305,
-    /// autocipher 哨兵：本层不解析，调用方必须先解析成具体套件。
+    /// autocipher 哨兵（`SecurityType_AUTO`）：本层**不解析**，调用方必须先
+    /// 解析成具体套件；未解析即使用一律 fail-closed。
+    ///
+    /// 参考的解析规则在 `common/protocol/headers.go` 的
+    /// `SecurityConfig.GetSecurityType()`：AUTO 在有 AES-GCM 硬件支持时解析成
+    /// AES-128-GCM，否则解析成 ChaCha20-Poly1305。**本层刻意不代劳**——
+    /// 自动选档是调用方/会话层的策略，原语层不替它做决定，但也不会默认 AES。
     AutoCipher,
 }
 
@@ -101,6 +117,19 @@ impl SecurityOption {
             SECURITY_CHACHA20_POLY1305 => Some(SecurityOption::ChaCha20Poly1305),
             SECURITY_AUTOCIPHER => Some(SecurityOption::AutoCipher),
             _ => None,
+        }
+    }
+
+    /// 解析成数据段套件；`AutoCipher` 哨兵**不解析**，返回 `None`。
+    ///
+    /// 调用方拿到 `None` 必须自己决定档位或拒绝——原语层不默认 AES。
+    #[must_use]
+    pub const fn resolve(self) -> Option<crate::bodyframe::BodySuite> {
+        match self {
+            SecurityOption::None => Some(crate::bodyframe::BodySuite::None),
+            SecurityOption::Aes128Gcm => Some(crate::bodyframe::BodySuite::Aes128Gcm),
+            SecurityOption::ChaCha20Poly1305 => Some(crate::bodyframe::BodySuite::ChaCha20Poly1305),
+            SecurityOption::AutoCipher => None,
         }
     }
 }
