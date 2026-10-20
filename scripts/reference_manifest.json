@@ -21,41 +21,52 @@
         "xray_tls",
         "xray_udp",
         "xray_mux",
-        "xray_target_addr"
+        "xray_target_addr",
+        "xray_vision",
+        "xray_vision_server"
       ],
-      "expected_passed": 14
+      "expected_passed": 20
     },
     {
       "crate": "lengsuo-trojan",
       "targets": [
         "xray_tls",
-        "xray_udp"
+        "xray_udp",
+        "xray_transport",
+        "xray_transport_server",
+        "xray_trojan_client",
+        "xray_trojan_udp"
       ],
-      "expected_passed": 4
+      "expected_passed": 18
     },
     {
       "crate": "lengsuo-ss2022",
       "targets": [
         "xray_tcp",
         "xray_tcp_reverse",
-        "xray_udp"
+        "xray_udp",
+        "xray_errors",
+        "xray_tcp_matrix"
       ],
-      "expected_passed": 4
+      "expected_passed": 14
     },
     {
       "crate": "lengsuo-shadowsocks",
       "targets": [
         "xray_tcp",
-        "xray_udp"
+        "xray_udp",
+        "xray_errors",
+        "xray_tcp_errors"
       ],
-      "expected_passed": 4
+      "expected_passed": 9
     },
     {
       "crate": "lengsuo-wireguard",
       "targets": [
-        "wireguard_go"
+        "wireguard_go",
+        "reference_errors"
       ],
-      "expected_passed": 5
+      "expected_passed": 14
     },
     {
       "crate": "lengsuo-hysteria",
