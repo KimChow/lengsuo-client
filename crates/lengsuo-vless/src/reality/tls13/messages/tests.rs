@@ -160,15 +160,9 @@ mod cases {
                 key: key.to_vec(),
             }
         );
-        // 把 ClientHello 的布局喂给 ServerHello 解析器，解不出 x25519。
-        match parse_server_key_share(&client_ext).unwrap() {
-            ServerKeyShare::Share { group, .. } => {
-                assert_ne!(group, GROUP_X25519, "列表长度被误当成 group");
-            }
-            ServerKeyShare::HelloRetryRequest { .. } => {
-                panic!("列表布局不应被当成 HelloRetryRequest")
-            }
-        }
+        // 把 ClientHello 的布局喂给 ServerHello 解析器必须 fail-closed：
+        // 不把列表长度当成 group 静默解出错误条目（D-1 的防御边界）。
+        assert!(parse_server_key_share(&client_ext).is_err());
     }
 
     /// ServerHello 的 `key_share` 只有 2 字节时是 HelloRetryRequest 形态。
