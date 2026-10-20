@@ -64,7 +64,9 @@ pub async fn read_chunk<R: AsyncRead + Unpin>(
         // decoded(16) == Overhead → 正常 EOF
         return Ok(None);
     }
-    if stored as usize > MAX_CHUNK_PAYLOAD {
+    // 参考 `common/crypto/auth.go:179` 用**含 tag 的 size**（Decode 已加回
+    // Overhead）与 `buf.Size = 8192` 比较，因此载荷明文上限是 8192 - 16 = 8176。
+    if stored as usize + TAG_LEN > MAX_CHUNK_PAYLOAD {
         return Err(Error::InvalidLength(payload_ct_len));
     }
     let mut payload_wire = vec![0u8; payload_ct_len];
