@@ -15,8 +15,9 @@
 //! 与任务书文字的差异（详见 `docs/ss2022-status.md` 偏离清单）：固定参考的线上
 //! **没有** `0xEIH` 标记、u64 uid 或变长整数编码，身份由 16 字节 PSK 指纹标识。
 //! 本模块因此以参考线格式为准；`uid` 只是本 crate 为服务端路由分配的**本地**
-//! 用户标识，不进入线上字节。SIP023 的 UDP 侧扩展（separate header 重加密）
-//! **未实现**，本模块只服务 TCP。
+//! 用户标识，不进入线上字节。**UDP 侧**的对应实现在 [`crate::eih_udp`]：线上布局
+//! 是 `separate header(16) + N×身份头(16) + AEAD 体`，且多用户下 separate header
+//! 需按方向重加密，故本模块只服务 TCP。
 //!
 //! 失败一律 fail-closed：身份头截断、未知指纹、链超限、算法不支持都返回
 //! [`Error`]，绝不回退到单用户 PSK。所有错误与 `Debug` 均不含 PSK 或密文。
@@ -388,7 +389,7 @@ impl EihServer {
 }
 
 /// 身份头只定义在 AES 套件上；参考 `MultiService` 也显式拒绝 ChaCha20。
-fn require_aes(method: Method) -> Result<(), Error> {
+pub(crate) fn require_aes(method: Method) -> Result<(), Error> {
     match method {
         Method::Aes128 | Method::Aes256 => Ok(()),
         Method::ChaCha20 => Err(Error::Unsupported),

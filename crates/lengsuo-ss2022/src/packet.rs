@@ -218,7 +218,7 @@ impl Key {
 }
 
 /// 解码认证后的明文体（方向字节起），校验方向、时间戳、客户端会话。
-fn decode_body(
+pub(crate) fn decode_body(
     plaintext: Vec<u8>,
     session_id: [u8; 8],
     packet_id: u64,
