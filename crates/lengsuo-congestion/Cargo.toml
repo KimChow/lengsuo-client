@@ -1,0 +1,12 @@
+[package]
+name = "lengsuo-congestion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 与本仓其它 crate 一致：quinn 关闭 default-features（避免引入 fastbloom），
+# 并由 quinn re-export 出 `quinn::congestion`（= quinn-proto 的同名模块）。
+quinn = { workspace = true }
+thiserror.workspace = true
+tracing.workspace = true

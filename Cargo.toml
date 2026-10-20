@@ -22,6 +22,7 @@ members = [
     "crates/lengsuo-browser-package",
     "crates/lengsuo-browser-lifecycle",
 "crates/lengsuo-browser-launch",
+"crates/lengsuo-congestion",
 ]
 
 [workspace.package]

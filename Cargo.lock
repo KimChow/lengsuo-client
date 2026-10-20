@@ -624,6 +624,19 @@ name = "lengsuo-browser-installer"
 version = "0.1.0"
 
 [[package]]
+name = "lengsuo-browser-launch"
+version = "0.1.0"
+dependencies = [
+ "lengsuo-browser-lifecycle",
+ "lengsuo-browser-profile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "lengsuo-browser-lifecycle"
 version = "0.1.0"
 dependencies = [
@@ -668,6 +681,15 @@ dependencies = [
 [[package]]
 name = "lengsuo-browser-state"
 version = "0.1.0"
+
+[[package]]
+name = "lengsuo-congestion"
+version = "0.1.0"
+dependencies = [
+ "quinn",
+ "thiserror 2.0.21",
+ "tracing",
+]
 
 [[package]]
 name = "lengsuo-environment"
