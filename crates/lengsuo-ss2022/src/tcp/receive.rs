@@ -192,7 +192,33 @@ impl Reader {
         if self.poisoned {
             return Err(Error::Poisoned);
         }
-        match self.open_inner(stream, replay, now, expected_peer).await {
+        match self
+            .open_inner(stream, replay, now, expected_peer, None)
+            .await
+        {
+            Ok(opened) => Ok(opened),
+            Err(error) => Err(self.fail(error)),
+        }
+    }
+
+    /// 同 [`Reader::open`]，但 salt 已由调用方读出（SIP023 多用户服务端在
+    /// 解析身份头时必然先读到 salt）。salt 长度必须等于套件密钥长度；本方法
+    /// 从固定头 chunk 开始读。身份头解析失败时调用方根本不会走到这里。
+    pub async fn open_after_salt<R: AsyncRead + Unpin>(
+        &mut self,
+        stream: &mut R,
+        replay: &mut SessionReplay,
+        now: Clock,
+        expected_peer: Option<&[u8]>,
+        salt: Vec<u8>,
+    ) -> Result<Opened, Error> {
+        if self.poisoned {
+            return Err(Error::Poisoned);
+        }
+        match self
+            .open_inner(stream, replay, now, expected_peer, Some(salt))
+            .await
+        {
             Ok(opened) => Ok(opened),
             Err(error) => Err(self.fail(error)),
         }
@@ -204,6 +230,7 @@ impl Reader {
         replay: &mut SessionReplay,
         now: Clock,
         expected_peer: Option<&[u8]>,
+        ahead_salt: Option<Vec<u8>>,
     ) -> Result<Opened, Error> {
         if self.opened {
             return Err(Error::SessionPolicy);
@@ -213,8 +240,15 @@ impl Reader {
             return Err(Error::Direction);
         }
         let salt_len = salt_len(&self.key);
-        let mut salt = vec![0u8; salt_len];
-        self.read_exact(stream, &mut salt).await?;
+        let salt = match ahead_salt {
+            Some(salt) if salt.len() == salt_len => salt,
+            Some(_) => return Err(Error::KeyLength),
+            None => {
+                let mut salt = vec![0u8; salt_len];
+                self.read_exact(stream, &mut salt).await?;
+                salt
+            }
+        };
         // 每个方向独立 salt → 独立子密钥 → 独立 nonce 序列（从全 0 起）。
         let mut aead = SessionAead::new(suite(self.key.method()), self.key.subkey(&salt));
         let mut fixed_wire = vec![0u8; fixed_header_wire_len(self.direction, salt_len)];

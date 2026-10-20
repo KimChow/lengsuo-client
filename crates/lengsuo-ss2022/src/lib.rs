@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 //! SIP022 AES 原语：UDP 报文与会话，以及 TCP 双向流编解码；完整运行时尚未完成，不是可用代理服务。
 pub mod crypto;
+pub mod eih;
 pub mod packet;
 pub mod receiver;
 pub mod replay_store;
 pub mod tcp;
+
+pub use eih::{EihHeader, EihServer, IdentityChain, ResolvedIdentity, User, UserTable};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -48,4 +51,18 @@ pub enum Error {
     Unsupported,
     #[error("重放快照损坏或格式非法")]
     ReplayStore,
+    #[error("配置要求多用户身份头，但请求中没有可用的身份头")]
+    EihMissing,
+    #[error("身份头被截断")]
+    EihTruncated,
+    #[error("身份链超过本实现允许的层数")]
+    EihChainTooLong,
+    #[error("身份头长度或出现方向非法")]
+    EihShape,
+    #[error("身份头只允许出现在请求方向")]
+    EihDirection,
+    #[error("用户表为空或含重复 uid/身份指纹")]
+    EihUserTable,
+    #[error("身份指纹不在用户表中")]
+    IdentityUnknown,
 }
