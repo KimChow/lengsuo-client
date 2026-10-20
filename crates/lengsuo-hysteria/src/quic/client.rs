@@ -20,6 +20,7 @@ use quinn::rustls::pki_types::CertificateDer;
 use quinn::VarInt;
 use tokio::sync::mpsc;
 
+use super::early::{self, EarlyDataConfig, MemorySessionCache, SessionCache, ZeroRttStatus};
 use crate::h3_auth::{self, AuthOutcome, H3ControlStreams, SeedFiller};
 
 /// QUIC datagram 上的会话 ID 长度（字节），对齐 `InterUdpConn.Write` 的前缀。
@@ -57,6 +58,8 @@ pub enum ConnectError {
     Auth(#[from] h3_auth::AuthError),
     #[error("服务端未声明支持 UDP（Hysteria-UDP 响应头为假）")]
     UdpUnsupported,
+    #[error("0-RTT 配置失败: {0}")]
+    EarlyData(#[from] early::EarlyDataError),
 }
 
 impl ConnectError {
@@ -79,11 +82,43 @@ pub struct HysteriaClient {
     /// HTTP/3 控制流必须保活，drop 即FIN会被视为协议错误。
     _h3: H3ControlStreams,
     udp: Arc<Mutex<UdpManager>>,
+    /// 0-RTT 结果观察器（未启用/未尝试时立即解析为 `NotAttempted`）。
+    zero_rtt: ZeroRttStatus,
 }
 
 impl HysteriaClient {
-    /// 建立端点、完成 TLS+QUIC 握手与 H3 认证。
+    /// 建立端点、完成 TLS+QUIC 握手与 H3 认证（0-RTT 关闭）。
     pub async fn connect(config: ClientConfig) -> Result<Self, ConnectError> {
+        Self::connect_with_early_data(config, EarlyDataConfig::default()).await
+    }
+
+    /// 以显式 0-RTT 配置建连。`enabled = false` 时代码路径与 [`Self::connect`]
+    /// 完全一致（仍走普通 1-RTT 握手，不设置任何 rustls 早数据字段）。
+    pub async fn connect_with_early_data(
+        config: ClientConfig,
+        early: EarlyDataConfig,
+    ) -> Result<Self, ConnectError> {
+        let cache = early.enabled.then(|| {
+            Arc::new(MemorySessionCache::new(early.resumption_capacity)) as Arc<dyn SessionCache>
+        });
+        Self::connect_inner(config, &early, cache).await
+    }
+
+    /// 使用调用方显式持有的 [`SessionCache`] 建连，使票据可跨多次连接复用
+    /// （第二次连接才可能命中恢复、进入 0-RTT）。
+    pub async fn connect_with_session_cache(
+        config: ClientConfig,
+        early: EarlyDataConfig,
+        cache: Arc<dyn SessionCache>,
+    ) -> Result<Self, ConnectError> {
+        Self::connect_inner(config, &early, Some(cache)).await
+    }
+
+    async fn connect_inner(
+        config: ClientConfig,
+        early: &EarlyDataConfig,
+        cache: Option<Arc<dyn SessionCache>>,
+    ) -> Result<Self, ConnectError> {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")
             .map_err(|e| ConnectError::Bind(e.to_string()))?;
         let runtime = quinn::default_runtime()
@@ -92,7 +127,7 @@ impl HysteriaClient {
             quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime)
                 .map_err(|e| ConnectError::Bind(e.to_string()))?;
 
-        let tls = build_tls_config(&config)?;
+        let tls = build_tls_config(&config, early, cache)?;
         let mut quic_config = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls)
                 .map_err(|e| ConnectError::Tls(e.to_string()))?,
@@ -106,20 +141,50 @@ impl HysteriaClient {
         quic_config.transport_config(Arc::new(transport));
         endpoint.set_default_client_config(quic_config);
 
-        let conn = endpoint
+        let connecting = endpoint
             .connect(config.server_addr, &config.server_name)
-            .map_err(|e| ConnectError::Bind(e.to_string()))?
-            .await?;
+            .map_err(|e| ConnectError::Bind(e.to_string()))?;
+        // 对齐 dialer.go 的 `quic.DialEarly`：有恢复票据时立即进入 0-RTT；
+        // `Err` 表示本端无法发早数据，退回普通握手（显式记日志）。
+        let (conn, zero_rtt) = if early.enabled {
+            match connecting.into_0rtt() {
+                Ok((conn, accepted)) => {
+                    let status = ZeroRttStatus::attempted();
+                    let watcher = status.clone();
+                    tokio::spawn(async move { watcher.record(accepted.await) });
+                    (conn, status)
+                }
+                Err(connecting) => {
+                    eprintln!(
+                        "[lengsuo-hysteria] 0-RTT 不可用（本端无可用会话票据），回退 1-RTT 握手"
+                    );
+                    (connecting.await?, ZeroRttStatus::not_attempted())
+                }
+            }
+        } else {
+            (connecting.await?, ZeroRttStatus::not_attempted())
+        };
 
+        let auth = h3_auth::authenticate(&conn, &config.auth, config.brutal_down).await;
         let (
             AuthOutcome {
                 udp_enabled,
                 server_cc_rx,
             },
             mut h3,
-        ) = h3_auth::authenticate(&conn, &config.auth, config.brutal_down)
-            .await
-            .map_err(ConnectError::from)?;
+        ) = match auth {
+            Ok(v) => v,
+            Err(e) if e.is_zero_rtt_rejected() => {
+                // 早数据被拒：握手结果必须先落成可观测状态，再在同一连接上
+                // 以 1-RTT 重放认证。认证请求幂等，重放不产生额外副作用。
+                let outcome = zero_rtt.wait().await;
+                eprintln!(
+                    "[lengsuo-hysteria] 服务端拒绝 0-RTT（{outcome:?}），在 1-RTT 上重放认证请求"
+                );
+                h3_auth::authenticate(&conn, &config.auth, config.brutal_down).await?
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         // 认证响应 chunk 派生的发送种子（见 h3_auth::SeedFiller）注入池，
         // 供首条 UDP datagram 发送；之后每收到一条服务端 datagram 再补种。
@@ -190,7 +255,21 @@ impl HysteriaClient {
             server_cc_rx,
             _h3: h3,
             udp,
+            zero_rtt,
         })
+    }
+
+    /// 0-RTT 状态观察器；握手完成前可能仍为 pending（[`ZeroRttStatus::current`]
+    /// 返回 `None`）。
+    #[must_use]
+    pub fn zero_rtt_status(&self) -> &ZeroRttStatus {
+        &self.zero_rtt
+    }
+
+    /// 等待握手完成并返回 0-RTT 最终结果。拒绝路径返回
+    /// [`early::ZeroRttOutcome::Rejected`]，**不会**静默当作 1-RTT 成功。
+    pub async fn zero_rtt_outcome(&self) -> early::ZeroRttOutcome {
+        self.zero_rtt.wait().await
     }
 
     /// 打开 TCP 承载流（双向流；首写 `0x401` 前缀由 `proxy` 层负责，
@@ -245,7 +324,11 @@ impl HysteriaClient {
 
 /// rustls 客户端配置：ALPN 固定 h3，验证链完整开启；根为系统缺省 +
 /// 注入 DER。`builder_with_provider(ring)` 对应工作区 rustls 特性。
-fn build_tls_config(config: &ClientConfig) -> Result<quinn::rustls::ClientConfig, ConnectError> {
+fn build_tls_config(
+    config: &ClientConfig,
+    early: &EarlyDataConfig,
+    cache: Option<Arc<dyn SessionCache>>,
+) -> Result<quinn::rustls::ClientConfig, ConnectError> {
     let provider = Arc::new(quinn::rustls::crypto::ring::default_provider());
     let builder = quinn::rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -258,6 +341,8 @@ fn build_tls_config(config: &ClientConfig) -> Result<quinn::rustls::ClientConfig
     }
     let mut tls = builder.with_root_certificates(roots).with_no_client_auth();
     tls.alpn_protocols = vec![b"h3".to_vec()];
+    // 关闭时该调用不做任何修改（既有 1-RTT 路径逐字节一致）。
+    early::configure_tls(&mut tls, early, cache)?;
     Ok(tls)
 }
 
