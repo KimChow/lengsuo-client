@@ -28,6 +28,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::forward::ForwardConfig;
+use crate::route::RouteError;
+
 /// 配置错误：解析失败（serde）、结构非法（校验）或读取文件失败。
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -37,6 +40,10 @@ pub enum ConfigError {
     Parse(#[from] serde_json::Error),
     #[error("节点 {name} 配置非法：{reason}")]
     Invalid { name: String, reason: String },
+    #[error("转发配置非法：{0}")]
+    Forward(String),
+    #[error("路由配置非法：{0}")]
+    Route(#[from] RouteError),
 }
 
 /// 支持的出口协议。八种全部注册；未注册的协议在解析层即拒绝，
@@ -176,6 +183,13 @@ pub struct NodeConfig {
     /// 其他协议忽略。缺省由 crate 默认决定，但本卡要求显式给出以便校验。
     #[serde(default)]
     pub method: Option<String>,
+    /// 转发服务配置（监听地址 / 默认节点 / 路由规则 / 超时）。
+    ///
+    /// **缺省即无转发服务**：dry-run 行为与旧版完全一致（既有测试不退化）。
+    /// 多个节点给出**不一致**的转发段 ⇒ 配置加载阶段显式报错（转发段全局唯一）。
+    /// 形态详见 `crate::forward::config` 的模块注释。
+    #[serde(default)]
+    pub forward: Option<ForwardConfig>,
 }
 
 impl fmt::Debug for NodeConfig {

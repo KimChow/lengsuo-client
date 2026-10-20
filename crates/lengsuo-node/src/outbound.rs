@@ -296,7 +296,7 @@ async fn dial_trojan(
 }
 
 /// anytls 出站：TLS → 认证块 → 客户端 Settings(v=2) → 等服务端 ServerSettings。
-async fn dial_anytls(config: &NodeConfig, wait: Duration) -> Result<AnyTlsOutbound, DialError> {
+pub async fn dial_anytls(config: &NodeConfig, wait: Duration) -> Result<AnyTlsOutbound, DialError> {
     let client = tls_client(config, wait)?;
     let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
     let mut stream = client.connect(addr).await?;
