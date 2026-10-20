@@ -32,8 +32,8 @@ def anytls_files():
 
 EXTRA_TESTS = [
     {"crate": "lengsuo-vmess",
-     "targets": ["xray_tcp", "xray_vmess_server", "xray_udp"],
-     "expected_passed": 12},
+     "targets": ["xray_tcp", "xray_vmess_server", "xray_udp", "xray_mux"],
+     "expected_passed": 19},
     {"crate": "lengsuo-anytls", "targets": ["interop_client", "interop_server"],
      "expected_passed": 4, "requires_commands": ["openssl"],
      "requires_files": anytls_files(),
