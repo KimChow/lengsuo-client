@@ -2,7 +2,7 @@
 //!
 //! 运行方式（缺 `LENGSUO_XRAY` 时每个用例明确打印原因并 return，不静默通过）：
 //! ```text
-//! LENGSUO_XRAY=/home/ubuntu/ref/bin/xray cargo test -p lengsuo-vmess --test xray_udp --locked -- --ignored --nocapture
+//! LENGSUO_XRAY=/path/to/xray cargo test -p lengsuo-vmess --test xray_udp --locked -- --ignored --nocapture
 //! ```
 //!
 //! 报文语义（固定 commit d2758a02，逐条给出参考出处）：
