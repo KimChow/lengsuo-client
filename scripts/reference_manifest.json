@@ -58,9 +58,10 @@
         "xray_transport",
         "xray_transport_server",
         "xray_trojan_client",
-        "xray_trojan_udp"
+        "xray_trojan_udp",
+        "xray_trojan_udp_server"
       ],
-      "expected_passed": 18
+      "expected_passed": 21
     },
     {
       "crate": "lengsuo-ss2022",
