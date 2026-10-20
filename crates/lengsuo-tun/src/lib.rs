@@ -25,8 +25,10 @@ pub mod checksum;
 #[cfg(windows)]
 pub mod device;
 pub mod dns;
+pub mod ingress;
 pub mod mtu;
 pub mod packet;
+pub mod route;
 pub mod session;
 pub mod tcp;
 
