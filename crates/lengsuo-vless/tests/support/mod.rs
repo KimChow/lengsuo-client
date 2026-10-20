@@ -180,3 +180,87 @@ pub async fn launch(config: Value, port: u16) -> Reference {
     println!("基线 {version}测试端口 {port}，入站 {inbound}，安全层 {security}");
     reference
 }
+
+/// 确定性熵源：`fill_bytes` 用 SHA-256 计数器模式展开种子（同
+/// `reality_e2e` 夹具的 `SeededRng`；本目标不共享那个模块）。
+#[allow(dead_code)]
+pub struct SeededRng {
+    seed: [u8; 32],
+    counter: u64,
+    buffer: Vec<u8>,
+}
+
+#[allow(dead_code)]
+impl SeededRng {
+    pub fn new(seed: [u8; 32]) -> Self {
+        Self {
+            seed,
+            counter: 0,
+            buffer: Vec::new(),
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        let mut seed = [0u8; 32];
+        seed[..label.len().min(32)].copy_from_slice(&label.as_bytes()[..label.len().min(32)]);
+        Self::new(seed)
+    }
+}
+
+#[allow(dead_code)]
+impl aes_gcm::aead::rand_core::RngCore for SeededRng {
+    fn next_u32(&mut self) -> u32 {
+        let mut bytes = [0u8; 4];
+        self.fill_bytes(&mut bytes);
+        u32::from_le_bytes(bytes)
+    }
+    fn next_u64(&mut self) -> u64 {
+        let mut bytes = [0u8; 8];
+        self.fill_bytes(&mut bytes);
+        u64::from_le_bytes(bytes)
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        while self.buffer.len() < dest.len() {
+            let mut input = [0u8; 40];
+            input[..32].copy_from_slice(&self.seed);
+            input[32..].copy_from_slice(&self.counter.to_be_bytes());
+            let digest = lengsuo_vless::reality::hash::sha::sha256(&input);
+            self.buffer.extend_from_slice(&digest);
+            self.counter = self.counter.wrapping_add(1);
+        }
+        let take = dest.len();
+        dest.copy_from_slice(&self.buffer[..take]);
+        self.buffer.drain(..take);
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), aes_gcm::aead::rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+#[allow(dead_code)]
+impl aes_gcm::aead::rand_core::CryptoRng for SeededRng {}
+
+/// base64 raw-url（RFC 4648 §5，无 padding）编码：给配置层喂「参考格式」的公钥文本。
+#[allow(dead_code)]
+pub fn base64_url(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(TABLE[(n >> 18) as usize & 0x3f] as char);
+        out.push(TABLE[(n >> 12) as usize & 0x3f] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(n >> 6) as usize & 0x3f] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[n as usize & 0x3f] as char);
+        }
+    }
+    out
+}
