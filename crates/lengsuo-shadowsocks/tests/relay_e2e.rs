@@ -205,11 +205,28 @@ fn relay_ipv6_target() {
         };
         let echo6 = listener.local_addr().expect("IPv6 echo 地址");
 
-        // ⚠️ 探针方式：**不能**用另开一条 `TcpStream::connect` 探测可用性——那条
-        // 探测连接会先占掉 echo 的唯一 accept（`spawn_echo` 只接一条），真正的中继
-        // 连接就无 echo 可接，用例会以「回程为空」假失败（2026-10-20 实机踩到）。
-        // 改为直接起 echo 并让中继自身的拨号说话：`::1` 不可达时中继会关连接、
-        // 回程为空，下面的断言会**如实失败**，不放水也不误判为代码缺陷。
+        // ⚠️ 探针约束（2026-10-20 两次实机踩坑后的定稿）：
+        // 1. **必须探测 connect**：本机（Windows）`::1` 可 bind 但 connect 被系统策略
+        //    拒（WSAEACCES 10013）——只探测 bind 会在 v6 受限环境必然失败，看似代码缺陷。
+        // 2. **探测连接不能打向 echo**：`spawn_echo` 只 accept 一条连接，探测连接会
+        //    把它占掉，真正的中继连接无 echo 可接 → 「回程为空」假失败。
+        // 定稿方案：起一个**一次性探测 listener**（自带 accept，用完即弃），
+        // 向它 connect 一次验证 v6 回环可连性；通过后才起真正的 echo 并继续。
+        let probe = match TcpListener::bind("[::1]:0").await {
+            Ok(probe) => probe,
+            Err(_) => return,
+        };
+        let probe_addr = probe.local_addr().expect("探测地址");
+        let probe_ok = tokio::select! {
+            accepted = probe.accept() => accepted.is_ok(),
+            _ = tokio::time::sleep(Duration::from_secs(2)) => false,
+        };
+        drop(probe);
+        if !probe_ok {
+            println!("skip relay_ipv6_target：IPv6 回环不可连接（connect 被系统策略拒绝）");
+            return;
+        }
+
         spawn_echo(listener).await;
         let (relay, handle) = start_relay("chacha20-ietf-poly1305", None).await;
         let v6 = TargetAddr::V6(Ipv6Addr::LOCALHOST.octets(), echo6.port());
