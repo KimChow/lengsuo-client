@@ -34,3 +34,10 @@ __pycache__/
 .build/
 **/target-*/
 /.cargo/
+
+# 智能体本地记忆与工作区状态（不入库）
+.workbuddy/
+.claude/settings.local.json
+
+# 本地派卡/验收工作产物（不入库）
+outputs/

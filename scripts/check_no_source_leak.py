@@ -107,7 +107,11 @@ SKIP_DIRS = {
 # 泄漏检查器自己的测试：它**必须**构造泄漏样本才能验证规则，
 # 所以其中的路径/词都是故意写的，不算泄漏。
 # 排除规则只对这一份文件生效，不扩大到整个 tests/ 目录。
-SELF_TEST_FILES = frozenset({"tests/test_no_source_leak.py"})
+SELF_TEST_FILES = frozenset({
+    "tests/test_no_source_leak.py",
+    "tests/test_check_no_source_leak.py",
+    "scripts/test_check_no_source_leak.py",
+})
 
 # 本地工作区状态目录：内容不入库，其中的来源标识**不算泄漏**
 # （但仍需保证它被 .gitignore 覆盖，故单独检查 ignore 状态）
