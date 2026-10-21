@@ -19,5 +19,7 @@ mod canonical;
 mod default_route;
 #[path = "allowedips_edge/fixture.rs"]
 mod fixture;
+#[path = "allowedips_edge/oracle.rs"]
+mod oracle;
 #[path = "allowedips_edge/peer_scope.rs"]
 mod peer_scope;
