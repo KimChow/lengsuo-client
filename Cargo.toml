@@ -26,6 +26,7 @@ members = [
 "crates/lengsuo-link-core",
 "crates/lengsuo-tunnel",
 "crates/lengsuo-ipc",
+    "crates/lengsuo-credential-crypto",
 ]
 
 [workspace.package]
@@ -68,6 +69,9 @@ tempfile = "3"
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
+rand = "0.8"
+argon2 = "0.5"
+zeroize = "1"
 
 [profile.dev]
 incremental = false

@@ -1,0 +1,30 @@
+[package]
+name = "lengsuo-credential-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# 凭据体系的密码学层：纯函数、无 IO、可单测。
+# 字节布局的唯一真相是浏览器仓 `docs/credential-wire-contract.md`
+# （docs/ 只留本地，不入库；派卡时按路径把任务书与契约传给本机）。
+#
+# 依赖说明：
+#   ring   —— ES256 (P-256) 密钥对生成 + PKCS#8 导出 + 签名。用 ring 不用 p256
+#             （p256 不在 Cargo.lock 里，引入即为新依赖树），ring 是
+#             Apache-2.0 + ISC + MIT，可商用闭源。
+#   aes-gcm —— 信封的 AES-256-GCM 认证加密。
+#   sha2    —— rpIdHash = SHA-256(rp_id)。
+#   argon2  —— 恢复码 KDF（Argon2id）。⛔ 不用 pbkdf2 默认轮数（太快）。
+[dependencies]
+ring = "0.17.14"
+aes-gcm.workspace = true
+sha2.workspace = true
+argon2 = "0.5.3"
+rand.workspace = true
+thiserror.workspace = true
+zeroize = "1.9.1"
+
+[dev-dependencies]
+serde_json.workspace = true
+hex.workspace = true
