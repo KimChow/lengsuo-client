@@ -76,8 +76,7 @@ fn make_waker(ready: Arc<AtomicBool>) -> Waker {
 /// 用于「这一步必须成功」的路径（握手、开流等）—— 超时属环境异常，
 /// 直接暴露而不是静默继续。
 pub fn block_on<F: Future>(mut future: F, timeout: Duration) -> F::Output {
-    block_on_inner(future, timeout)
-        .unwrap_or_else(|| panic!("block_on 超时（{timeout:?}）"))
+    block_on_inner(future, timeout).unwrap_or_else(|| panic!("block_on 超时（{timeout:?}）"))
 }
 
 /// 轮询一个 future 直到就绪，返回其输出；**超时返回 `None`（不 panic）**。
