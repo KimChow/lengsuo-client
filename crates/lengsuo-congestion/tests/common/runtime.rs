@@ -75,7 +75,7 @@ fn make_waker(ready: Arc<AtomicBool>) -> Waker {
 ///
 /// 用于「这一步必须成功」的路径（握手、开流等）—— 超时属环境异常，
 /// 直接暴露而不是静默继续。
-pub fn block_on<F: Future>(mut future: F, timeout: Duration) -> F::Output {
+pub fn block_on<F: Future>(future: F, timeout: Duration) -> F::Output {
     block_on_inner(future, timeout).unwrap_or_else(|| panic!("block_on 超时（{timeout:?}）"))
 }
 
@@ -88,7 +88,7 @@ pub fn block_on<F: Future>(mut future: F, timeout: Duration) -> F::Output {
 /// 但 `block_on` 超时是 **panic** ⇒ 那个「放弃」分支是**死代码**，
 /// 于是负载下 10s 写超时直接把整个用例打成失败
 /// （`cargo test --workspace --locked` 的合流门禁随机打红）。
-pub fn block_on_timeout<F: Future>(mut future: F, timeout: Duration) -> Option<F::Output> {
+pub fn block_on_timeout<F: Future>(future: F, timeout: Duration) -> Option<F::Output> {
     block_on_inner(future, timeout)
 }
 
