@@ -522,9 +522,7 @@ mod xray {
             Some(0),
             "参考服务端未授予 0-RTT 早数据许可（票据早数据上限必须为 0）"
         );
-        first
-            .connection()
-            .close(quinn::VarInt::from_u32(0), b"");
+        first.connection().close(quinn::VarInt::from_u32(0), b"");
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // 第二次：同一缓存命中票据，进入 into_0rtt 并立即发送认证。
@@ -569,7 +567,10 @@ mod xray {
         let peer_certs = second
             .connection()
             .peer_identity()
-            .and_then(|d| d.downcast::<Vec<quinn::rustls::pki_types::CertificateDer<'static>>>().ok())
+            .and_then(|d| {
+                d.downcast::<Vec<quinn::rustls::pki_types::CertificateDer<'static>>>()
+                    .ok()
+            })
             .expect("必须完成证书校验");
         assert!(
             !peer_certs.is_empty(),
