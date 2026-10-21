@@ -23,8 +23,8 @@ use tokio::time::timeout;
 
 use super::harness::{
     bounded_shutdown, client_action, header_bytes, tcp_request, Action, Identity, Outcome, Outer,
-    Target, Verdict, BAD_PASSWORD, CLOSE_BOUND, HANDSHAKE, PASSWORD, PATH, PAYLOAD, REPLY,
-    REPLY_BULK_LEN, TOTAL, TRUNCATION_CUTS, WAIT,
+    ReplyWhen, Target, Verdict, BAD_PASSWORD, CLOSE_BOUND, HANDSHAKE, PASSWORD, PATH, PAYLOAD,
+    REPLY, REPLY_BULK_LEN, TOTAL, TRUNCATION_CUTS, WAIT,
 };
 
 /// 本仓服务端：TLS 接入 → （按外层）升级 → trojan `server::process`。
@@ -331,13 +331,16 @@ async fn rust_matrix_truncated_header_is_rejected_on_every_outer() {
 ///
 /// 逐外层的关闭语义不同（WS 发 `Close` 帧，其余发 FIN），但**协议层**结论
 /// 必须一致：半关闭不得切断回程。
+///
+/// 编排上业务目标**等对端 EOF 才回写**（`ReplyWhen::AfterEof`），因此“回程收满”
+/// 真正证明的是“半关闭之后回程仍完整”，而不是“回程恰好先于关写端到达”。
 #[tokio::test]
 async fn rust_matrix_half_close_still_delivers_bulk_reply_on_every_outer() {
     timeout(TOTAL, async {
         let identity = Identity::new();
         let bulk = vec![0xA5u8; REPLY_BULK_LEN];
         for outer in Outer::ALL {
-            let target = Target::bind(bulk.clone()).await;
+            let target = Target::bind_with(bulk.clone(), ReplyWhen::AfterEof).await;
             let server = RustServer::start(&identity, outer).await;
             let outcome = run_client(
                 &identity,

@@ -25,8 +25,6 @@
 
 #[path = "transport_matrix/harness.rs"]
 mod harness;
-#[path = "transport_matrix/probe.rs"]
-mod probe;
 #[path = "transport_matrix/rust_matrix.rs"]
 mod rust_matrix;
 mod support;

@@ -123,6 +123,40 @@ async fn expect_reference_closed<S: AsyncRead + Unpin>(stream: &mut S) -> bool {
     }
 }
 
+/// 参考端在“客户端关写端”之后的**半关闭语义**（按外层分档）。
+///
+/// 判据来自实测（基线 v26.3.27 / commit `d2758a0`）：
+///
+/// - `tcp`（raw）与 `httpupgrade`：外层是**裸字节流**，关写端就是 TCP FIN。
+///   参考端的请求方向读到 EOF（`buf.Copy` 把 EOF 视为正常结束），会话继续，
+///   回程照常送达 ⇒ **保半关闭**。
+/// - `ws`：外层是 RFC 6455 帧。本仓客户端关写端时发 `Close` 帧（对齐参考
+///   `transport/internet/websocket/connection.go` 的 `Close` 语义），而参考端的
+///   gorilla 读侧把 `Close` 帧当作**非 EOF 的读错误**上报；参考的
+///   `common/buf/copy.go` 只把 `io.EOF` 当正常结束，于是请求方向被判为
+///   “failed to transfer request”，整个会话被拆除 ⇒ **拆会话，不保半关闭**。
+///
+/// 判据是**可判定的**，不依赖时序：回程由业务目标在**读到对端 EOF 之后**
+/// 才回写（`ReplyWhen::AfterEof`）。因此“保半关闭”的档位必然收满整个回程；
+/// “拆会话”的档位必然收不到任何回程字节。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HalfClose {
+    /// 保半关闭：关写端后回程仍完整送达。
+    Preserved,
+    /// 拆会话：关写端即终止整个会话，回程被截断（收不到任何字节）。
+    SessionTornDown,
+}
+
+impl HalfClose {
+    /// 按外层取参考端的半关闭语义。
+    fn of(outer: Outer) -> Self {
+        match outer {
+            Outer::Tcp | Outer::HttpUpgrade => HalfClose::Preserved,
+            Outer::Ws => HalfClose::SessionTornDown,
+        }
+    }
+}
+
 /// 在参考服务端上跑一个动作，返回（结果、业务目标 accept 计数）。
 async fn run_against_reference(outer: Outer, action: Action, reply: Vec<u8>) -> (Outcome, usize) {
     let identity = Identity::new();
@@ -353,42 +387,21 @@ async fn xray_matrix_httpupgrade_truncated() {
 #[ignore = "需要显式提供固定版本参考二进制"]
 async fn xray_matrix_tcp_half_close() {
     timeout(TOTAL, async {
-        let bulk = vec![0xA5u8; REPLY_BULK_LEN];
-        let (outcome, accepted) =
-            run_against_reference(Outer::Tcp, Action::HalfClose, bulk.clone()).await;
-        assert_eq!(
-            outcome.reply.len(),
-            REPLY_BULK_LEN,
-            "半关闭后必须收满 {REPLY_BULK_LEN} 字节回程"
-        );
-        assert!(
-            outcome.reply.iter().all(|byte| *byte == 0xA5),
-            "半关闭后的回程内容必须逐字节一致"
-        );
-        assert_eq!(accepted, 1, "半关闭必须恰好抵达业务目标一次");
+        assert_half_close(Outer::Tcp).await;
     })
     .await
     .unwrap();
 }
 
 /// 半关闭（ws 档）。
+///
+/// 参考端的 WS 外层在收到客户端的 `Close` 帧后**拆除整个会话**（不是半关闭），
+/// 故断言回程**收不到任何字节**，且业务目标仍被抵达过一次（请求已穿过外层）。
 #[tokio::test]
 #[ignore = "需要显式提供固定版本参考二进制"]
 async fn xray_matrix_ws_half_close() {
     timeout(TOTAL, async {
-        let bulk = vec![0xA5u8; REPLY_BULK_LEN];
-        let (outcome, accepted) =
-            run_against_reference(Outer::Ws, Action::HalfClose, bulk.clone()).await;
-        assert_eq!(
-            outcome.reply.len(),
-            REPLY_BULK_LEN,
-            "半关闭后必须收满 {REPLY_BULK_LEN} 字节回程"
-        );
-        assert!(
-            outcome.reply.iter().all(|byte| *byte == 0xA5),
-            "半关闭后的回程内容必须逐字节一致"
-        );
-        assert_eq!(accepted, 1, "半关闭必须恰好抵达业务目标一次");
+        assert_half_close(Outer::Ws).await;
     })
     .await
     .unwrap();
@@ -399,22 +412,79 @@ async fn xray_matrix_ws_half_close() {
 #[ignore = "需要显式提供固定版本参考二进制"]
 async fn xray_matrix_httpupgrade_half_close() {
     timeout(TOTAL, async {
-        let bulk = vec![0xA5u8; REPLY_BULK_LEN];
-        let (outcome, accepted) =
-            run_against_reference(Outer::HttpUpgrade, Action::HalfClose, bulk.clone()).await;
-        assert_eq!(
-            outcome.reply.len(),
-            REPLY_BULK_LEN,
-            "半关闭后必须收满 {REPLY_BULK_LEN} 字节回程"
-        );
-        assert!(
-            outcome.reply.iter().all(|byte| *byte == 0xA5),
-            "半关闭后的回程内容必须逐字节一致"
-        );
-        assert_eq!(accepted, 1, "半关闭必须恰好抵达业务目标一次");
+        assert_half_close(Outer::HttpUpgrade).await;
     })
     .await
     .unwrap();
+}
+
+/// 半关闭的**逐外层**判定。
+///
+/// 编排：
+///
+/// 1. 业务目标读满请求载荷后**立刻**回写 64 KiB；
+/// 2. 客户端写完头部与载荷后**关写端**（WS 发 `Close` 帧，TCP / HTTPUpgrade 发 FIN）；
+/// 3. 客户端读回程。
+///
+/// 结论唯一确定（实测基线 v26.3.27 / commit `d2758a0`）：
+///
+/// - 参考端保半关闭（`tcp` / `httpupgrade`）⇒ 会话存活，回程**收满** 64 KiB；
+/// - 参考端拆会话（`ws`）⇒ 会话被拆除，回程**收不满**。
+///
+/// 注意：业务目标**不能**用“等对端 EOF 才回写”的编排——参考端在客户端 EOF 后
+/// **不**把 EOF 传播给目标连接（`proxy/trojan/server.go` 的请求方向只停止拷贝，
+/// 目标连接的写侧直到回程结束才被关闭），业务目标因此永远等不到 EOF。
+/// 本仓服务端与之相反（`server/relay.rs` 的 `copy_until_eof` 在读到 EOF 时对目标
+/// 写侧 `shutdown`），该差异记在 `docs/trojan-transport.md` 的偏离清单里。
+async fn assert_half_close(outer: Outer) {
+    let bulk = vec![0xA5u8; REPLY_BULK_LEN];
+    let identity = Identity::new();
+    let target = Target::bind(bulk.clone()).await;
+    let port = free_port();
+    let reference = launch(server_config(port, &identity, outer), port).await;
+    let outcome = run_client(&identity, port, outer, Action::HalfClose, target.port()).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let accepted = target.accepted();
+    drop(reference);
+    target.stop().await;
+
+    match HalfClose::of(outer) {
+        HalfClose::Preserved => {
+            assert_eq!(
+                outcome.reply.len(),
+                REPLY_BULK_LEN,
+                "{} 档参考端保半关闭：关写端后必须收满 {REPLY_BULK_LEN} 字节回程",
+                outer.name()
+            );
+            assert!(
+                outcome.reply.iter().all(|byte| *byte == 0xA5),
+                "{} 档半关闭后的回程内容必须逐字节一致",
+                outer.name()
+            );
+            assert_eq!(
+                accepted,
+                1,
+                "{} 档半关闭必须恰好抵达业务目标一次",
+                outer.name()
+            );
+        }
+        HalfClose::SessionTornDown => {
+            assert!(
+                outcome.reply.len() < REPLY_BULK_LEN,
+                "{} 档参考端拆会话：关写端后回程必须被截断（实收 {} 字节），\
+                 若收满说明参考端在该外层上保半关闭——与实测基线不符",
+                outer.name(),
+                outcome.reply.len()
+            );
+            assert_eq!(
+                accepted,
+                1,
+                "{} 档：请求必须已穿过外层抵达业务目标一次（会话是被关写端拆掉的，\
+                 不是被拒绝的）",
+                outer.name()
+            );
+        }
+    }
 }
 
 /// 错误外层路径：参考端必须拒绝升级，业务目标不得被触达。
