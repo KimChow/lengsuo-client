@@ -33,14 +33,14 @@ use std::time::Duration;
 use lengsuo_vmess::aead;
 use lengsuo_vmess::bodyframe::{BodyFrame, BodySuite, ChunkStreamFrame};
 use lengsuo_vmess::chunkframe::DataSizeParser;
-use lengsuo_vmess::request::{Command, KeySource, RequestHeader, SecurityOption};
+use lengsuo_vmess::request::{KeySource, SecurityOption};
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 
 use super::refharness::{
-    current_unix_seconds, plan_request_header, rewrite_security_nibble, seal_header_now,
-    start_xray_inbound, xray_bin, CONNECT_TIMEOUT, PAYLOAD, RESPONSE_TIMEOUT,
+    plan_request_header, rewrite_security_nibble, seal_header_now, start_xray_inbound, xray_bin,
+    CONNECT_TIMEOUT, PAYLOAD, RESPONSE_TIMEOUT,
 };
 use super::refhelpers::{
     cmd_key_from_uuid, response_key_iv, spawn_echo, spawn_echo_counted, uuid_bytes, uuid_string,
@@ -82,22 +82,7 @@ async fn every_tier_roundtrips_against_real_xray() {
             "aes-128-gcm" => SecurityOption::Aes128Gcm,
             _ => SecurityOption::ChaCha20Poly1305,
         };
-        let plain = HeaderPlanner::new(KeySource {
-            body_key: keys.body_key,
-            body_iv: keys.body_iv,
-            response_header: keys.response_header,
-        })
-        .plan_with(
-            &RequestHeader {
-                target: Some(target),
-                command: Command::Tcp,
-                security,
-                option,
-                padding_len: 0,
-            },
-            &[],
-        )
-        .expect("请求头明文可编码");
+        let plain = plan_request_header(&keys, target, security, option);
         let header = aead::seal_vmess_aead_header(&cmd_key, &plain).expect("请求头可封");
 
         let mut stream =
@@ -223,22 +208,7 @@ async fn real_xray_rejects_tier_mismatch_instead_of_downgrading() {
     let keys = KeySource::generate().expect("生成会话密钥");
     let target = TargetAddr::V4([127, 0, 0, 1], echo_addr.port());
     // 头里声明 aes-128-gcm。
-    let plain = HeaderPlanner::new(KeySource {
-        body_key: keys.body_key,
-        body_iv: keys.body_iv,
-        response_header: keys.response_header,
-    })
-    .plan_with(
-        &RequestHeader {
-            target: Some(target),
-            command: Command::Tcp,
-            security: SecurityOption::Aes128Gcm,
-            option: 0x01 | 0x04 | 0x08,
-            padding_len: 0,
-        },
-        &[],
-    )
-    .expect("请求头明文可编码");
+    let plain = plan_request_header(&keys, target, SecurityOption::Aes128Gcm, 0x01 | 0x04 | 0x08);
     let header = aead::seal_vmess_aead_header(&cmd_key, &plain).expect("请求头可封");
 
     let mut stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(("127.0.0.1", port)))
@@ -319,36 +289,17 @@ async fn real_xray_rejects_the_zero_security_tier() {
 
     let keys = KeySource::generate().expect("生成会话密钥");
     let target = TargetAddr::V4([127, 0, 0, 1], echo_addr.port());
-    let mut plain = HeaderPlanner::new(KeySource {
-        body_key: keys.body_key,
-        body_iv: keys.body_iv,
-        response_header: keys.response_header,
-    })
-    .plan_with(
-        &RequestHeader {
-            target: Some(target),
-            command: Command::Tcp,
-            // 用一个本仓**支持**的档构造明文，随后把线上字节改写成 zero。
-            security: SecurityOption::Aes128Gcm,
-            option: 0x01 | 0x04 | 0x08,
-            padding_len: 0,
-        },
-        &[],
-    )
-    .expect("请求头明文可编码");
-    // 改写 security 低 4 位 = 6（ZERO），并重算 FNV 尾部。
-    plain[35] = (plain[35] & 0xF0) | 0x06;
-    let body_len = plain.len() - 4;
-    let tail = lengsuo_vmess::request::fnv1a32(&plain[..body_len]).to_be_bytes();
-    plain[body_len..].copy_from_slice(&tail);
+    let plain = plan_request_header(&keys, target, SecurityOption::Aes128Gcm, 0x01 | 0x04 | 0x08);
+    // 改写 security 低 4 位 = 6（ZERO），并重算 FNV 尾部
+    // （封装在 refharness::rewrite_security_nibble 内：改完不重算校验和，
+    //   参考会先在校验和上拒绝，测不到 security 判定）。
+    let plain = rewrite_security_nibble(&plain, 0x06);
 
     // ⛔ AuthID 必须用**当前时间**：参考 `proxy/vmess/aead/authid.go:110` 对
     // 超过 120 秒的时间戳判 `ErrInvalidTime`（用户校验阶段就拒）⇒ 用固定的
     // 历史时间戳会**在到不了安全档判定之前**就被拒，测出来的是「用户校验
     // 失败」而不是「zero 档被拒」，那种用例是**假绿**。
-    let now = current_unix_seconds();
-    let auth = lengsuo_vmess::create_auth_id_with(&cmd_key, now, &[0x01, 0x02, 0x03, 0x04]);
-    let header = aead::seal_header_with(&cmd_key, auth.as_bytes(), &[0x11; 8], &plain);
+    let (auth, header) = seal_header_now(&cmd_key, &plain);
     let opened =
         lengsuo_vmess::aead::open_vmess_aead_header(&cmd_key, auth.as_bytes(), &header[16..])
             .expect("本仓自己封的头必须能解开");

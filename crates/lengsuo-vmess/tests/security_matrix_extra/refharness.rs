@@ -172,11 +172,16 @@ pub fn rewrite_security_nibble(plain: &[u8], nibble: u8) -> Vec<u8> {
 /// ⛔ 不用固定时间戳——见 [`current_unix_seconds`] 的说明（超过 120 秒会被
 /// 参考判 `ErrInvalidTime`，用例就成了假绿）。
 #[must_use]
-pub fn seal_header_now(cmd_key: &[u8], plain: &[u8]) -> Vec<u8> {
+///
+/// 返回 `(auth_id, sealed_header)`：调用方需要 `auth_id` 做**本仓自校验**
+/// （用同一个 auth 解开自己封的头，确认字节没被改坏）——只返回 header
+/// 的话调用方拿不到 auth，自校验就做不了。
+pub fn seal_header_now(cmd_key: &[u8], plain: &[u8]) -> (lengsuo_vmess::AuthId, Vec<u8>) {
     let auth = lengsuo_vmess::create_auth_id_with(
         cmd_key,
         current_unix_seconds(),
         &[0x01, 0x02, 0x03, 0x04],
     );
-    aead::seal_header_with(cmd_key, auth.as_bytes(), &[0x11; 8], plain)
+    let header = aead::seal_header_with(cmd_key, auth.as_bytes(), &[0x11; 8], plain);
+    (auth, header)
 }
