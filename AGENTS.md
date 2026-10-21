@@ -128,6 +128,8 @@ cargo build --workspace --locked
   # 47 -> 本机
   ssh 47 "cd <repo> && tar -cf - docs" | (cd <repo> && tar -xf -)
   ```
+- ⚠️ **tar 同步会产生嵌套**：解包前先 `rm -rf <目标>/docs`，或解包后检查并清理 `docs/docs/`；
+  否则文档会越同步越多（实测出现过 101→202 的翻倍）。
 - 同步**只做文件搬运，不做删除**；清理旧文档由人工在两侧分别处理。
 - 依赖 `docs/` 存在才通过的测试要加 `skipUnless(DOCS.is_dir())`，否则 CI 会因缺文件变红。
 
