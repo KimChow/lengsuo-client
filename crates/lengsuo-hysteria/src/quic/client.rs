@@ -16,17 +16,17 @@
 //!
 //! | 子模块 | 职责 |
 //! |--------|------|
-//! | [`client`] | `HysteriaClient`：建连、H3 认证、TCP/UDP 通道开放 |
+//! | [`endpoint`] | `HysteriaClient`：建连、H3 认证、TCP/UDP 通道开放 |
 //! | [`config`] | `ClientConfig` / `ConnectError` |
 //! | [`constants`] | 会话 ID 长度、通道容量、首个会话 ID |
 //! | [`udp`] | `UdpManager` / `UdpSession` / `UdpSendError` |
 
-mod client;
 mod config;
 mod constants;
+mod endpoint;
 mod udp;
 
-pub use client::HysteriaClient;
 pub use config::{ClientConfig, ConnectError};
 pub use constants::{FIRST_UDP_SESSION_ID, UDP_MESSAGE_CHAN_SIZE, UDP_SESSION_ID_LEN};
+pub use endpoint::HysteriaClient;
 pub use udp::{UdpSendError, UdpSession};

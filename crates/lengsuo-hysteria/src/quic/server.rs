@@ -19,14 +19,14 @@
 //!
 //! | 子模块 | 职责 |
 //! |--------|------|
-//! | [`server`] | `HysteriaServer` / `ServerSessionCtx` / quinn 服务端配置构造 |
+//! | [`endpoint`] | `HysteriaServer` / `ServerSessionCtx` / quinn 服务端配置构造 |
 //! | [`config`] | `ServerConfig` / `ServerError` |
 //! | [`constants`] | 会话 ID 长度、通道容量、UDP 空闲回收与 QUIC 缺省值 |
 //! | [`udp`] | `UdpManager` / `UdpInboundSession` / `UdpSendHandle` / 分发循环 |
 
 mod config;
 mod constants;
-mod server;
+mod endpoint;
 mod udp;
 
 pub use config::{ServerConfig, ServerError};
@@ -34,7 +34,7 @@ pub use constants::{
     DEFAULT_MAX_IDLE_TIMEOUT_MS, DEFAULT_MAX_INCOMING_STREAMS, DEFAULT_UDP_IDLE_TIMEOUT_SECS,
     UDP_IDLE_CLEANUP_INTERVAL_SECS, UDP_MESSAGE_CHAN_SIZE, UDP_SESSION_ID_LEN,
 };
-pub use server::{HysteriaServer, ServerSessionCtx};
+pub use endpoint::{HysteriaServer, ServerSessionCtx};
 pub use udp::{UdpInboundSession, UdpSendError, UdpSendHandle};
 
 pub(crate) use udp::{run_udp_manager, UdpManager};
