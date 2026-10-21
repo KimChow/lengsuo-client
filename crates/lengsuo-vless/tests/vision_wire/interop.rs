@@ -143,7 +143,7 @@ where
         if let Poll::Ready(Ok(())) = &poll {
             let filled = buf.filled().len();
             if filled > 0 {
-                me.received.lock().unwrap().extend_from_slice(&buf.filled());
+                me.received.lock().unwrap().extend_from_slice(buf.filled());
             }
         }
         poll
