@@ -31,7 +31,6 @@ const SERVER_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 const SERVER_PORT: u16 = 8080;
 const CLIENT_PORT: u16 = 40000;
 const TIMEOUT: Duration = Duration::from_secs(5);
-#[allow(dead_code)] // 共享常量：各测试文件用到的符号不同
 const NOW: u64 = 1;
 
 /// 客户端侧最小 TCP：驱动合成 IP 报文进出被测栈。
