@@ -20,6 +20,7 @@ pub mod outbound;
 pub mod outbound_hysteria;
 pub mod outbound_ss;
 pub mod outbound_ss2022;
+pub mod outbound_trojan;
 pub mod outbound_vless;
 pub mod outbound_vmess;
 pub mod outbound_wireguard;
