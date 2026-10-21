@@ -1,5 +1,19 @@
 //! 有截止时间的基础握手与 UDP 帧；传入流必须由调用方完成安全传输认证。
 //! 请求发送与响应读取分离，允许首批应用数据随请求发送，避免等待响应死锁。
+//!
+//! ## VLESS 响应头的两种读法
+//!
+//! 参考 `proxy/vless/encoding/encoding.go` 的 `EncodeResponseHeader` 写出的是
+//! **1 字节 version ＋ `EncodeHeaderAddons` 的 1 字节 addons 长度**（＋ 长度非 0
+//! 时的 addons 载荷）。`EncodeHeaderAddons`（`encoding/addons.go:18`）只在
+//! `Flow == XRV` 时写非 0 长度，而参考入站的响应固定用空 `Addons`
+//! （`inbound.go:546` 的 `responseAddons` 未设 `Flow`）⇒ **线上响应头恒为
+//! 2 字节 `00 00`**。
+//!
+//! - [`receive_response`]：**严格** 2 字节形态（version 0 ＋ addons 长度 0），
+//!   多一个字节都不接受；用于普通 TCP/UDP 链路。
+//! - [`receive_response_header`]：**通用**形态，按 addons 长度消费载荷；用于
+//!   mux 承载连接（响应头与 mux 帧同属一条字节流，见 [`crate::mux_wire`]）。
 use crate::header::{self, Request};
 use std::time::Duration;
 use subtle::ConstantTimeEq;
@@ -105,6 +119,54 @@ pub async fn receive_response<R: AsyncRead + Unpin>(
             return Err(header::Error::Unsupported.into());
         }
         Ok(())
+    })
+    .await
+    .map_err(|_| Error::Timeout)?
+}
+
+/// VLESS 响应头（参考 `encoding.EncodeResponseHeader` 的产物）。
+///
+/// 线上形态：`1 字节 version ‖ 1 字节 addons 长度 ‖ addons 载荷`。
+/// `addons` 载荷只在参考的 `Flow == XRV` 时非 0（`encoding/addons.go:18`），
+/// 而参考入站的响应固定用空 `Addons` ⇒ 线上响应头恒为 `00 00`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResponseHeader {
+    /// 响应版本字节（参考 `request.Version`，线上为 0）。
+    pub version: u8,
+    /// addons 载荷长度（参考 `EncodeHeaderAddons` 写的那个长度字节）。
+    pub addons: u8,
+}
+
+/// 读 VLESS 响应头并按 addons 长度消费载荷（参考 `DecodeResponseHeader`）。
+///
+/// 与 [`receive_response`] 的差别：**不要求** version/addons 为 0，而是按参考
+/// `DecodeResponseHeader` 的通用形态消费——version 必须等于请求的 version（线上
+/// 为 0），addons 长度字节决定后续还要读多少字节的载荷。
+///
+/// 用途：mux 承载连接上，响应头与 mux 帧流是**同一条字节流**；必须先消费掉
+/// 响应头再解帧，且不能因为「后面还有帧」而多读/少读。详见 [`crate::mux_wire`]。
+pub async fn receive_response_header<R: AsyncRead + Unpin>(
+    stream: &mut R,
+    duration: Duration,
+) -> Result<ResponseHeader, Error> {
+    deadline(duration)?;
+    timeout(duration, async {
+        let mut prefix = [0u8; 2];
+        stream.read_exact(&mut prefix).await?;
+        let version = prefix[0];
+        if version != 0 {
+            return Err(header::Error::Unsupported.into());
+        }
+        let addons_len = prefix[1];
+        if addons_len > 0 {
+            // 参考 `DecodeHeaderAddons`：按长度字节读满 addons 载荷。
+            let mut payload = vec![0u8; usize::from(addons_len)];
+            stream.read_exact(&mut payload).await?;
+        }
+        Ok(ResponseHeader {
+            version,
+            addons: addons_len,
+        })
     })
     .await
     .map_err(|_| Error::Timeout)?
