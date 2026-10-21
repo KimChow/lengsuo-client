@@ -9,6 +9,8 @@ on:
       - 'scripts/run_reference_tests.py'
       - 'scripts/reference_fixtures.py'
       - 'scripts/reference_manifest.json'
+      - 'scripts/run_baseline_tests.py'
+      - 'scripts/baseline_manifest.json'
       - 'tools/reference/**'
       - '.github/workflows/reference-tests.yml'
   pull_request:
@@ -19,6 +21,8 @@ on:
       - 'scripts/run_reference_tests.py'
       - 'scripts/reference_fixtures.py'
       - 'scripts/reference_manifest.json'
+      - 'scripts/run_baseline_tests.py'
+      - 'scripts/baseline_manifest.json'
       - 'tools/reference/**'
       - '.github/workflows/reference-tests.yml'
   workflow_dispatch:
@@ -61,5 +65,32 @@ jobs:
           path: |
             ${{ runner.temp }}/lengsuo-reference/report.json
             ${{ runner.temp }}/lengsuo-reference/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+  # 基线轮（ALL-1 审计 P0-1）：八协议的 Rust↔Rust 互通用例是普通 `#[test]`，
+  # `run_reference_tests.py` 只跑 `-- --ignored`（参考互通方向），因此这一向
+  # 必须在独立 job 里单独跑，否则合流时不会被自动重跑。
+  # 独立清单（scripts/baseline_manifest.json）、独立计数、独立退出码：
+  # 实际 passed 必须等于清单登记值，否则 fail-closed 非 0 退出。
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Baseline Rust-to-Rust interop
+        run: python scripts/run_baseline_tests.py --work-dir "${{ runner.temp }}/lengsuo-baseline"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline
+          path: |
+            ${{ runner.temp }}/lengsuo-baseline/report.json
+            ${{ runner.temp }}/lengsuo-baseline/*.log
           if-no-files-found: ignore
           retention-days: 3
