@@ -35,15 +35,6 @@ use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
 
 use crate::config::{Endpoint, NodeConfig, Protocol};
-use crate::outbound_hysteria::HysteriaOutbound;
-use crate::outbound_ss::ShadowsocksOutbound;
-use crate::outbound_ss2022::Ss2022Outbound;
-use crate::outbound_trojan::{
-    TrojanError, TrojanOutbound, TROJAN_PROBE_FALLBACK_HOST, TROJAN_PROBE_FALLBACK_PORT,
-};
-use crate::outbound_vless::VlessOutbound;
-use crate::outbound_vmess::VmessOutbound;
-use crate::outbound_wireguard::WireguardOutbound;
 /// anytls 拨号入口转出到 `outbound_anytls`（协议专属实现），保持
 /// `outbound::dial_anytls` 这条路径对既有调用方（`forward`）继续可用。
 pub use crate::outbound_anytls::dial_anytls;
@@ -53,7 +44,15 @@ pub use crate::outbound_anytls::AnyTlsError;
 /// anytls 出站会话：已认证、已协商版本，可继续开流（SYN/PUSH）转发业务。
 /// 定义在 `outbound_anytls`（协议专属模块）；此处转出以保持既有引用路径可用。
 pub use crate::outbound_anytls::AnyTlsOutbound;
-
+use crate::outbound_hysteria::HysteriaOutbound;
+use crate::outbound_ss::ShadowsocksOutbound;
+use crate::outbound_ss2022::Ss2022Outbound;
+use crate::outbound_trojan::{
+    TrojanError, TrojanOutbound, TROJAN_PROBE_FALLBACK_HOST, TROJAN_PROBE_FALLBACK_PORT,
+};
+use crate::outbound_vless::VlessOutbound;
+use crate::outbound_vmess::VmessOutbound;
+use crate::outbound_wireguard::WireguardOutbound;
 
 /// 已完成的 TLS 连接类型别名。
 pub type NodeTlsStream = TlsStream<TcpStream>;
@@ -79,7 +78,6 @@ pub enum Outbound {
     /// wireguard：Noise IK 响应已认证解封并派生 transport 会话密钥。
     Wireguard(WireguardOutbound),
 }
-
 
 /// 分发失败。所有 Display 都不含密码或其摘要。
 #[derive(Debug, thiserror::Error)]
@@ -259,4 +257,3 @@ pub(crate) async fn connect_tcp(
         .map_err(|_| DialError::Timeout)?
         .map_err(|err| DialError::Resolve(format!("连接 {} 失败：{}", config.endpoint.host, err)))
 }
-
