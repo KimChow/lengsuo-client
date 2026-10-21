@@ -9,9 +9,9 @@
 
 mod support;
 
-use lengsuo_vless::mux::frame::{SessionStatus, TargetNetwork};
+use lengsuo_vless::mux::frame::TargetNetwork;
 use lengsuo_vless::mux::worker::Strategy;
-use lengsuo_vless::mux_wire::{MuxWire, DEFAULT_DEADLINE};
+use lengsuo_vless::mux_wire::MuxWire;
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -48,7 +48,7 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
     use lengsuo_vless::header::{Command, Request};
     use lengsuo_vless::stream::{receive_response, send_request};
     use serde_json::json;
-    use support::{free_port, launch, ID, KEY};
+    use support::{free_port, launch, ID, KEY, WAIT};
     use tokio::net::TcpStream;
     use tokio::time::timeout;
 
