@@ -431,11 +431,19 @@ async fn xray_matrix_httpupgrade_half_close() {
 /// - 参考端保半关闭（`tcp` / `httpupgrade`）⇒ 会话存活，回程**收满** 64 KiB；
 /// - 参考端拆会话（`ws`）⇒ 会话被拆除，回程**收不满**。
 ///
-/// 注意：业务目标**不能**用“等对端 EOF 才回写”的编排——参考端在客户端 EOF 后
-/// **不**把 EOF 传播给目标连接（`proxy/trojan/server.go` 的请求方向只停止拷贝，
-/// 目标连接的写侧直到回程结束才被关闭），业务目标因此永远等不到 EOF。
-/// 本仓服务端与之相反（`server/relay.rs` 的 `copy_until_eof` 在读到 EOF 时对目标
-/// 写侧 `shutdown`），该差异记在 `docs/trojan-transport.md` 的偏离清单里。
+/// 注意：业务目标**不能**用“等对端 EOF 才回写”的编排。实测（基线 v26.3.27 /
+/// commit `d2758a0`）：参考端**确实**把 EOF 传播给目标连接（目标观察到 EOF），
+/// 但此后**回程再也送不到客户端**——目标在观察到 EOF 后**成功写出**了全部
+/// 64 KiB（`write` → `Ok(65536)`），客户端却只收到 0 字节；数据丢在参考端的
+/// 转发环节，不在目标的写侧。三档外层在该编排下**都是 0 字节**，因此这种编排
+/// **无法区分** `tcp`/`httpupgrade` 与 `ws`。
+///
+/// 因此本用例必须用“读满载荷**立刻**回写”的编排：只有回程**已经在途**时，
+/// “保半关闭”（`tcp`/`httpupgrade` ⇒ 收满）与“拆会话”（`ws` ⇒ 收不到）才是
+/// 可判别的。实测三档分别为 65536 / 0 / 65536 字节。
+/// 本仓服务端与之不同（`server/relay.rs` 的 `copy_until_eof` 只对目标写侧
+/// `shutdown`，**不**拆回程方向），该差异记在 `docs/trojan-transport.md` 的
+/// 偏离清单里。
 async fn assert_half_close(outer: Outer) {
     let bulk = vec![0xA5u8; REPLY_BULK_LEN];
     let identity = Identity::new();
