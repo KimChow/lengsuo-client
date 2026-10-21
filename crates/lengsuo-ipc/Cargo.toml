@@ -1,0 +1,19 @@
+[package]
+name = "lengsuo-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "本地网关客户端：握手文件 → POST /rpc → GET /events(WebSocket)。从 lengsuo-agent 的 lengsuo-shell 抽出，供桌面壳与移动端共用"
+
+[dependencies]
+tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "sync", "macros", "rt", "rt-multi-thread"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }

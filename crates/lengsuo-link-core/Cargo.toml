@@ -1,0 +1,11 @@
+[package]
+name = "lengsuo-link-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "跨端链路协议核心：会话密钥派生、密文帧编解码、通道协商、连接世代号。平台无关、无 IO（纯状态机 + 字节进出）"
+
+[dependencies]
+thiserror = { workspace = true }
+lengsuo-wireguard = { path = "../lengsuo-wireguard" }

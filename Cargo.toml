@@ -23,6 +23,9 @@ members = [
     "crates/lengsuo-browser-lifecycle",
 "crates/lengsuo-browser-launch",
 "crates/lengsuo-congestion",
+"crates/lengsuo-link-core",
+"crates/lengsuo-tunnel",
+"crates/lengsuo-ipc",
 ]
 
 [workspace.package]

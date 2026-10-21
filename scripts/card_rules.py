@@ -54,6 +54,9 @@ LANES = {
         "lengsuo-browser-lifecycle",
     ],
     "core": ["ss-core", "ss-client", "ss-cli", "lengsuo-tls"],
+    # 跨端链路：link-core 是无 IO 的协议核心（可编移动端静态库）；
+    # tunnel 是有 IO 的隧道运行时（只在 PC 端）；ipc 是本地网关客户端。
+    "link": ["lengsuo-link-core", "lengsuo-tunnel", "lengsuo-ipc"],
 }
 
 # merging 也算占用：否则进入合流后别的卡能立刻占进来，合流就不再独占。
