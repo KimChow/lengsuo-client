@@ -12,6 +12,8 @@ jobs:
         run: rustup component add rustfmt clippy
       - name: File length
         run: python3 scripts/check_line_limit.py
+      - name: Docs are local-only
+        run: python3 scripts/check_docs_not_tracked.py --allow-history
       - name: Lean build profiles
         run: python3 scripts/verify_build_profiles.py
       - name: Format
