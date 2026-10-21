@@ -34,14 +34,16 @@ mod section;
 mod tables;
 
 pub use decoder::Decoder;
-pub use encode::{append_insert_count_increment, append_section_acknowledgment, encode_field_block};
+pub use encode::{
+    append_insert_count_increment, append_section_acknowledgment, encode_field_block,
+};
 pub use error::QpackError;
 pub use header::HeaderField;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::primitives::{append_prefix_int, huffman_decode, prefix_int};
+    use super::*;
 
     fn hf(name: &str, value: &str) -> HeaderField {
         HeaderField {
