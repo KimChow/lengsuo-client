@@ -20,8 +20,8 @@
 //! `policy.Manager` 与 `routing.Dispatcher`，本入口没有核心可挂，故用静态替身。
 
 use lengsuo_tun::egress::{
-    Attribution, AuthorityError, BindingAuthority, DeviceId, EgressSelector, EnvironmentId,
-    Lease, OutboundProtocol, OutboundRuntime, OutboundSession, RuntimeError,
+    Attribution, AuthorityError, BindingAuthority, DeviceId, EgressSelector, EnvironmentId, Lease,
+    OutboundProtocol, OutboundRuntime, OutboundSession, RuntimeError,
 };
 use lengsuo_tun::ingress::Classifier;
 use lengsuo_tun::packet::PacketInfo;
@@ -264,20 +264,14 @@ where
 /// 跑一次完整的入口：解析配置 → 开设备 → 建运行时 → 跑事件循环。
 ///
 /// 设备打开失败时返回 [`EntryError`]（**不返回空设备、不静默成功**）。
-pub fn run_entry(
-    args: Vec<String>,
-    now: Clock,
-) -> Result<EntryOutcome, EntryError> {
+pub fn run_entry(args: Vec<String>, now: Clock) -> Result<EntryOutcome, EntryError> {
     let raw = config::parse_args(args)?;
     let config = raw.into_config()?;
     run_with_config(&config, now)
 }
 
 /// 按已校验的配置跑一次完整的入口。
-pub fn run_with_config(
-    config: &RuntimeConfig,
-    now: Clock,
-) -> Result<EntryOutcome, EntryError> {
+pub fn run_with_config(config: &RuntimeConfig, now: Clock) -> Result<EntryOutcome, EntryError> {
     let device = device::open_device(config)?;
     let outbound = DemoOutbound::new(config.device_id, OutboundProtocol::Vless);
     let mut runtime = build_runtime(config, device, outbound)?;

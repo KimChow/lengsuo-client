@@ -156,7 +156,7 @@ pub fn open_device(config: &super::config::RuntimeConfig) -> Result<PlatformDevi
     #[cfg(target_os = "linux")]
     {
         let device = super::linux::open(&config.device_name, config.mtu)?;
-        return Ok(PlatformDevice::Linux(device));
+        Ok(PlatformDevice::Linux(device))
     }
     #[cfg(not(target_os = "linux"))]
     {

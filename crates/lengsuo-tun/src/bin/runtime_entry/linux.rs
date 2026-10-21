@@ -184,9 +184,8 @@ impl TunDevice for LinuxTunDevice {
         }
         // 单次 `write`：TUN 设备一次写一个完整 IP 报文。
         // 短写视为失败：IP 报文不可拆分（分片由上层决定，本层不重组）。
-        let written = unsafe { ffi::write_bytes(self.fd, packet) }.ok_or_else(|| {
-            syscall_error("写回报文")
-        })?;
+        let written = unsafe { ffi::write_bytes(self.fd, packet) }
+            .ok_or_else(|| syscall_error("写回报文"))?;
         if written != packet.len() {
             return Err(DeviceError::Io {
                 detail: format!("短写：期望 {} 字节，实际 {written}", packet.len()),

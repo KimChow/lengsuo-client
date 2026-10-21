@@ -250,7 +250,10 @@ fn ones_complement_sum(parts: &[&[u8]]) -> u16 {
     for part in parts {
         let mut index = 0;
         while index + 1 < part.len() {
-            sum = sum.wrapping_add(u32::from(u16::from_be_bytes([part[index], part[index + 1]])));
+            sum = sum.wrapping_add(u32::from(u16::from_be_bytes([
+                part[index],
+                part[index + 1],
+            ])));
             index += 2;
         }
         if let Some(odd) = part.get(index) {

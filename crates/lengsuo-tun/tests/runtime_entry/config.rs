@@ -161,7 +161,10 @@ fn command_line_parses_into_a_valid_config() {
     assert_eq!(config.mtu, 1400);
     assert_eq!(config.routes.len(), 1);
     assert_eq!(config.routes[0].interface_index, 7);
-    assert_eq!(config.routes[0].source, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+    assert_eq!(
+        config.routes[0].source,
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
+    );
 }
 
 /// 路由表按最长前缀匹配查表；查不到 ⇒ `None`（调用方 fail-closed）。

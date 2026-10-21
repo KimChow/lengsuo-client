@@ -130,7 +130,9 @@ pub struct RawConfig {
 impl RawConfig {
     /// 校验并转成 [`RuntimeConfig`]。任何一条不合法都返回 [`ConfigError`]。
     pub fn into_config(self) -> Result<RuntimeConfig, ConfigError> {
-        let device_name = self.device_name.ok_or(ConfigError::Missing { field: "设备名" })?;
+        let device_name = self
+            .device_name
+            .ok_or(ConfigError::Missing { field: "设备名" })?;
         if device_name.is_empty() || device_name.len() > MAX_DEVICE_NAME_LEN {
             return Err(ConfigError::InvalidArgument {
                 detail: format!(
@@ -202,12 +204,13 @@ impl RuntimeConfig {
         let mut table = RouteTable::new();
         for rule in &self.routes {
             rule.validate()?;
-            let destination = RouteDestination::prefix(rule.prefix, rule.prefix_len).map_err(|_| {
-                ConfigError::InvalidRoutePrefix {
-                    prefix: rule.prefix,
-                    prefix_len: rule.prefix_len,
-                }
-            })?;
+            let destination =
+                RouteDestination::prefix(rule.prefix, rule.prefix_len).map_err(|_| {
+                    ConfigError::InvalidRoutePrefix {
+                        prefix: rule.prefix,
+                        prefix_len: rule.prefix_len,
+                    }
+                })?;
             table
                 .insert(destination, rule.interface_index, rule.source)
                 .map_err(|error| ConfigError::RouteTable {
@@ -271,9 +274,11 @@ fn number<T>(value: &str, field: &str) -> Result<T, ConfigError>
 where
     T: std::str::FromStr,
 {
-    value.parse::<T>().map_err(|_| ConfigError::InvalidArgument {
-        detail: format!("{field} 的值 {value:?} 不是合法数值"),
-    })
+    value
+        .parse::<T>()
+        .map_err(|_| ConfigError::InvalidArgument {
+            detail: format!("{field} 的值 {value:?} 不是合法数值"),
+        })
 }
 
 /// 解析一条路由规则：`前缀/长度,出接口索引,源地址`。
@@ -284,17 +289,20 @@ fn parse_route(value: &str) -> Result<RouteRule, ConfigError> {
             detail: format!("route {value:?} 应为 前缀/长度,出接口索引,源地址"),
         });
     }
-    let (prefix, prefix_len) = parts[0].split_once('/').ok_or_else(|| {
-        ConfigError::InvalidArgument {
-            detail: format!("route 前缀 {:?} 缺少 /长度", parts[0]),
-        }
-    })?;
+    let (prefix, prefix_len) =
+        parts[0]
+            .split_once('/')
+            .ok_or_else(|| ConfigError::InvalidArgument {
+                detail: format!("route 前缀 {:?} 缺少 /长度", parts[0]),
+            })?;
     let prefix: IpAddr = prefix.parse().map_err(|_| ConfigError::InvalidArgument {
         detail: format!("route 前缀 {prefix:?} 不是合法地址"),
     })?;
-    let prefix_len: u8 = prefix_len.parse().map_err(|_| ConfigError::InvalidArgument {
-        detail: format!("route 前缀长度 {prefix_len:?} 不是合法数值"),
-    })?;
+    let prefix_len: u8 = prefix_len
+        .parse()
+        .map_err(|_| ConfigError::InvalidArgument {
+            detail: format!("route 前缀长度 {prefix_len:?} 不是合法数值"),
+        })?;
     let interface_index: u32 = parts[1].parse().map_err(|_| ConfigError::InvalidArgument {
         detail: format!("route 出接口索引 {:?} 不是合法数值", parts[1]),
     })?;

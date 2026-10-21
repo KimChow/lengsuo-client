@@ -58,9 +58,7 @@ pub use entry::{
     main_with_args, run_entry, run_with_config, DemoOutbound, EntryError, EntryOutcome,
     StaticAuthority, StaticClassifier, StaticWiring,
 };
-pub use runtime::{
-    Limits, OutboundExchange, RunOutcome, Runtime, RuntimeStats, Step, StopReason,
-};
+pub use runtime::{Limits, OutboundExchange, RunOutcome, Runtime, RuntimeStats, Step, StopReason};
 
 /// 进程主函数。
 ///

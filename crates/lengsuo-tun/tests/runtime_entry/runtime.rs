@@ -5,9 +5,7 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use lengsuo_tun::egress::{
-    Attribution, DeviceId, EgressSelector, EnvironmentId, OutboundProtocol,
-};
+use lengsuo_tun::egress::{Attribution, DeviceId, EgressSelector, EnvironmentId, OutboundProtocol};
 use lengsuo_tun::tcp::connector::RouteTable;
 use lengsuo_tun::tcp::listener::{self, TcpListener};
 use lengsuo_tun::tcp::segment::Flags;
@@ -25,11 +23,16 @@ fn runtime(
     outbound: FakeOutbound,
     authority: FakeAuthority,
 ) -> Runtime<FakeDevice, FixedClassifier, FakeAuthority, FakeOutbound> {
-    runtime_with_attribution(device, outbound, authority, Some(Attribution {
-        environment: EnvironmentId(authority.environment),
-        device: DeviceId(authority.device),
-        epoch: authority.epoch,
-    }))
+    runtime_with_attribution(
+        device,
+        outbound,
+        authority,
+        Some(Attribution {
+            environment: EnvironmentId(authority.environment),
+            device: DeviceId(authority.device),
+            epoch: authority.epoch,
+        }),
+    )
 }
 
 /// 组装一个运行时，但可指定归因（`None` 表示无归属）。

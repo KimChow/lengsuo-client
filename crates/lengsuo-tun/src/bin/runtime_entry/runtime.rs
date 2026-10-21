@@ -44,21 +44,12 @@ pub trait OutboundExchange {
 }
 
 /// 事件循环的预算。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Limits {
     /// 收到这么多报文后停止（0 表示不限）。
     pub max_packets: u64,
     /// 最多执行这么多步（0 表示不限）。防止持续超时时死循环。
     pub max_steps: u64,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_packets: 0,
-            max_steps: 0,
-        }
-    }
 }
 
 /// 单步处理结果。每一步都能被调用方观测，不需要解析日志。
@@ -74,10 +65,7 @@ pub enum Step {
         detail: Option<String>,
     },
     /// 已处理。`written` 是写回设备的报文数，`delivered` 是交给出口的载荷字节数。
-    Forwarded {
-        written: usize,
-        delivered: usize,
-    },
+    Forwarded { written: usize, delivered: usize },
     /// 设备层面错误；事件循环应以 [`StopReason::DeviceFailed`] 停止。
     DeviceFailed { detail: String },
 }
@@ -312,10 +300,7 @@ where
             written += 1;
             self.stats.written += 1;
         }
-        Step::Forwarded {
-            written,
-            delivered,
-        }
+        Step::Forwarded { written, delivered }
     }
 
     /// 按预算运行事件循环，返回统计与停止原因。设备错误是终止性的。

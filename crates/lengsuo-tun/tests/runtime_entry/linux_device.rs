@@ -54,31 +54,32 @@ fn real_tun_device_is_configured_and_writes_reach_the_kernel() {
     // ① 设备名被内核接受，且非空。
     assert!(!device.name().is_empty(), "设备名不得为空");
     // ② MTU 生效：本地记录的 MTU 与配置一致。
-    assert_eq!(device.mtu(), Some(config.mtu), "本地记录的 MTU 必须与配置一致");
+    assert_eq!(
+        device.mtu(),
+        Some(config.mtu),
+        "本地记录的 MTU 必须与配置一致"
+    );
 
     // ③ 从内核读回状态：MTU 认账、接口已 UP。
     //    这是「生效」的唯一可信证据——复述本地字段不算数。
-    let state = device
-        .query_state()
-        .expect("从内核读回接口状态应成功");
+    let state = device.query_state().expect("从内核读回接口状态应成功");
     assert_eq!(state.mtu, config.mtu, "内核认账的 MTU 必须与配置一致");
     assert!(state.up, "接口必须已置 UP");
 
     // ④ 写路径：写一个目的地址不可达的 IPv4 报文，内核会因此产生一个 ICMP
     //    差错报文，读得到就说明写确实到了内核。
-    let mut packet = crate::support::tcp_packet(
-        1000,
-        0,
-        lengsuo_tun::tcp::segment::Flags::SYN,
-        &[],
-    );
+    let mut packet =
+        crate::support::tcp_packet(1000, 0, lengsuo_tun::tcp::segment::Flags::SYN, &[]);
     // 目的地址改成一个内核不会路由的地址，制造可观测的内核反应。
     packet[16..20].copy_from_slice(&[192, 0, 2, 123]);
     device.send(&packet).expect("写回报文应成功");
 
     let mut saw_kernel_packet = false;
     for _ in 0..50 {
-        match device.receive(Duration::from_millis(100)).expect("收包不应报错") {
+        match device
+            .receive(Duration::from_millis(100))
+            .expect("收包不应报错")
+        {
             Receipt::Packet(bytes) => {
                 // 内核产出的报文是一份 IP 报文：首字节高 4 位是版本号。
                 // ⚠️ 不能用 `packet::inspect` 校验它——那个解析器**只**接受 TCP/UDP，
@@ -125,7 +126,9 @@ fn real_tun_device_reports_errors_explicitly() {
 #[test]
 fn stub_device_never_pretends_to_work() {
     let mut device = crate::runtime_entry::UnsupportedDevice::new("lstest0");
-    let error = device.receive(Duration::from_millis(1)).expect_err("桩不得假装收到包");
+    let error = device
+        .receive(Duration::from_millis(1))
+        .expect_err("桩不得假装收到包");
     assert!(matches!(error, DeviceError::Unsupported { .. }));
     let error = device.send(&[0u8; 20]).expect_err("桩不得假装写回成功");
     assert!(matches!(error, DeviceError::Unsupported { .. }));

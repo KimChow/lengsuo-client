@@ -3,7 +3,9 @@
 use lengsuo_tun::egress::{BindingAuthority, DeviceId, EnvironmentId, OutboundRuntime};
 use lengsuo_tun::ingress::Classifier;
 
-use crate::runtime_entry::{main_with_args, run_entry, DemoOutbound, StaticAuthority, StaticClassifier};
+use crate::runtime_entry::{
+    main_with_args, run_entry, DemoOutbound, StaticAuthority, StaticClassifier,
+};
 
 use crate::support::{config, tcp_packet, NOW};
 
@@ -20,8 +22,13 @@ fn static_wiring_is_self_consistent() {
         device: 70,
         epoch: 3,
     };
-    let info = lengsuo_tun::packet::inspect(&tcp_packet(1000, 0, lengsuo_tun::tcp::segment::Flags::SYN, &[]))
-        .expect("报文应可解析");
+    let info = lengsuo_tun::packet::inspect(&tcp_packet(
+        1000,
+        0,
+        lengsuo_tun::tcp::segment::Flags::SYN,
+        &[],
+    ))
+    .expect("报文应可解析");
     let attribution = classifier
         .classify(&info)
         .expect("分类不应失败")
@@ -71,9 +78,7 @@ fn demo_outbound_records_what_it_did() {
         )
         .expect("建连应成功");
     assert_eq!(outbound.opens, 1);
-    outbound
-        .forward(session, b"hello")
-        .expect("转发应成功");
+    outbound.forward(session, b"hello").expect("转发应成功");
     assert_eq!(outbound.forwarded.len(), 1);
     // 释放后再转发 ⇒ 明确失败（不假装成功）。
     outbound.release(session);
