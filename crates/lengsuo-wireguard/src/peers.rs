@@ -1,14 +1,19 @@
 //! 多 peer 配置装载与定向：本端可同时与多个对端并存，每个 peer 有独立的
-//! allowedIPs、keepalive 与 index。
+//! allowedIPs、keepalive、index 与 endpoint（源地址）。
 //!
 //! 对照参考：
 //! - Xray `proxy/wireguard/config.pb.go` 的 `PeerConfig{PublicKey, PreSharedKey,
 //!   Endpoint, KeepAlive, AllowedIps}` 与 `wireguard.go:createIPCRequest` 的
 //!   peers 数组语义（一对多条 `public_key=` / `allowed_ip=` / ... 记录）。
 //! - wireguard-go `device/peer.go`：`Peer` 持 `handshake`/`keypairs`，
-//!   通过 device 的全局 index 表把接收报文定向回 peer。
+//!   通过 device 的全局 index 表把接收报文定向回 peer；同文件的
+//!   `Peer.SetEndpointFromPacket`（commit
+//!   `2631ce99a06f27120d581611cf125d68bc6aa565`）用**收到报文的源地址**
+//!   覆盖 `Peer.endpoint`（`endpoint-mutex` 保护）⇒ 对端换网络后仍能回包。
 //!
-//! 本模块只做**纯配置装载 + 定向查询**，不建立 socket / TUN。
+//! 本模块只做**纯配置装载 + 定向查询 + endpoint 漫游判定**，不建立 socket / TUN。
+
+use std::net::SocketAddr;
 
 use crate::allowedips::AllowedIps;
 
@@ -37,6 +42,11 @@ pub struct Peer {
     pub config: PeerConfig,
     /// 该 peer 的 allowedIPs 集合（与此 peer 绑定）。
     pub allowed_ips: AllowedIps,
+    /// 该 peer 当前的 endpoint（源地址），`None` 表示尚未建立。
+    ///
+    /// 这是**运行时状态**而非配置项（故不在 `PeerConfig` 里）：它随对端
+    /// 网络切换而变，由 `PeerSet::set_peer_endpoint` 更新。
+    pub endpoint: Option<SocketAddr>,
 }
 
 /// 装载/查询失败（fail-closed）。
@@ -96,6 +106,7 @@ impl PeerSet {
             id,
             config,
             allowed_ips: AllowedIps::new(),
+            endpoint: None,
         });
         Ok(id)
     }
@@ -140,4 +151,45 @@ impl PeerSet {
     pub fn iter(&self) -> impl Iterator<Item = &Peer> {
         self.peers.iter()
     }
+
+    /// 设置/更新某个 peer 的 endpoint（漫游）。`None` 表示清除。
+    ///
+    /// 找不到 peer ⇒ 返回 `Err(PeerError::NotFound)`（fail-closed，不静默忽略）。
+    ///
+    /// 对照参考 wireguard-go `device/peer.go` 的 `Peer.SetEndpointFromPacket`
+    /// （commit `2631ce99a06f27120d581611cf125d68bc6aa565`）：用报文的源
+    /// 地址直接覆盖旧值，不比较新旧是否相同。
+    pub fn set_peer_endpoint(
+        &mut self,
+        id: usize,
+        endpoint: Option<SocketAddr>,
+    ) -> Result<(), PeerError> {
+        let peer = self.peers.get_mut(id).ok_or(PeerError::NotFound)?;
+        peer.endpoint = endpoint;
+        Ok(())
+    }
+
+    /// 读某个 peer 的 endpoint。peer 不存在或尚未建立 ⇒ `None`。
+    #[must_use]
+    pub fn endpoint(&self, id: usize) -> Option<SocketAddr> {
+        self.peers.get(id).and_then(|p| p.endpoint)
+    }
+}
+
+/// 漫游判定：收到一个「源地址」，与该 peer 当前 endpoint 比较。
+///
+/// - `None`（本端还不知道 endpoint）⇒ 接受（首次建链）
+/// - 与当前 endpoint 相同 ⇒ 接受（未漫游）
+/// - 与当前 endpoint 不同 ⇒ **接受并要求更新**（漫游，源地址已变）
+///
+/// 返回 `true` 表示「需要把该 peer 的 endpoint 更新为 `src`」。
+///
+/// 判定**只用地址相等性**，不做端口范围 / 同网段猜测。
+///
+/// ⛔ 漫游是**允许**的：地址变了**不得**据此拒绝收包——那会打断漫游。
+/// 对端在 NAT 后换网络时源 IP 与源端口都可能变，若不更新 endpoint，
+/// 之后所有响应仍发往旧地址 ⇒ 链路直接断。
+#[must_use]
+pub fn should_roam(current: Option<SocketAddr>, src: SocketAddr) -> bool {
+    current != Some(src)
 }

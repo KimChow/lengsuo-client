@@ -7,11 +7,19 @@
 //!
 //! 未实现（不在本卡范围，见 `docs/wireguard-status.md`）：TUN 读写、真实
 //! endpoint 收发、握手报文的构造/校验（`handshake` 模块存在但本模块只做转发）。
+//!
+//! 端点漂移（roaming）：本模块另提供 `endpoint_after_receive`——在**认证
+//! 通过**的报文到达时，按报文的源地址判定该 peer 是否发生了漫游并给出
+//! 应写入的新 endpoint。对照 wireguard-go `device/receive.go`（commit
+//! `2631ce99a06f27120d581611cf125d68bc6aa565`）：认证失败的报文直接
+//! `goto skip`，**不碰** endpoint；认证通过的才 `SetEndpointFromPacket`。
 
+use std::net::SocketAddr;
 use std::time::Instant;
 
 use crate::allowedips::AllowedIps;
 use crate::keypair::KeypairSet;
+use crate::peers::should_roam;
 use crate::timers::{TimerAction, TimerState};
 use crate::wire::{self, Message};
 
@@ -142,5 +150,32 @@ impl Device {
     /// 推进定时器并返回到期的动作（调用方据此真正发包 / 擦除密钥）。
     pub fn tick(&mut self, now: Instant) -> Vec<TimerAction> {
         self.timers.tick(now)
+    }
+}
+
+/// 源地址校验 + 漫游判定：给定一次收包的结果与该 peer 当前的 endpoint，
+/// 给出**应写入的新 endpoint**。
+///
+/// - `Output::Deliver`（认证通过）⇒ 源地址可信：地址变了就是漫游，返回
+///   `Some(src)` 让调用方更新 endpoint；地址未变则返回 `None`（无需写）。
+/// - 其余结果（`DroppedUnparsable` / `DroppedExpiredKeypair`，即认证失败
+///   或报文非法）⇒ **不碰** endpoint，返回 `None`。
+///
+/// 对照 wireguard-go `device/receive.go`（commit
+/// `2631ce99a06f27120d581611cf125d68bc6aa565`）：认证失败的报文
+/// `goto skip`，`Peer.SetEndpointFromPacket` 根本不会被调到——否则伪造包
+/// 就能把对端的回包引到攻击者地址。
+///
+/// ⛔ 认证通过但源地址变了时**不得**拒绝收包：漫游是允许的，判定只看
+/// 地址相等性（见 `peers::should_roam`）。
+#[must_use]
+pub fn endpoint_after_receive(
+    output: &Output,
+    current: Option<SocketAddr>,
+    src: SocketAddr,
+) -> Option<SocketAddr> {
+    match output {
+        Output::Deliver { .. } => should_roam(current, src).then_some(src),
+        Output::DroppedExpiredKeypair { .. } | Output::DroppedUnparsable => None,
     }
 }
