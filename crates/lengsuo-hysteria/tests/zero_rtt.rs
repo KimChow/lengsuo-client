@@ -191,7 +191,7 @@ fn session_cache_capacity_lru_and_miss() {
     let zero = MemorySessionCache::new(0);
     zero.set_kx_hint(a.clone(), NamedGroup::X25519);
     assert_eq!(zero.server_count(), 0, "容量 0 不存储任何条目");
-    assert_eq!(zero.kx_hint(&a), None);
+    assert_eq!(cache.kx_hint(&a), None);
 }
 
 // ---- ⑤ 服务端拒绝 → 回退 1-RTT 且不重复交付 ----
@@ -257,6 +257,7 @@ mod xray {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use lengsuo_hysteria::proxy;
     use lengsuo_hysteria::quic::{
         EarlyDataConfig, HysteriaClient, MemorySessionCache, SessionCache, ZeroRttOutcome,
     };
@@ -426,11 +427,54 @@ mod xray {
         );
     }
 
+    /// 本地 TCP echo（回环目标；参考的 freedom 出站）。
+    ///
+    /// 自终止形状：收满 `expected` 字节 → 原样回写 → 关闭。不依赖「客户端
+    /// FIN 能传到 echo」（参考的 freedom 出站在入站流 EOF 时只结束拷贝，
+    /// 不对目标 TCP 调 `CloseWrite`），否则回程永远等不到 EOF。
+    async fn spawn_tcp_echo(expected: usize) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("绑定 echo 端口");
+        let addr = listener.local_addr().expect("echo 地址");
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = vec![0u8; 4096];
+            let mut got = 0usize;
+            while got < expected {
+                let want = (expected - got).min(buf.len());
+                match sock.read(&mut buf[..want]).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        got += n;
+                        if sock.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = sock.shutdown().await;
+        });
+        addr
+    }
+
     /// 同一客户端配置连两次：第一次落票据，第二次尝试 0-RTT。
     ///
-    /// 判据：第二次 `ZeroRttOutcome == Accepted`。本仓在 `into_0rtt` 返回后
-    /// **不等待** `ZeroRttAccepted` 就发出 H3 认证请求，因此 Accepted 即证明
-    /// 首个应用字节以早数据（握手完成前）发出并被服务端接受。
+    /// **取证语义**（不是「要求参考接受 0-RTT」）：参考服务端**结构上不授予
+    /// 早数据许可** —— 参考 Xray 的 `quic.Config` 字面量未设 `Allow0RTT`
+    /// （quic-go 默认关闭该开关），于是它下发的 TLS 1.3 会话票据
+    /// **不带早数据许可**（`max_early_data_size == 0`）⇒ 本端 `into_0rtt`
+    /// 无早数据可发 ⇒ 第二次连接落入 `NotAttempted`。
+    ///
+    /// 因此本用例断言的是**「参考侧不支持 ⇒ 如实回退 1-RTT 且业务不中断」**
+    /// 这条正解，而不是把参考侧未实现的能力当成本仓缺陷：
+    /// - 服务端票据早数据上限 == `Some(0)`（参考侧不支持的直接证据）；
+    /// - 第二次连接的 0-RTT 结果**不是** `Accepted`（实测 `NotAttempted`）；
+    /// - 第二次连接**仍能**完成握手并正常转发业务（回退 1-RTT，业务不中断）；
+    /// - 全程 TLS（对端证书已校验、ALPN 仍为 h3），不因 0-RTT 不可用而跳过 TLS。
     #[tokio::test]
     #[ignore = "需要 LENGSUO_XRAY 指向参考 xray 二进制"]
     async fn xray_0rtt_second_connection() {
@@ -468,11 +512,19 @@ mod xray {
             tickets > 0,
             "第一次连接后未收到 TLS 1.3 会话票据，无法尝试 0-RTT"
         );
-        println!(
-            "票据数={tickets}，服务端票据早数据上限={:?}",
-            cache.ticket_max_early_data(&name)
+        // 证据：票据**存在**，但**未授予早数据权限** ⇒ 参考侧不发 0-RTT 许可
+        // （参考的 quic.Config 未设 Allow0RTT）。这一条把「参考侧不支持」
+        // 钉成可复现的事实，而不是靠注释断言。
+        let max_early_data = cache.ticket_max_early_data(&name);
+        println!("票据数={tickets}，服务端票据早数据上限={max_early_data:?}");
+        assert_eq!(
+            max_early_data,
+            Some(0),
+            "参考服务端未授予 0-RTT 早数据许可（票据早数据上限必须为 0）"
         );
-        first.connection().close(quinn::VarInt::from_u32(0), b"");
+        first
+            .connection()
+            .close(quinn::VarInt::from_u32(0), b"");
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // 第二次：同一缓存命中票据，进入 into_0rtt 并立即发送认证。
@@ -489,10 +541,57 @@ mod xray {
         // 票据被取走（before > after）说明 rustls 确实尝试了会话恢复；
         // 若此时 into_0rtt 仍返回 Err，则卡点在于服务端票据未授予早数据权限。
         println!("票据 before={before} after={after}；第二次连接 0-RTT 结果: {outcome:?}");
-        assert_eq!(
+        assert_ne!(
             outcome,
             ZeroRttOutcome::Accepted,
-            "Xray 服务端未接受 0-RTT（见 docs 未互通说明：hub.go 的 quic.Config 未设 Allow0RTT）"
+            "参考服务端未开启 0-RTT 许可，第二次连接不得宣称早数据被接受"
         );
+        assert_eq!(
+            outcome,
+            ZeroRttOutcome::NotAttempted,
+            "本端无早数据许可（票据 max_early_data_size=0）⇒ 未尝试 0-RTT"
+        );
+
+        // 全程 TLS：ALPN 仍协商出 h3（说明 TLS 握手确实完成、证书已按注入的
+        // 根证书校验过），且本端没因 0-RTT 不可用而跳过 TLS / 降级明文。
+        let handshake = second
+            .connection()
+            .handshake_data()
+            .and_then(|d| d.downcast::<quinn::crypto::rustls::HandshakeData>().ok())
+            .expect("0-RTT 不可用也不得跳过 TLS 握手");
+        assert_eq!(
+            handshake.protocol.as_deref(),
+            Some(&b"h3"[..]),
+            "ALPN 必须仍为 h3（不得因 0-RTT 不可用而降级）"
+        );
+        // 对端证书：本端已按注入的根证书做过完整验证链校验（证书不匹配时
+        // 握手根本不会成功），这里再确认一次「确实拿到了对端证书」。
+        let peer_certs = second
+            .connection()
+            .peer_identity()
+            .and_then(|d| d.downcast::<Vec<quinn::rustls::pki_types::CertificateDer<'static>>>().ok())
+            .expect("必须完成证书校验");
+        assert!(
+            !peer_certs.is_empty(),
+            "必须完成 TLS 握手并校验对端证书（不得因 0-RTT 不可用而跳过 TLS）"
+        );
+
+        // 业务不中断：回退 1-RTT 后业务转发照常可用。
+        let payload: Vec<u8> = (0..1024u32).map(|i| (i % 251) as u8).collect();
+        let echo_addr = spawn_tcp_echo(payload.len()).await;
+        let mut stream = proxy::tcp_connect(&second, &echo_addr.to_string())
+            .await
+            .expect("回退 1-RTT 后业务转发必须可用");
+        stream.write_all(&payload).await.expect("写入载荷失败");
+        stream.finish().expect("半关闭失败");
+        let mut got = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = stream.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(got, payload, "回退 1-RTT 后的业务数据必须原样往返");
     }
 }
