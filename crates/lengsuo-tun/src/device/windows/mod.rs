@@ -11,6 +11,9 @@
 //! `end_session` / `close` / `Drop`（会话结束）。关闭后的任何操作返回 [`Error::Closed`]，
 //! 不会二次关闭。适配器句柄在 `Device` 析构时由 wintun 绑定释放。
 
+mod error;
+mod netsh;
+
 use super::{
     DeviceConfig, Error, Result, LIBRARY_ENV, LIBRARY_FILE, MAX_PACKET_BYTES, POLL_INTERVAL,
 };
@@ -18,13 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wintun::{Adapter, Session, Wintun};
 
-/// 与 wintun.h 注释一致的系统错误码，用于把绑定错误分类成本层的类型化错误。
-/// 数值取自 windows-sys 的 `WIN32_ERROR` 常量，只在本机做整数比较。
-const ERROR_INVALID_DATA: i32 = 13;
-const ERROR_HANDLE_EOF: i32 = 38;
-const ERROR_BUFFER_OVERFLOW: i32 = 111;
-const ERROR_NO_MORE_ITEMS: i32 = 259;
-const ERROR_ADAPTER_OFF: i32 = 1246;
+use error::map_error;
 
 /// 已加载的 wintun 库句柄。克隆只增加引用计数（绑定的 `Wintun` 本身就是 `Arc`）。
 #[derive(Clone)]
@@ -187,7 +184,7 @@ impl Device {
     /// Windows 接口索引，供按接口指定 `netsh` 等命令。
     pub fn interface_index(&self) -> Result<u32> {
         self.ensure_open()?;
-        wrap(self.adapter.get_adapter_index())
+        error::wrap(self.adapter.get_adapter_index())
     }
 
     /// 设置 MTU。属于系统状态变更，只在调用方显式请求时执行；成功后同步进配置。
@@ -206,8 +203,8 @@ impl Device {
         let name = self.config.adapter_name.clone();
         let value = usize::from(mtu);
         // 先走绑定（IPv4），再补 IPv6；两侧都必须成功，避免只改一半。
-        wrap(self.adapter.set_mtu(value))?;
-        set_adapter_mtu_for(&name, "ipv6", value)?;
+        error::wrap(self.adapter.set_mtu(value))?;
+        netsh::set_adapter_mtu_for(&name, "ipv6", value)?;
         self.config.mtu = mtu;
         Ok(())
     }
@@ -221,11 +218,11 @@ impl Device {
     pub fn mtu(&self) -> Result<u16> {
         self.ensure_open()?;
         let name = self.config.adapter_name.clone();
-        let v4 = query_adapter_mtu(&name, "ipv4")?;
-        let v6 = query_adapter_mtu(&name, "ipv6")?;
+        let v4 = netsh::query_adapter_mtu(&name, "ipv4")?;
+        let v6 = netsh::query_adapter_mtu(&name, "ipv6")?;
         let (Some(v4), Some(v6)) = (v4, v6) else {
             // 至少一族没有 MTU 行：退回绑定读回，但要求它落在 16 位内。
-            let mtu = wrap(self.adapter.get_mtu())?;
+            let mtu = error::wrap(self.adapter.get_mtu())?;
             return u16::try_from(mtu).map_err(|_| Error::Device {
                 reason: format!("系统 MTU {mtu} 超出 16 位单包上限 {MAX_PACKET_BYTES}"),
             });
@@ -240,8 +237,8 @@ impl Device {
         self.ensure_open()?;
         let name = self.config.adapter_name.clone();
         Ok((
-            query_adapter_mtu(&name, "ipv4")?,
-            query_adapter_mtu(&name, "ipv6")?,
+            netsh::query_adapter_mtu(&name, "ipv4")?,
+            netsh::query_adapter_mtu(&name, "ipv6")?,
         ))
     }
 
@@ -328,117 +325,4 @@ impl Drop for Device {
         // 幂等：显式 close() 之后再到这里不会二次关闭。
         let _ = self.close();
     }
-}
-
-/// 把 wintun 绑定的结果统一换成本层错误类型。
-fn wrap<T>(result: std::result::Result<T, wintun::Error>) -> Result<T> {
-    result.map_err(map_error)
-}
-
-/// 错误分类。wintun::Error 是 `#[non_exhaustive]`，所以必须有兜底分支；
-/// 兜底保留原始文案，绝不把失败说成成功。
-fn map_error(error: wintun::Error) -> Error {
-    match error {
-        wintun::Error::ShuttingDown => Error::SessionEnded,
-        wintun::Error::CapacityOutOfRange(data) => Error::RingCapacity {
-            value: data.value,
-            min: *data.range.start(),
-            max: *data.range.end(),
-        },
-        wintun::Error::CapacityNotPowerOfTwo(value) => Error::RingCapacity {
-            value,
-            min: DeviceConfig::MIN_RING_CAPACITY,
-            max: DeviceConfig::MAX_RING_CAPACITY,
-        },
-        wintun::Error::Io(io) => map_io_error(io),
-        other => Error::Device {
-            reason: format!("{other}"),
-        },
-    }
-}
-
-/// IO 错误按 Win32 错误码分类；取不到错误码时保留文案与 dll 提示。
-fn map_io_error(io: std::io::Error) -> Error {
-    match io.raw_os_error() {
-        // 这三类都表示 ring/适配器侧已经终止，重试无意义。
-        Some(ERROR_NO_MORE_ITEMS)
-        | Some(ERROR_HANDLE_EOF)
-        | Some(ERROR_INVALID_DATA)
-        | Some(ERROR_ADAPTER_OFF) => Error::SessionEnded,
-        Some(ERROR_BUFFER_OVERFLOW) => Error::BufferInsufficient,
-        _ => Error::Device {
-            reason: format!(
-                "{io}（提示：{}；确认 {LIBRARY_ENV} 指向的 dll 与已装驱动版本一致）",
-                Library::load_hint()
-            ),
-        },
-    }
-}
-
-/// 运行 `netsh` 并返回 stdout；非 0 退出码转为类型化错误。
-///
-/// 与 wintun 绑定的 `run_command` 同为「只看退出码」的语义，但本层保留
-/// stderr 文案便于实机排障。**不写入系统目录、不改路由、不碰非本适配器接口。**
-fn run_netsh(args: &[&str]) -> Result<String> {
-    let output = std::process::Command::new("netsh")
-        .args(args)
-        .output()
-        .map_err(|io| Error::Device {
-            reason: format!("调用 netsh 失败：{io}"),
-        })?;
-    if !output.status.success() {
-        let text = String::from_utf8_lossy(if output.stderr.is_empty() {
-            &output.stdout
-        } else {
-            &output.stderr
-        });
-        return Err(Error::Device {
-            reason: format!("netsh {} 失败：{}", args.join(" "), text.trim()),
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// 按协议族设置适配器 MTU（`family` 为 `"ipv4"` 或 `"ipv6"`）。
-///
-/// 存在的理由：wintun 绑定的 `set_mtu` **只设 IPv4**（见 [`Device::set_mtu`] 取证），
-/// 双栈环境必须补设 IPv6，否则 [`Device::mtu`] 的回读不可信。
-fn set_adapter_mtu_for(name: &str, family: &str, mtu: usize) -> Result<()> {
-    let quoted = format!("\"{name}\"");
-    run_netsh(&[
-        "interface",
-        family,
-        "set",
-        "subinterface",
-        &quoted,
-        &format!("mtu={mtu}"),
-        "store=persistent",
-    ])
-    .map(|_| ())
-}
-
-/// 按协议族读取适配器 MTU；该协议族没有对应行时返回 `None`。
-///
-/// 解析 `netsh interface <family> show subinterfaces` 的表格行，
-/// 匹配适配器名后取首列 MTU。**读不到或格式变化时返回 `None` 而非猜测值**，
-/// 由调用方决定回退策略。
-fn query_adapter_mtu(name: &str, family: &str) -> Result<Option<u16>> {
-    let text = run_netsh(&["interface", family, "show", "subinterfaces"])?;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("---") {
-            continue;
-        }
-        // 只认含本适配器名的行；表头行不含适配器名，自然跳过。
-        if !trimmed.contains(name) {
-            continue;
-        }
-        // 首列是 MTU；按空白切分，第一段必须是十进制整数。
-        if let Some(first) = trimmed.split_whitespace().next() {
-            if let Ok(value) = first.parse::<u16>() {
-                return Ok(Some(value));
-            }
-        }
-    }
-    Ok(None)
 }
