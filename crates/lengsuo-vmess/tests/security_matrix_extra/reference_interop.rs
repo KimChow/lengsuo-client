@@ -28,113 +28,23 @@
 //! - `proxy/vmess/encoding/server.go:323`：`ZERO` 等其余档 ⇒ 体阶段
 //!   `invalid option: Security`。
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use lengsuo_vmess::aead;
 use lengsuo_vmess::bodyframe::{BodyFrame, BodySuite, ChunkStreamFrame};
 use lengsuo_vmess::chunkframe::DataSizeParser;
-use lengsuo_vmess::request::{Command, HeaderPlanner, KeySource, RequestHeader, SecurityOption};
+use lengsuo_vmess::request::{Command, KeySource, RequestHeader, SecurityOption};
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 
+use super::refharness::{
+    current_unix_seconds, plan_request_header, rewrite_security_nibble, seal_header_now,
+    start_xray_inbound, xray_bin, CONNECT_TIMEOUT, PAYLOAD, RESPONSE_TIMEOUT,
+};
 use super::refhelpers::{
     cmd_key_from_uuid, response_key_iv, spawn_echo, spawn_echo_counted, uuid_bytes, uuid_string,
 };
-
-/// 连接超时。
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// 回程超时。
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
-/// 固定 unix 秒（构造确定性 AuthID 用）。
-///
-/// ⛔ **参考侧不能用固定的历史时间**：`proxy/vmess/aead/authid.go:110` 的
-/// `math.Abs(... - time.Now().Unix()) > 120` ⇒ 超过 120 秒的旧时间戳会被
-/// 参考判成 `ErrInvalidTime`（用户校验阶段就拒），**根本到不了安全档判定**。
-/// 所以打给参考的 AuthID 必须用**当前时间**；本仓自己的单元测试用固定
-/// `NOW`（`common.rs`）是安全的，因为那走本仓的 `decode_request_header`
-/// 显式传入时间。
-const NOW: i64 = 1_700_000_000;
-
-/// 假载荷（不含任何真实凭据）。
-const PAYLOAD: &[u8] = b"vmess-security-matrix-extra-probe";
-
-/// 惰性获取参考二进制；未设置时打印原因并返回 `None`（调用方 `return` 跳过）。
-fn xray_bin() -> Option<PathBuf> {
-    match std::env::var_os("LENGSUO_XRAY") {
-        Some(path) => Some(PathBuf::from(path)),
-        None => {
-            eprintln!(
-                "SKIP: 环境变量 LENGSUO_XRAY 未设置，跳过参考互通用例。\
-                 原因：没有参考二进制可拉起，无法证明与参考的档位语义一致。"
-            );
-            None
-        }
-    }
-}
-
-/// 拉起一个 Xray VMess 入站（127.0.0.1，临时端口，UUID 为随机假凭据）。
-///
-/// 用参考二进制自己的 `run -c` 起进程；配置里只放一个 inbound（vmess）
-/// 与一个 outbound（freedom）。UID 由调用方生成，**不打印**。
-fn start_xray_inbound(bin: &PathBuf, uuid: &str) -> Result<(u16, std::process::Child), String> {
-    // 端口探测：bind 0 后立即释放（与本仓既有夹具同一手法，不新增依赖）。
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|e| format!("探测空闲端口失败: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("取端口失败: {e}"))?
-        .port();
-    drop(listener);
-
-    let dir = std::env::temp_dir().join(format!(
-        "lengsuo-vmess-extra-{}-{}",
-        std::process::id(),
-        port
-    ));
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
-    let cfg_path = dir.join("config.json");
-    let config = format!(
-        concat!(
-            "{{\"log\":{{\"loglevel\":\"warning\"}},",
-            "\"inbounds\":[{{\"tag\":\"vmess-in\",\"listen\":\"127.0.0.1\",\"port\":{port},",
-            "\"protocol\":\"vmess\",\"settings\":{{\"clients\":[{{\"id\":\"{uuid}\",\"alterId\":0}}]}},",
-            "\"streamSettings\":{{\"network\":\"tcp\"}}}}],",
-            "\"outbounds\":[{{\"tag\":\"direct\",\"protocol\":\"freedom\",\"settings\":{{}}}}]}}"
-        ),
-        port = port,
-        uuid = uuid,
-    );
-    std::fs::write(&cfg_path, &config).map_err(|e| format!("写配置失败: {e}"))?;
-    let child = std::process::Command::new(bin)
-        .arg("run")
-        .arg("-c")
-        .arg(&cfg_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("spawn xray 失败: {e}"))?;
-
-    // 等端口就绪（有上限）。
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
-    while std::time::Instant::now() < deadline {
-        if std::net::TcpStream::connect_timeout(
-            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
-            Duration::from_millis(200),
-        )
-        .is_ok()
-        {
-            return Ok((port, child));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let mut child = child;
-    let _ = child.kill();
-    let _ = child.wait();
-    Err(format!("Xray 入站端口 {port} 在超时内未就绪"))
-}
 
 /// 本仓客户端 → Xray 入站 → 本地回显后端：回程载荷必须逐字节一致。
 ///
@@ -436,10 +346,7 @@ async fn real_xray_rejects_the_zero_security_tier() {
     // 超过 120 秒的时间戳判 `ErrInvalidTime`（用户校验阶段就拒）⇒ 用固定的
     // 历史时间戳会**在到不了安全档判定之前**就被拒，测出来的是「用户校验
     // 失败」而不是「zero 档被拒」，那种用例是**假绿**。
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("系统时间")
-        .as_secs() as i64;
+    let now = current_unix_seconds();
     let auth = lengsuo_vmess::create_auth_id_with(&cmd_key, now, &[0x01, 0x02, 0x03, 0x04]);
     let header = aead::seal_header_with(&cmd_key, auth.as_bytes(), &[0x11; 8], &plain);
     let opened =
@@ -561,18 +468,29 @@ async fn real_xray_rejects_the_zero_security_tier() {
             );
         }
     }
-    // 关键判据：参考**不得**把 zero 档请求的载荷当成正常数据交付给客户端。
+    // 关键判据（两条，缺一不可）：
+    // 1. 客户端**零字节**响应，且绝不回显明文；
+    // 2. 后端**没有**被连上（连接数相对对照组基线没有增加）。
     //
-    // ⛔ 注意参考的**处理顺序**：`proxy/vmess/inbound/inbound.go:281` 的
-    // `dispatcher.Dispatch(...)`（连后端）发生在 `:289` 的
-    // `svrSession.DecodeRequestBody(request, reader)`（体阶段解帧）**之前**
-    // ⇒ 参考在体阶段拒 zero 档时，**后端可能已经被连上了**。
-    // 所以判据是**客户端可观测**的那一侧：零字节响应、且绝不回显明文。
-    // 后端连接数只做**记录**（对照组基线 vs zero 组），不作硬断言。
+    // 第 2 条把「拒绝点」钉在**体阶段之前**：若参考真把请求转发了，后端连接
+    // 数必然增加（对照组建模证明这条链路会连上后端）。
+    // 判据用**对照组基线**做差，不是绝对值（绝对值会受并发影响）。
+    //
+    // ⚠️ 参考的**代码顺序**是 `proxy/vmess/inbound/inbound.go:281` 的
+    // `dispatcher.Dispatch(...)` 在 `:289` 的
+    // `svrSession.DecodeRequestBody(request, reader)` **之前**；但 freedom
+    // 出口是**懒连接**的（第一次写数据时才真正 dial 后端）⇒ 体阶段解帧
+    // 失败时数据从未流向后端 ⇒ 后端连接数不增加。**这是实测结论**，
+    // 不是从代码顺序推出来的。
     let accepts_after_zero = accepts.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        accepts_after_zero, accepts_after_control,
+        "参考必须在校验 zero 档时拒绝（不得把请求转发到后端）：\
+         对照组基线={} zero 组={}",
+        accepts_after_control, accepts_after_zero
+    );
     eprintln!(
-        "OK 参考拒绝 zero 档请求：未回数据（{} 字节）；后端连接数 对照组={} zero 组={} \
-         （参考先 dispatch 后解体 ⇒ 后端可能被连上，判据取客户端可观测侧）",
+        "OK 参考拒绝 zero 档请求：未回数据（{} 字节）；后端连接数 对照组={} zero 组={}",
         rest.len(),
         accepts_after_control,
         accepts_after_zero
