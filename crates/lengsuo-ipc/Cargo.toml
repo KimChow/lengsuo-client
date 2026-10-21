@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "本地网关客户端：握手文件 → POST /rpc → GET /events(WebSocket)。从 lengsuo-agent 的 lengsuo-shell 抽出，供桌面壳与移动端共用"
+description = "本地网关客户端：握手文件 → POST /rpc → GET /events(WebSocket)。从另一仓的壳层抽出，供桌面壳与移动端共用"
 
 [dependencies]
 tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "sync", "macros", "rt", "rt-multi-thread"] }
@@ -12,8 +12,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# 与本仓 workspace.dependencies 对齐（0.24）。源仓 lengsuo-shell 用的是 0.28，
+# 但两版的 client_async / accept_hdr_async / Message API 对本客户端完全一致；
+# 0.28 的 Message::Text 是 Utf8Bytes、0.24 是 String，本 crate 只用 as_str()，
+# 两版都成立 ⇒ 保持 0.24，避免动共享区的 workspace.dependencies。
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+serde_json = { workspace = true }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
