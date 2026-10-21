@@ -5,10 +5,17 @@
 //! `lengsuo_tls` 承担（对齐参考：两协议的认证都只在已认证 TLS 之上进行）。
 //!
 //! 本文件只保留**分发**与**八协议共用**的设施；各协议的具体拨号实现分散在
-//! 各自的 `outbound_*` 模块里（`outbound_trojan` / `outbound_ss` /
+//! 各自的 `outbound_*` 模块里（`outbound_trojan` / `outbound_anytls` /
+//! `outbound_ss` /
 //! `outbound_ss2022` / `outbound_vmess` / `outbound_vless` /
 //! `outbound_hysteria` / `outbound_wireguard`）。
 //!
+//!
+//! anytls 的实现与常量已搬到协议专属模块 `outbound_anytls`（其它六协议
+//! 同样各自独立成文件）；本模块只保留**跨协议共享**的部分：分发、类型别名、
+//! 解析、TLS 客户端构造与错误枚举。anytls 的出口会话、拨号入口与错误变体
+//! 在此转出（`pub use`），既有引用路径 `outbound::dial_anytls` /
+//! `outbound::AnyTlsOutbound` 保持可用。
 //! “握手到认证完成”在两协议的观测方式不同，与参考一致：
 //! - trojan 没有成功响应头（参考 `client.go` 写完头部即转发）：认证完成只能
 //!   负向排除——请求头完整写出后开一个观察窗，窗内对端关闭（EOF/读错误）即
@@ -37,20 +44,16 @@ use crate::outbound_trojan::{
 use crate::outbound_vless::VlessOutbound;
 use crate::outbound_vmess::VmessOutbound;
 use crate::outbound_wireguard::WireguardOutbound;
-use lengsuo_anytls::auth::Credential as AnyTlsCredential;
-use lengsuo_anytls::client_state::ClientState;
-use lengsuo_anytls::frame::{Command as AnyTlsCommand, Frame};
+/// anytls 拨号入口转出到 `outbound_anytls`（协议专属实现），保持
+/// `outbound::dial_anytls` 这条路径对既有调用方（`forward`）继续可用。
+pub use crate::outbound_anytls::dial_anytls;
+/// anytls 专属错误变体（协议错误 / 客户端状态机拒绝），定义在
+/// `outbound_anytls`；`DialError::AnyTls` 以 `transparent` 承载它。
+pub use crate::outbound_anytls::AnyTlsError;
+/// anytls 出站会话：已认证、已协商版本，可继续开流（SYN/PUSH）转发业务。
+/// 定义在 `outbound_anytls`（协议专属模块）；此处转出以保持既有引用路径可用。
+pub use crate::outbound_anytls::AnyTlsOutbound;
 
-/// anytls 客户端单会话活跃流上限（对齐参考默认，见 interop 客户端组装）。
-const ANYTLS_MAX_STREAMS: usize = 16;
-/// anytls 客户端标识；服务端不校验该键，如实上报自身。
-const ANYTLS_CLIENT_IDENT: &str = "lengsuo-node";
-/// 默认 padding 方案的 md5（anytls-go v0.0.13 `pad/padding.go` 逐字节算出），
-/// 上报它使服务端不必先下发 UpdatePadding 即完成 v2 协商。
-/// 与 `lengsuo-anytls/tests/interop_client/session.rs` 同源同值。
-const ANYTLS_DEFAULT_SCHEME_MD5: &str = "75cff2ad89aadf5e257059ee571ebe11";
-/// 认证块 padding：参考客户端按默认方案 `0=30-30` 生成，0 号记录恒 30 字节零值。
-const ANYTLS_AUTH_PADDING: [u8; 30] = [0; 30];
 
 /// 已完成的 TLS 连接类型别名。
 pub type NodeTlsStream = TlsStream<TcpStream>;
@@ -77,11 +80,6 @@ pub enum Outbound {
     Wireguard(WireguardOutbound),
 }
 
-/// anytls 出站会话：已认证、已协商版本，可继续开流（SYN/PUSH）转发业务。
-pub struct AnyTlsOutbound {
-    pub stream: NodeTlsStream,
-    pub state: ClientState,
-}
 
 /// 分发失败。所有 Display 都不含密码或其摘要。
 #[derive(Debug, thiserror::Error)]
@@ -94,10 +92,8 @@ pub enum DialError {
     Resolve(String),
     #[error("trojan 握手失败：{0}")]
     Trojan(#[from] TrojanError),
-    #[error("anytls 协议错误：{0}")]
-    AnyTls(#[from] lengsuo_anytls::Error),
-    #[error("anytls 客户端状态机拒绝：{0}")]
-    AnyTlsState(String),
+    #[error(transparent)]
+    AnyTls(#[from] AnyTlsError),
     #[error("vless 协议错误：{0}")]
     Vless(#[from] lengsuo_vless::stream::Error),
     #[error("vless 请求头编码失败：{0}")]
@@ -264,46 +260,3 @@ pub(crate) async fn connect_tcp(
         .map_err(|err| DialError::Resolve(format!("连接 {} 失败：{}", config.endpoint.host, err)))
 }
 
-/// anytls 出站：TLS → 认证块 → 客户端 Settings(v=2) → 等服务端 ServerSettings。
-pub async fn dial_anytls(config: &NodeConfig, wait: Duration) -> Result<AnyTlsOutbound, DialError> {
-    let client = tls_client(config, wait)?;
-    let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
-    let mut stream = client.connect(addr).await?;
-
-    AnyTlsCredential::new(config.auth.password.as_bytes())
-        .send(&mut stream, &ANYTLS_AUTH_PADDING, wait)
-        .await?;
-    let mut state = ClientState::new(ANYTLS_MAX_STREAMS)
-        .map_err(|err| DialError::AnyTlsState(err.to_string()))?;
-    state
-        .mark_settings_sent()
-        .map_err(|err| DialError::AnyTlsState(err.to_string()))?;
-    let settings =
-        format!("v=2\nclient={ANYTLS_CLIENT_IDENT}\npadding-md5={ANYTLS_DEFAULT_SCHEME_MD5}");
-    Frame {
-        command: AnyTlsCommand::Settings,
-        stream_id: 0,
-        data: settings.into_bytes(),
-    }
-    .write(&mut stream, wait)
-    .await?;
-
-    // 等认证完成的正向证据：ServerSettings。断连/Alert = 拒绝；其他帧按状态机处理。
-    loop {
-        let frame = Frame::read(&mut stream, u16::MAX, wait).await?;
-        let event = state
-            .accept(&frame)
-            .map_err(|err| DialError::AnyTlsState(format!("cmd={}: {err}", frame.command as u8)))?;
-        match frame.command {
-            AnyTlsCommand::ServerSettings => {
-                let _ = event;
-                return Ok(AnyTlsOutbound { stream, state });
-            }
-            AnyTlsCommand::Alert => {
-                return Err(DialError::Rejected("服务端 Alert".to_owned()));
-            }
-            // Waste/心跳/padding 更新/迟到帧：状态机已归类，继续等待。
-            _ => continue,
-        }
-    }
-}
