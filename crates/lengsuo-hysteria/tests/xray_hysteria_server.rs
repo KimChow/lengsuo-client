@@ -131,6 +131,7 @@ fn xray_client_config(socks_port: u16, server_port: u16, auth: &str, cert: &Path
       "tlsSettings": {{
         "serverName": "{SERVER_NAME}",
         "alpn": ["h3"],
+        "disableSystemRoot": true,
         "certificates": [{{"certificateFile": "{cert}"}}]
       }}
     }}

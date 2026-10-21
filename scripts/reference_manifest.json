@@ -103,7 +103,7 @@
       ],
       "expected_passed": 6,
       "expected_passed_by_platform": {
-        "windows": 4
+        "windows": 6
       }
     }
   ]
