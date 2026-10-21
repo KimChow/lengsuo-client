@@ -89,7 +89,9 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
             command: Command::Mux,
             target: TargetAddr::Domain(lengsuo_vless::mux::MUX_COOL_ADDRESS.to_string(), 0),
         };
-        send_request(&mut stream, &request, &KEY, support::WAIT).await.unwrap();
+        send_request(&mut stream, &request, &KEY, support::WAIT)
+            .await
+            .unwrap();
         // 参考端先回 VLESS 响应头，之后才是 mux 帧。
         receive_response(&mut stream, support::WAIT).await.unwrap();
 
@@ -108,7 +110,8 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
         }
 
         // 收齐两条会话的回程：每条响应首帧为 `Keep`，载荷必须与本会话一致。
-        let mut received: std::collections::HashMap<u16, Vec<u8>> = std::collections::HashMap::new();
+        let mut received: std::collections::HashMap<u16, Vec<u8>> =
+            std::collections::HashMap::new();
         let deadline = tokio::time::Instant::now() + WAIT;
         while received.len() < 2 {
             assert!(
