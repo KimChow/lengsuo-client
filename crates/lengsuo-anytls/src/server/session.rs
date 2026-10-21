@@ -15,7 +15,7 @@
 use super::sink::Sink;
 use super::streams::Stream;
 use crate::auth::Credential;
-use crate::frame::{Command, Frame};
+use crate::frame::{self, Command, Eof, Frame};
 use crate::padding::PaddingScheme;
 use crate::server_state::{Event, ServerState, StateError};
 use crate::Error;
@@ -100,12 +100,28 @@ async fn serve(
     loop {
         let frame = match sink.read(u16::MAX).await {
             Ok(frame) => frame,
-            // 对端干净关闭（EOF / close_notify）：正常收尾。
-            Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-                finish(&mut streams, &mut stats);
-                return Ok(stats);
+            Err(err) => {
+                // 对端在**帧边界**干净关闭（0 字节 EOF）：正常收尾。
+                // 参考 anytls-go `proxy/session/session.go:190` 的 `io.ReadFull`：
+                // 0 字节读到 EOF 是 `io.EOF`（收尾），读到一半是
+                // `io.ErrUnexpectedEOF`（截断 ⇒ fail-closed）。
+                match frame::eof_kind(&err) {
+                    Some(Eof::Clean) => {
+                        finish(&mut streams, &mut stats);
+                        return Ok(stats);
+                    }
+                    Some(Eof::Truncated) => {
+                        // 帧被中途截断：**fail-closed**，会话以失败结束。
+                        // 资源照常回收（关出站通道、汇总计数），但**不**返回
+                        // `Ok(stats)`——调用方必须能区分「对方正常关闭」与
+                        // 「连接被中途截断」。
+                        finish(&mut streams, &mut stats);
+                        return Err(err);
+                    }
+                    // 超时、连接重置等其它错误：直接失败。
+                    None => return Err(err),
+                }
             }
-            Err(err) => return Err(err),
         };
         dispatch(&sink, &mut state, &mut streams, &mut stats, &padding, frame).await?;
     }
