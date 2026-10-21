@@ -86,10 +86,7 @@ async fn mux_wire_roundtrip_payload_is_byte_exact() {
         .await
         .expect("可开会话");
     assert_eq!(session.id(), 1, "首个会话 ID 从 1 起（参考 `m.count++`）");
-    session
-        .write(PAYLOAD, DEFAULT_DEADLINE)
-        .await
-        .expect("可写");
+    session.write(PAYLOAD, DEFAULT_DEADLINE).await.expect("可写");
 
     // 对端先读首帧（`New`）：带目标地址、无数据段。
     let (meta, data) = read_frame(&mut peer, true).await;
@@ -137,10 +134,7 @@ async fn mux_wire_output_is_identical_to_existing_session_writer() {
         .await
         .expect("可开会话");
     assert_eq!(session.id(), 1, "新 API 分配的首个会话 ID 也是 1");
-    session
-        .write(PAYLOAD, DEFAULT_DEADLINE)
-        .await
-        .expect("可写");
+    session.write(PAYLOAD, DEFAULT_DEADLINE).await.expect("可写");
     session.close(DEFAULT_DEADLINE).await.expect("可收尾");
     wire.shutdown(DEFAULT_DEADLINE).await.expect("可关闭");
 
@@ -164,10 +158,7 @@ async fn mux_wire_output_differs_only_in_session_id() {
         .open(target(8443), None, DEFAULT_DEADLINE)
         .await
         .expect("可开会话");
-    session
-        .write(PAYLOAD, DEFAULT_DEADLINE)
-        .await
-        .expect("可写");
+    session.write(PAYLOAD, DEFAULT_DEADLINE).await.expect("可写");
     session.close(DEFAULT_DEADLINE).await.expect("可收尾");
     wire.shutdown(DEFAULT_DEADLINE).await.expect("可关闭");
 
@@ -432,10 +423,7 @@ async fn mux_wire_packet_session_writes_single_frame() {
     // 参考的 `PacketReader` 上限是 `buf.Size`（8192）：分组会话一帧一包，
     // 超过 8192 的包参考读侧会报 `packet size too large`，故用上限内的载荷。
     let packet = vec![0x5Au8; 8 * 1024];
-    session
-        .write(&packet, DEFAULT_DEADLINE)
-        .await
-        .expect("可写");
+    session.write(&packet, DEFAULT_DEADLINE).await.expect("可写");
 
     // 首帧 `New`（带 UDP 网络类型）。
     let (meta, _) = read_frame(&mut peer, false).await;
@@ -487,9 +475,7 @@ async fn mux_wire_inbound_matches_existing_decoder() {
     let second = decode_from_async(&mut cursor, false)
         .await
         .expect("可解帧头");
-    let data = read_data_async(&mut cursor, true)
-        .await
-        .expect("可解数据段");
+    let data = read_data_async(&mut cursor, true).await.expect("可解数据段");
     assert_eq!(first.status, SessionStatus::New);
     assert_eq!(second.status, SessionStatus::Keep);
     assert_eq!(data, PAYLOAD);
@@ -554,10 +540,7 @@ async fn mux_wire_keeps_sessions_separated() {
     assert_eq!(wire.active_sessions().await, 2);
 
     first.write(b"first", DEFAULT_DEADLINE).await.expect("可写");
-    second
-        .write(b"second", DEFAULT_DEADLINE)
-        .await
-        .expect("可写");
+    second.write(b"second", DEFAULT_DEADLINE).await.expect("可写");
 
     // 依次读回：首帧 ×2 + 数据帧 ×2。
     let mut seen = Vec::new();
@@ -618,6 +601,7 @@ async fn mux_wire_exposes_session_target() {
 }
 
 // ============================================================================
-// 参考互通用例（与固定版本参考端真实互跑）已移至独立测试文件
-// `mux_wire_interop.rs`（`#[ignore]`，显式实跑）。
+// 参考互通用例（与固定版本参考端真实互跑，`#[ignore]` 显式实跑）已移至
+// 独立测试文件 `mux_wire_interop.rs`——职责不同（参考互通 vs 本仓自洽），
+// 分文件避免单文件超 700 行硬上限。
 // ============================================================================

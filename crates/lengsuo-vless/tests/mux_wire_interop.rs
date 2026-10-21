@@ -3,11 +3,12 @@
 //! 显式执行：
 //! `LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --test mux_wire_interop -- --ignored --nocapture`
 //!
-//! 本文件与 `mux_wire.rs` 分开：前者是**参考互通**（需外部二进制、默认跳过），
-//! 后者是**本仓自洽**（往返 / 拒绝路径，默认跑）。两者职责不同，分文件避免
-//! 单文件超行数上限。
+//! 与 `mux_wire.rs` 分文件：前者是**参考互通**（需外部二进制、默认跳过），
+//! 后者是**本仓自洽**（往返 / 拒绝路径，默认跑）。职责不同，分文件避免单文件超行数上限。
 
 mod support;
+
+use std::time::Duration;
 
 use lengsuo_vless::mux::frame::TargetNetwork;
 use lengsuo_vless::mux::worker::Strategy;
@@ -15,16 +16,13 @@ use lengsuo_vless::mux_wire::MuxWire;
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const PAYLOAD: &[u8] = b"lengsuo-mux-interop-payload";
-
-/// 目标网络常量（TCP=1）。
 const TCP: TargetNetwork = TargetNetwork::Tcp;
+const PAYLOAD: &[u8] = b"lengsuo-mux-interop-payload";
+const WAIT: Duration = Duration::from_secs(5);
 
+/// 目标地址（回环 + 端口）。
 fn target(port: u16) -> (TargetAddr, TargetNetwork) {
-    (
-        TargetAddr::Ip("127.0.0.1".parse().expect("合法 IP")),
-        TargetNetwork::Tcp,
-    )
+    (TargetAddr::V4([127, 0, 0, 1], port), TCP)
 }
 
 // ============================================================================
@@ -48,7 +46,7 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
     use lengsuo_vless::header::{Command, Request};
     use lengsuo_vless::stream::{receive_response, send_request};
     use serde_json::json;
-    use support::{free_port, launch, ID, KEY, WAIT};
+    use support::{free_port, launch, ID, KEY};
     use tokio::net::TcpStream;
     use tokio::time::timeout;
 
@@ -91,9 +89,7 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
             command: Command::Mux,
             target: TargetAddr::Domain(lengsuo_vless::mux::MUX_COOL_ADDRESS.to_string(), 0),
         };
-        send_request(&mut stream, &request, &KEY, support::WAIT)
-            .await
-            .unwrap();
+        send_request(&mut stream, &request, &KEY, support::WAIT).await.unwrap();
         // 参考端先回 VLESS 响应头，之后才是 mux 帧。
         receive_response(&mut stream, support::WAIT).await.unwrap();
 
@@ -112,8 +108,7 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
         }
 
         // 收齐两条会话的回程：每条响应首帧为 `Keep`，载荷必须与本会话一致。
-        let mut received: std::collections::HashMap<u16, Vec<u8>> =
-            std::collections::HashMap::new();
+        let mut received: std::collections::HashMap<u16, Vec<u8>> = std::collections::HashMap::new();
         let deadline = tokio::time::Instant::now() + WAIT;
         while received.len() < 2 {
             assert!(
