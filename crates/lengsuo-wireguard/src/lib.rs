@@ -27,6 +27,7 @@
 //! 状态、偏离清单与验证记录见 `docs/wireguard-status.md`。
 
 pub mod allowedips;
+pub mod device;
 pub mod handshake;
 pub mod index_table;
 pub mod keypair;
