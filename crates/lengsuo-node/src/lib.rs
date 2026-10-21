@@ -17,6 +17,7 @@ pub mod config;
 pub mod dryrun;
 pub mod forward;
 pub mod outbound;
+pub mod outbound_anytls;
 pub mod outbound_hysteria;
 pub mod outbound_ss;
 pub mod outbound_ss2022;
