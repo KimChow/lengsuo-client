@@ -105,7 +105,11 @@ pub struct RealityStream {
     /// 读任务：TCP → 管道。对端关闭或出错后自行结束。
     reader_task: Option<JoinHandle<()>>,
     /// 写任务：管道 → TCP。应用侧 `shutdown` 后自行结束。
-    writer_task: JoinHandle<()>,
+    ///
+    /// `Option` 是**幂等闸**：`take()` 之后句柄即被「收走」，重复的
+    /// `shutdown()` 不会再 await 同一个 `JoinHandle`（tokio 对**已完成**的
+    /// 句柄二次 poll 会 panic：`JoinHandle polled after completion`）。
+    writer_task: Option<JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for RealityStream {
@@ -187,23 +191,51 @@ impl RealityStream {
         Ok(Self {
             app,
             reader_task: Some(reader_task),
-            writer_task,
+            writer_task: Some(writer_task),
         })
     }
 
     /// 关闭写方向（管道 → TCP 的写任务随之结束），返回前等任务收尾。
+    ///
+    /// **幂等**：重复调用不 panic，也不会二次 await 同一个 `JoinHandle`
+    /// （tokio 对**已完成**的句柄二次 poll 会 panic：
+    /// `JoinHandle polled after completion`）。写任务句柄用 `Option` 持有，
+    /// `take()` 之后即被「收走」⇒ 后续调用直接跳过。
+    ///
+    /// 返回值语义：**第一次**调用照常返回 `app.shutdown()` 的结果（可能是
+    /// `Err`）；**之后**的调用返回 `Ok(())`。第一次的错误不吞掉。
     pub async fn shutdown(&mut self) -> io::Result<()> {
         self.app.shutdown().await?;
-        let _ = (&mut self.writer_task).await;
+        // 写任务句柄只 await 一次：`take()` 之后即「已收走」。
+        if let Some(task) = self.writer_task.take() {
+            let _ = task.await;
+        }
         Ok(())
     }
 
     /// 收尾：关闭写方向并等读任务结束（对端已关闭时立即返回）。
+    ///
+    /// **幂等**：重复调用不 panic、不重复等待任何任务（读任务句柄同样
+    /// `take()` 一次）。`shutdown()` 之后再 `close()` 也是安全的：`close()`
+    /// 仍会把 `reader_task` 收完（读任务由 `shutdown()` 从未碰过）。
     pub async fn close(&mut self) {
         let _ = self.shutdown().await;
         if let Some(task) = self.reader_task.take() {
             let _ = task.await;
         }
+    }
+
+    /// 尚未收走的**后台任务数**（写任务 + 读任务）。
+    ///
+    /// 幂等判据（供调用方与测试断言，不是「不崩就行」）：
+    /// - 新建流是 `2`（写任务 + 读任务都待收）；
+    /// - 第一次 `shutdown()` 后是 `1`（写任务已收走，**读任务仍在**）；
+    /// - 第一次 `close()` 后是 `0`（读任务也被收走）。
+    ///
+    /// 重复调用 `shutdown()` / `close()` **不再改变**该计数，也不再等待
+    /// 任何已被收走的任务。
+    pub fn pending_tasks(&self) -> usize {
+        usize::from(self.writer_task.is_some()) + usize::from(self.reader_task.is_some())
     }
 }
 

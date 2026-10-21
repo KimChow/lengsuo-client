@@ -9,6 +9,8 @@
 //!    且**后续不再有数据被投递**。
 //! 3. Mux 部分（见子模块 [`mux`]）：会话表回收、重复 `session_id` 覆盖、
 //!    Mux 承载连接读任务结束。
+//! 4. REALITY 收尾**幂等**部分（见子模块 [`reality_idempotent`]）：重复
+//!    `shutdown()` / 重复 `close()` / `shutdown()` 后 `close()` 都**不 panic**。
 //!
 //! 每条用例都有**外层 `timeout(...)` 兜底**：本仓若真的挂住，用例是**超时
 //! 失败**而不是静默通过。
@@ -25,6 +27,7 @@ use tokio::{
 use super::{reality_fixture, request, DEADLINE, KEY, WAIT};
 
 mod mux;
+mod reality_idempotent;
 
 /// 「任务必须结束」的观察上限。
 const JOIN_LIMIT: Duration = Duration::from_secs(8);
@@ -156,63 +159,6 @@ async fn clean_close_yields_clean_eof_on_the_read_side() {
         assert_eq!(read, 0, "对端干净关闭必须读到 0 字节（干净 EOF）");
         assert_eq!(kind, "clean-eof", "读侧必须拿到干净 EOF，而不是错误");
         println!("干净关闭取证：读侧拿到 clean EOF（0 字节）");
-    })
-    .await
-    .expect("用例总超时");
-}
-
-/// **1b. 已知实现缺陷：`shutdown()` 之后再 `close()` 会 panic。**
-///
-/// 现状（**只记录，不改 `src/**`**）：`src/reality_link.rs:195` 的
-/// `shutdown()` 对 `writer_task` 做了一次 `(&mut self.writer_task).await`，
-/// 而 `close()`（`:202`）又先调 `shutdown()`——于是 `writer_task` 被**二次**
-/// await，tokio 直接 panic：`JoinHandle polled after completion`
-/// （tokio 1.53 `runtime/task/core.rs:427`）。
-///
-/// 影响面：`shutdown()` **不幂等**。`close()` 单独调用没问题（只 await 一次
-/// `writer_task`），但「先 `shutdown()` 再 `close()`」或「`close()` 调两次」
-/// 都会 panic。正确判据应是「`shutdown()` / `close()` 幂等、重复调用不
-/// panic」；修复归实现卡，本卡只如实取证。
-///
-/// 本用例断言的是**实况**（`JoinError` 是 panic），不是「期望行为」。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reality_stream_shutdown_then_close_panics_known_defect() {
-    timeout(DEADLINE, async {
-        let server = reality_fixture::start_server().await;
-        let config = reality_fixture::client_config();
-        let mut client = reality_fixture::connect(&format!("127.0.0.1:{}", server.port), &config)
-            .await
-            .expect("REALITY 建流");
-        // 第一次收尾：正常，关闭写方向并等写任务结束。
-        client.shutdown().await.expect("第一次 shutdown");
-        // 第二次收尾：当前实现会 panic（tokio 不允许二次 await 同一
-        // `JoinHandle`）。放到独立任务里观测，避免把整个用例二进制带崩。
-        let outcome = tokio::spawn(async move {
-            client.close().await;
-        })
-        .await;
-        assert!(
-            outcome.is_err(),
-            "已知缺陷当前应表现为 panic（JoinError）；若上游已修复，本用例需改写"
-        );
-        let error = outcome.expect_err("必须是 JoinError");
-        assert!(
-            error.is_panic(),
-            "二次收尾必须表现为 panic，实际：{error:?}"
-        );
-        // 取 panic 载荷：必须是 tokio 的「JoinHandle 被二次 poll」提示，
-        // 而不是别的 panic（例如断言失败）。
-        let payload = error.into_panic();
-        let message = payload
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_owned())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_default();
-        assert!(
-            message.contains("JoinHandle"),
-            "panic 必须来自 tokio 的二次 await JoinHandle，实际：{message}"
-        );
-        println!("已知缺陷取证：二次收尾 panic（tokio: {message}）");
     })
     .await
     .expect("用例总超时");
