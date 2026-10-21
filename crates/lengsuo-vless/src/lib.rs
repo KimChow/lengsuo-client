@@ -13,4 +13,5 @@ pub mod reality_link;
 pub mod stream;
 pub mod vision;
 pub mod xel;
+pub mod xel_wire;
 pub mod xudp;
