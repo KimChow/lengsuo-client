@@ -63,9 +63,10 @@
         "xray_trojan_client",
         "xray_trojan_udp",
         "xray_trojan_udp_server",
-        "xray_errors"
+        "xray_errors",
+        "replay_matrix"
       ],
-      "expected_passed": 25
+      "expected_passed": 33
     },
     {
       "crate": "lengsuo-ss2022",
@@ -77,9 +78,10 @@
         "xray_tcp_matrix",
         "xray_eih",
         "xray_udp_eih",
-        "udp_eih_extra"
+        "udp_eih_extra",
+        "udp_replay_matrix"
       ],
-      "expected_passed": 21
+      "expected_passed": 22
     },
     {
       "crate": "lengsuo-shadowsocks",

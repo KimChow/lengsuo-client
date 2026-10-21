@@ -30,9 +30,10 @@ EXTRA_TESTS = [
     # v0.0.13 服务端在该平台自身崩溃（上游缺陷，见 docs/anytls-status.md
     # 偏离清单「平台差异」条）。按平台如实登记通过数，**不冒充通过**。
     {"crate": "lengsuo-anytls",
-     "targets": ["interop_client", "interop_server", "interop_udp", "interop"],
-     "expected_passed": 7, "requires_commands": ["openssl"],
-     "expected_passed_by_platform": {"windows": 5}},
+     "targets": ["interop_client", "interop_server", "interop_udp", "interop",
+                 "lifecycle"],
+     "expected_passed": 9, "requires_commands": ["openssl"],
+     "expected_passed_by_platform": {"windows": 7}},
     # hysteria 混淆（ Salamander）互通：需要**参考生成的确定性向量**做逐字节对照。
     # 生成器已收进仓内 tools/reference/gen_salamander_vector.py（纯 Python，
     # 只依赖 hashlib），因此门禁可自洽生成，不依赖仓外夹具。
