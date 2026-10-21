@@ -40,10 +40,7 @@ const HEX_COMPOSED_CHACHA_XOR: &str = include_str!("vectors/xel_composed_chacha_
 
 /// 解析十六进制向量（忽略空白与换行）。
 fn parse_hex(text: &str) -> Vec<u8> {
-    let cleaned: String = text
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
+    let cleaned: String = text.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     assert!(cleaned.len().is_multiple_of(2), "十六进制长度必须为偶数");
     (0..cleaned.len())
         .step_by(2)

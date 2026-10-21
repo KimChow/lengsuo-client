@@ -49,8 +49,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(20);
 /// 参考二进制路径（门禁经 `LENGSUO_XRAY` 注入，例如 `LENGSUO_XRAY=/path/to/xray`）。
 fn reference_binary() -> PathBuf {
     PathBuf::from(
-        std::env::var("LENGSUO_XRAY")
-            .expect("必须显式指定固定版本参考二进制（如 /path/to/xray）"),
+        std::env::var("LENGSUO_XRAY").expect("必须显式指定固定版本参考二进制（如 /path/to/xray）"),
     )
 }
 
@@ -82,10 +81,8 @@ fn assert_baseline() -> String {
 fn run_reference(config: &str) -> (Option<i32>, String) {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let directory = std::env::temp_dir().join(format!(
-        "lengsuo-xel-ref-{}-{sequence}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("lengsuo-xel-ref-{}-{sequence}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("创建临时目录");
     let path = directory.join("config.json");
     std::fs::write(&path, config).expect("写配置");
