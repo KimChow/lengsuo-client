@@ -8,7 +8,7 @@
 //! | 环节 | 既有原语 | 位置 |
 //! |---|---|---|
 //! | 发送方向的记录封装（AEAD + 头部作 AAD） | [`crate::xel::record::RecordWriter::seal`] | `src/xel/record.rs:46` |
-//! | 接收方向的分帧 + 锁定步序号 + 解封 | [`crate::xel::record::Reader`] | `src/xel/record.rs:63` |
+//! | 接收方向的分帧 + 锁定步序号 + 解封 | [`crate::xel::record::RecordReader`] | `src/xel/record.rs:58` |
 //! | XOR 头部掩蔽（可选） | [`crate::xel::xor::XorMask`] | `src/xel/xor.rs:149` |
 //!
 //! 本模块新增的只有**编排**：上下行密钥分离、8192 字节分块（参考 `common.go`
@@ -28,10 +28,11 @@
 //! 基线：Xray v26.3.27 `d2758a023cd7f4174a5a5fa4ff66e487d4342ba0`。
 //!
 //! - `proxy/vless/encryption/common.go:47` `CommonConn.Write`：**每 8192 字节明文
-//!   一条记录**（`if len(b) > 8192 { b = b[:8192] }`）。本模块按同一上限分块。
+//!   一条记录**（`common.go:55` 的 `if len(b) > 8192 { b = b[:8192] }`）。本模块按
+//!   同一上限分块。
 //! - `proxy/vless/encryption/common.go:80` `CommonConn.Read`：记录体先整体读满再解封。
 //! - `proxy/vless/encryption/xor.go:41`/`:69` `XorConn.Write`/`Read`：只掩蔽 5 字节
-//!   头，记录体原样透传；跳过量由解码出的头部长度决定。
+//!   头，记录体原样透传；跳过量由解码出的头部长度决定（`xor.go:58`/`:88`）。
 //! - **偏离**：`common.go:212` `DecodeHeader` 在魔数不符时把长度置 0 后继续运行；
 //!   本仓 `src/xel/frame.rs:68` 视为 `InvalidHeader` 并 poison（更严格，已在
 //!   `src/xel/mod.rs:15` 记录）。本模块沿用本仓的严格语义。
@@ -42,6 +43,11 @@
 //!
 //! 认证失败、序号失步、头部非法、长度越界、截断——任一发生即由既有原语 poison
 //! 该方向，之后所有调用返回 `Error::Record(Poisoned)`，绝不产出明文或静默降级。
+//!
+//! [`XelStream`] 的读方向失败**在读操作本身**报出：管道（`tokio::io::duplex`）
+//! 只能表达 EOF，表达不了失败原因，所以读任务把失败原因放进独立失败槽，
+//! 应用侧在「本轮没有交付任何字节」时把该原因作为 `io::Error` 抛出来。
+//! ⇒ 「认证失败的流」不会被误读成「对端正常结束」（干净的 EOF）。
 //!
 //! # 用法
 //!
@@ -89,7 +95,7 @@ use crate::xel::{
     Error as XelError, XelKey,
 };
 
-/// 单条记录的明文上限（参考 `common.go:53` `CommonConn.Write` 的
+/// 单条记录的明文上限（参考 `common.go:55` `CommonConn.Write` 的
 /// `if len(b) > 8192 { b = b[:8192] }`）。
 pub const MAX_PLAINTEXT_PER_RECORD: usize = 8192;
 
@@ -125,8 +131,8 @@ pub enum Error {
 /// `send` 是上行、服务端的 `send` 是下行，两端因此可以对调同一份配置。
 ///
 /// **密钥材料与 AEAD 密钥不是同一份**：参考用 `blake3.DeriveKey("VLESS", UnitedKey)`
-/// 作 AES-256-CTR 密钥（`xor.go:12`），而 AEAD 侧用 `blake3.DeriveKey(ctx, UnitedKey)`
-/// （`common.go:157`）。本仓把派生结果与 IV 都交给调用方注入，因此这里给的是
+/// 作 AES-256-CTR 密钥（`xor.go:13`），而 AEAD 侧用 `blake3.DeriveKey(ctx, UnitedKey)`
+/// （`common.go:159`）。本仓把派生结果与 IV 都交给调用方注入，因此这里给的是
 /// **未派生的 UnitedKey 材料**，掩蔽层内部再派生一次（`src/xel/xor.rs:34`）。
 #[derive(Debug)]
 pub struct XorLayer {
@@ -245,8 +251,8 @@ pub struct XelSender {
 impl XelSender {
     /// 把明文封成线上字节（可能含多条记录）。
     ///
-    /// 分块上限 [`MAX_PLAINTEXT_PER_RECORD`]，与参考 `common.go:53` 一致：
-    /// 每 8192 字节明文一条记录，空明文产出空输出（参考 `common.go:49`）。
+    /// 分块上限 [`MAX_PLAINTEXT_PER_RECORD`]，与参考 `common.go:55` 一致：
+    /// 每 8192 字节明文一条记录，空明文产出空输出（参考 `common.go:48`）。
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, Error> {
         let mut wire = Vec::with_capacity(plaintext.len() + 5);
         for chunk in plaintext.chunks(MAX_PLAINTEXT_PER_RECORD) {
@@ -543,20 +549,33 @@ impl AsyncRead for XelStream {
         // 字节的后半段；前半段的明文是有效的，不该被丢弃）。
         // 三态：None = 管道读侧仍 pending（等更多数据）；
         // Some(Ok(())) = 本轮读到数据；错误直接向上抛（不吞）。
+        let before = buf.filled().len();
         let read: Option<io::Result<()>> = match Pin::new(&mut self.app).poll_read(cx, buf) {
             Poll::Ready(Ok(())) => Some(Ok(())),
             Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
             Poll::Pending => None,
         };
-        // 管道读空了（EOF）且读方向有失败 ⇒ 报出失败原因（管道只能表达 EOF）。
-        if read.is_none() {
-            if let Ok(slot) = self.read_error.lock() {
-                if let Some(error) = slot.as_ref() {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error.to_string(),
-                    )));
-                }
+        // 本轮**没有交付任何字节**（管道 EOF 或 pending）且读方向已失败 ⇒ 报出
+        // 失败原因。
+        //
+        // 这一步是 fail-closed 的关键：管道本身只能表达 EOF，读任务失败时会把
+        // 失败原因放进 `read_error` 槽并关闭管道写端。若这里不把失败报出来，
+        // 应用侧读到的是**干净的 EOF**——「错钥/篡改/截断的流」会被误读成
+        // 「对端正常结束」（静默降级）。只有 [`XelStream::close`] 会报出该失败，
+        // 而只读不收尾的调用方根本不会发现。
+        //
+        // 交付了字节的那一轮**不**报：那些明文已经过认证，仍然有效；失败会在
+        // 下一轮（管道 EOF 时）报出。
+        if buf.filled().len() == before {
+            let failure = match self.read_error.lock() {
+                Ok(slot) => slot.as_ref().cloned(),
+                Err(_) => None,
+            };
+            if let Some(error) = failure {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    error.to_string(),
+                )));
             }
         }
         match read {
