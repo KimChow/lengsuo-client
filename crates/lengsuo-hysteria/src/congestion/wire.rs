@@ -300,11 +300,35 @@ mod tests {
 
     #[test]
     fn pacer_limits_to_rate() {
-        let mut pacer = Pacer::new(10_000);
+        // 判据：**按实测时间窗折算速率上界**，而不是按名义窗口断言绝对字节数。
+        //
+        // 原写法是「sleep(100ms) 后断言放行字节数落在 990..=1010」——
+        // `sleep` 的**实际**时长受调度与负载影响（实测可到 101.9ms），
+        // 于是放行 1019 字节、断言失败 ⇒ 该用例 flaky，并把
+        // `cargo test --workspace --locked` 的**合流门禁随机打红**。
+        //
+        // 现在改为：记录窗口的**实测**时长 `elapsed`，令
+        //   上界 = rate × elapsed + 1 个块的量化余量
+        // 并同时要求「放行量不低于名义窗口的一半」——
+        // 上界证明限速**没有失效**（不会超发），下界证明限速**确实在放行**
+        // （不会因为限速过头而饿死）。两侧都不依赖 sleep 的精确时长。
+        const RATE: u64 = 10_000;
+        let mut pacer = Pacer::new(RATE);
+        let started = std::time::Instant::now();
         std::thread::sleep(Duration::from_millis(100));
-        // 100ms × 10000 B/s = 1000 字节（容许 ±10 字节的计时误差）。
         let got: usize = (0..20).map(|_| pacer.take(PACE_BLOCK)).sum();
-        assert!((990..=1010).contains(&got), "放行 {got} 字节");
+        let elapsed = started.elapsed().as_secs_f64();
+
+        // 上界：实测窗口内最多放行 rate × elapsed 字节（+1 字节量化余量）。
+        // 桶容量 PACE_BLOCK 是硬上界，与时间无关。
+        let upper = RATE as f64 * elapsed + 1.0;
+        assert!(
+            (got as f64) <= upper,
+            "放行 {got} 字节，超过实测窗口 {elapsed:.4}s 内的上界 {upper:.1} 字节"
+        );
+        // 下界：名义 100ms 窗口内至少放行其一半（证明限速没有把流饿死）。
+        let lower = (RATE as f64 * 0.1 * 0.5) as usize;
+        assert!(got >= lower, "放行 {got} 字节，低于下界 {lower} 字节");
     }
 
     #[test]

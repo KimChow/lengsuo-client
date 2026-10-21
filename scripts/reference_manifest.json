@@ -47,9 +47,11 @@
         "xray_target_addr",
         "xray_vision",
         "xray_vision_server",
-        "reality_xray_server"
+        "reality_xray_server",
+        "mux_wire_interop",
+        "vision_wire_xray"
       ],
-      "expected_passed": 23
+      "expected_passed": 27
     },
     {
       "crate": "lengsuo-trojan",
