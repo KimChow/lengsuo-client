@@ -27,6 +27,11 @@
 //! - [`negotiate`]：L4 通道协商（`p2p` / `relay` 选择、能力集交集、
 //!   世代号确认、稳定错误码）。
 //!   协商规范见仓内 `docs/link-negotiate-spec.md`。
+//! - [`transport`]：L1 传输抽象（**字节搬运**的 trait）+ L1↔L2 接线层。
+//!   搬运层**只认字节**（⛔ 不提供明文语义），接线层负责把 L2 会话
+//!   （`seal_frame` / `open_frame`）接到搬运层上。
+//!   ⛔ **不含** UDP / socket / 打洞（那是 `crates/lengsuo-tunnel` 的活）。
+//!   传输规范见仓内 `docs/link-transport-spec.md`。
 //!
 //! 后续模块由后续卡在各自子目录里补齐；
 //! 顶层模块声明统一由本文件维护。
@@ -34,3 +39,4 @@
 pub mod frame;
 pub mod negotiate;
 pub mod session;
+pub mod transport;
