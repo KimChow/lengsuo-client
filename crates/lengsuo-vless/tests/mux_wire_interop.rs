@@ -1,12 +1,13 @@
 //! 参考互通：`MuxWire` 出站原语与固定版本参考端的真实互跑。
 //!
 //! 显式执行：
-//! `LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --test mux_interop -- --ignored --nocapture`
+//! `LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --test mux_wire_interop -- --ignored --nocapture`
 //!
 //! 与 `mux_wire.rs` 分文件：前者是**参考互通**（需外部二进制、默认跳过），
 //! 后者是**本仓自洽**（往返 / 拒绝路径，默认跑）。职责不同，分文件避免单文件超行数上限。
+//!
+//! 全部用例只用回环地址、临时端口、假凭据；不打印任何密钥/明文。
 
-#[path = "../support/mod.rs"]
 mod support;
 
 use std::time::Duration;
@@ -21,14 +22,19 @@ const TCP: TargetNetwork = TargetNetwork::Tcp;
 const PAYLOAD: &[u8] = b"lengsuo-mux-interop-payload";
 const WAIT: Duration = Duration::from_secs(5);
 
+/// 目标地址（回环 + 端口）。
+fn target(port: u16) -> (TargetAddr, TargetNetwork) {
+    (TargetAddr::V4([127, 0, 0, 1], port), TCP)
+}
+
 // ============================================================================
 // 参考互通：新 API 与固定版本 Xray 真实互跑（`#[ignore]`，显式实跑）
 // ============================================================================
 
-/// 参考互通：Xray mux 服务端 ⇄ 本仓 `mux_wire` 出站原语。
+/// 参考互通：参考端 mux 服务端 ⇄ 本仓 `mux_wire` 出站原语。
 ///
 /// 显式执行：
-/// `LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --test mux_wire -- --ignored --nocapture`
+/// `LENGSUO_XRAY=/绝对路径/xray cargo test -p lengsuo-vless --test mux_wire_interop -- --ignored --nocapture`
 ///
 /// 覆盖：
 /// - 本仓 `MuxWire` 发出的 `New` 帧（承载 VLESS `command=Mux` 头）被参考端识别为
@@ -40,6 +46,7 @@ const WAIT: Duration = Duration::from_secs(5);
 #[ignore = "需要显式提供固定版本参考二进制"]
 async fn xray_mux_server_accepts_mux_wire_outbound() {
     use lengsuo_vless::header::{Command, Request};
+    use lengsuo_vless::mux::MUX_COOL_ADDRESS;
     use lengsuo_vless::stream::{receive_response, send_request};
     use serde_json::json;
     use support::{free_port, launch, ID, KEY};
@@ -83,7 +90,7 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
             .unwrap();
         let request = Request {
             command: Command::Mux,
-            target: TargetAddr::Domain(lengsuo_vless::mux::MUX_COOL_ADDRESS.to_string(), 0),
+            target: TargetAddr::Domain(MUX_COOL_ADDRESS.to_string(), 0),
         };
         send_request(&mut stream, &request, &KEY, support::WAIT)
             .await
@@ -94,13 +101,12 @@ async fn xray_mux_server_accepts_mux_wire_outbound() {
         let mut wire = MuxWire::new(stream, Strategy::default());
         let mut sessions = Vec::new();
         for (index, echo_port) in echo_ports.iter().enumerate() {
-            let target = (TargetAddr::V4([127, 0, 0, 1], *echo_port), TCP);
-            let payload = [PAYLOAD, &[index as u8]].concat();
             let mut session = wire
-                .open(target, Some(&payload), support::WAIT)
+                .open(target(*echo_port), None, support::WAIT)
                 .await
                 .expect("可开会话");
-            // 首包已随 `New` 帧发出；再补一包 `Keep` 数据，验证续帧路径。
+            // 首包走 `New` 帧的数据段（参考 `writeFirstPayload` 的等价路径）。
+            let payload = [PAYLOAD, &[index as u8]].concat();
             session.write(&payload, support::WAIT).await.expect("可写");
             sessions.push(session);
         }

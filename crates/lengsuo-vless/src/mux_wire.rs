@@ -196,9 +196,8 @@ impl MuxSession {
 /// // 3) 写应用数据（`Keep` 帧 + 数据段）。
 /// session.write(b"ping", DEFAULT_DEADLINE).await?;
 /// // 4) 读承载连接上的下行帧，按 `frame.action` 派发。
-/// if let Some(frame) = wire.next_inbound(DEFAULT_DEADLINE).await? {
-///     let _ = frame.action;
-/// }
+/// let frame = wire.next_inbound(DEFAULT_DEADLINE).await?;
+/// let _ = frame.action;
 /// // 5) 收尾：`End` 帧 + 从会话表摘除（`close` 两者都做）。
 /// session.close(DEFAULT_DEADLINE).await?;
 /// # Ok(()) }
