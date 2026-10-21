@@ -1,33 +1,12 @@
-//! DNS 报文解析原语（RFC 1035）：头部、问题区与后续资源记录区的结构校验。
-//!
-//! 纯内存、只读，不改写报文、不发包、不做缓存，也不判断报文该走哪台出口设备。
-//! 入参是 UDP 载荷字节（IP/UDP 头部由 [`crate::packet`] 负责），因此本模块只在
-//! 「载荷确实是一个结构完整的 DNS 报文」时返回决策层需要的字段。
-//!
-//! 安全底线（全部 fail-closed，没有任何宽松回退）：
-//! - 任何截断、越界、非法标签长度（高位组合不是 `00`/`11`）、超限名字或标签数量
-//!   都返回 [`Error`]，调用方必须丢弃报文。
-//! - 问题区不接受压缩指针（RFC 1035 3.3.14 只允许出现在后续区），因此问题区的
-//!   名字解析是严格线性的，不可能形成指针环。
-//! - 后续区（答案/权威/附加）只做**结构化跳过**：按名字（允许合法指针）+ 8 字节
-//!   固定字段 + rdlength 推进，逐条核对是否落在报文内；内容一律不被解释，
-//!   也不参与任何决策，因此跳过失败只说明报文结构不完整。
-//! - 指针跳转次数与指针目标都有显式上限与方向检查（目标必须严格靠前且不小于
-//!   头部长度），环与自指无法无限消耗 CPU。
-//!
-//! 已知范围限制：本模块不验证 UDP 校验和（见 [`crate::checksum`]），不理解任何
-//! 资源记录语义（不判断 RCODE 是否代表伪造），也不做 DNSSEC 校验；它提供的是
-//! 「能否安全地把这条报文交给转发决策」的结构门槛。
+//! DNS 报文的结构化解析：头部校验、问题区名字读取与后续区跳过。
 
-pub mod rewrite;
-pub mod upstream;
+use super::header::{Header, Question, QuestionName};
+use super::name::MAX_NAME;
 
 /// DNS 头部固定 12 字节。
 const HEADER: usize = 12;
 /// 单个标签的字节上限（RFC 1035 3.3.1，6 位长度字段）。
 const MAX_LABEL: usize = 63;
-/// 名字总字节上限，含每个标签的长度八位组与结尾零（RFC 1035 3.3.14）。
-const MAX_NAME: usize = 255;
 /// 标签数上限：每个标签至少占 2 字节（长度八位组 + 1 字节内容），结尾零已计入
 /// [`MAX_NAME`]，因此 1 + 127 × 2 = 255。存在它是为了让任何畸形输入都在有限
 /// 步数内结束，而不是宽松放行。
@@ -39,17 +18,6 @@ const MAX_POINTER_HOPS: usize = 32;
 const LABEL_MASK: u8 = 0x3f;
 /// 压缩指针标签的两位前缀（11）与偏移掩码。
 const POINTER_MASK: u16 = 0x3fff;
-
-/// UDP DNS 的约定端口：转发决策只接受落在该端口上的流。
-pub const DNS_PORT: u16 = 53;
-/// 查询报文的 opcode 上限：本模块只接受 QUERY(0)。
-pub const OPCODE_QUERY: u8 = 0;
-/// 类型 A。
-pub const TYPE_A: u16 = 1;
-/// 类型 AAAA。
-pub const TYPE_AAAA: u16 = 28;
-/// 类别 IN。
-pub const CLASS_IN: u16 = 1;
 
 /// DNS 解析的全部失败种类。调用方一律丢弃报文并记录原因，不得回退为放行。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -84,146 +52,6 @@ pub enum Error {
     /// 单个名字的指针跳转次数超过 [`MAX_POINTER_HOPS`]。
     #[error("DNS 名字指针跳转次数超过上限")]
     PointerLimit,
-}
-
-/// 已解码的名字，以未压缩的线上格式（长度八位组 + 标签内容 + 结尾零）存放。
-///
-/// 定长数组避免数据面为每条查询堆分配；`PartialEq` 按字节比较，因此跨大小写
-/// 相等必须用 [`QuestionName::matches`]（DNS 名字按不区分大小写处理，RFC 1035 2.3.1）。
-#[derive(Clone)]
-pub struct QuestionName {
-    bytes: [u8; MAX_NAME],
-    len: usize,
-}
-
-impl PartialEq for QuestionName {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
-    }
-}
-
-impl Eq for QuestionName {}
-
-impl core::fmt::Debug for QuestionName {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // 只输出点分形式，不打印原始字节，避免把内容写进日志。
-        formatter
-            .debug_struct("QuestionName")
-            .field("name", &self.to_text())
-            .finish()
-    }
-}
-
-impl QuestionName {
-    /// 未压缩的线上字节（含结尾零八位组）。
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..self.len]
-    }
-
-    /// 根名字（只有一个零八位组）。
-    pub fn is_root(&self) -> bool {
-        self.len == 1 && self.bytes[0] == 0
-    }
-
-    /// 逐标签比较，ASCII 大小写不敏感（RFC 1035 2.3.1）。
-    ///
-    /// 只做标签边界比较而不是整串 `eq_ignore_ascii_case`：标签长度字节相同
-    /// 但内容不同（如长度字节碰巧等于某个字母）不会被误判为相等。
-    pub fn matches(&self, other: &Self) -> bool {
-        let mut left = self.labels();
-        let mut right = other.labels();
-        loop {
-            match (left.next(), right.next()) {
-                (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => continue,
-                (None, None) => return true,
-                _ => return false,
-            }
-        }
-    }
-
-    /// 标签迭代器，不含结尾零八位组。
-    pub fn labels(&self) -> Labels<'_> {
-        Labels { name: self, at: 0 }
-    }
-
-    /// 点分形式，用于诊断与测试断言。非可打印字节以 `.` 代替，绝不外泄原始字节。
-    pub fn to_text(&self) -> String {
-        let mut text = String::new();
-        for label in self.labels() {
-            if !text.is_empty() {
-                text.push('.');
-            }
-            for byte in label {
-                text.push(match byte.is_ascii_graphic() {
-                    true => char::from(*byte).to_ascii_lowercase(),
-                    false => '.',
-                });
-            }
-        }
-        text
-    }
-}
-
-/// [`QuestionName::labels`] 的返回类型。
-pub struct Labels<'a> {
-    name: &'a QuestionName,
-    at: usize,
-}
-
-impl<'a> Iterator for Labels<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let length = usize::from(*self.name.bytes.get(self.at)?);
-        if length == 0 {
-            return None;
-        }
-        let start = self.at + 1;
-        self.at = start + length;
-        Some(&self.name.bytes[start..self.at])
-    }
-}
-
-/// 头部字段，逐位取自 RFC 1035 4.1.1。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Header {
-    /// 查询标识，响应必须原样匹配。
-    pub id: u16,
-    /// QR：1 表示响应。
-    pub response: bool,
-    /// 4 位 opcode，本层只接受 QUERY。
-    pub opcode: u8,
-    /// AA，仅记录，不参与决策。
-    pub authoritative: bool,
-    /// TC：报文被截断。
-    pub truncated: bool,
-    /// RD。
-    pub recursion_desired: bool,
-    /// RA。
-    pub recursion_available: bool,
-    /// 4 位 RCODE（含扩展 0），仅记录，不代表内容可信。
-    pub rcode: u8,
-    pub question_count: u16,
-    pub answer_count: u16,
-    pub name_server_count: u16,
-    pub additional_count: u16,
-}
-
-impl Header {
-    /// 后续三区记录总数。查询报文必须为零。
-    pub fn record_count(&self) -> u16 {
-        self.answer_count
-            .saturating_add(self.name_server_count)
-            .saturating_add(self.additional_count)
-    }
-}
-
-/// 问题区的一条记录。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Question {
-    pub name: QuestionName,
-    pub qtype: u16,
-    pub qclass: u16,
 }
 
 /// 一条通过结构校验的 DNS 报文：头部 + 唯一一条问题记录。
@@ -262,7 +90,7 @@ fn parse_inner(payload: &[u8], expect_response: Option<bool>) -> Result<Message,
     }
     // opcode 在两个方向上都限定为 QUERY：INVITE/STATUS 等不属于本数据面要
     // 转发的语义，响应携带非 QUERY opcode 同样说明报文不属于任何已登记的查询。
-    if header.opcode != OPCODE_QUERY {
+    if header.opcode != super::OPCODE_QUERY {
         return Err(Error::UnsupportedOpcode(header.opcode));
     }
     if header.truncated {
