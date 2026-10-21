@@ -4,11 +4,16 @@
 //! anytls 走 `lengsuo_anytls` 的认证块 + 帧原语 + 客户端状态机，TLS 统一由
 //! `lengsuo_tls` 承担（对齐参考：两协议的认证都只在已认证 TLS 之上进行）。
 //!
+//! 本文件只保留**分发**与**八协议共用**的设施；各协议的具体拨号实现分散在
+//! 各自的 `outbound_*` 模块里（`outbound_trojan` / `outbound_ss` /
+//! `outbound_ss2022` / `outbound_vmess` / `outbound_vless` /
+//! `outbound_hysteria` / `outbound_wireguard`）。
+//!
 //! “握手到认证完成”在两协议的观测方式不同，与参考一致：
 //! - trojan 没有成功响应头（参考 `client.go` 写完头部即转发）：认证完成只能
 //!   负向排除——请求头完整写出后开一个观察窗，窗内对端关闭（EOF/读错误）即
 //!   判拒绝（参考服务端认证失败的表达就是关闭连接）；窗内收到数据或安静
-//!   到超时都视为未被拒绝。
+//!   到超时都视为未被拒绝。实现见 `crate::outbound_trojan`。
 //! - anytls 服务端认证通过后下发 ServerSettings：收到它即认证完成的正向证据
 //!   （对齐 anytls-go `session.go` 的客户端分支），断连或 Alert 即拒绝。
 
@@ -18,8 +23,6 @@ use std::time::Duration;
 use lengsuo_tls::{CertificateDer, TlsClient};
 use rustls::pki_types::pem::PemObject as _;
 use ss_core::target::TargetAddr;
-use tokio::io::ReadHalf;
-use tokio::io::WriteHalf;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
@@ -28,14 +31,15 @@ use crate::config::{Endpoint, NodeConfig, Protocol};
 use crate::outbound_hysteria::HysteriaOutbound;
 use crate::outbound_ss::ShadowsocksOutbound;
 use crate::outbound_ss2022::Ss2022Outbound;
+use crate::outbound_trojan::{
+    TrojanError, TrojanOutbound, TROJAN_PROBE_FALLBACK_HOST, TROJAN_PROBE_FALLBACK_PORT,
+};
 use crate::outbound_vless::VlessOutbound;
 use crate::outbound_vmess::VmessOutbound;
 use crate::outbound_wireguard::WireguardOutbound;
 use lengsuo_anytls::auth::Credential as AnyTlsCredential;
 use lengsuo_anytls::client_state::ClientState;
 use lengsuo_anytls::frame::{Command as AnyTlsCommand, Frame};
-use lengsuo_trojan::session::Session as TrojanSession;
-use lengsuo_trojan::{Command as TrojanCommand, Credential as TrojanCredential, Request};
 
 /// anytls 客户端单会话活跃流上限（对齐参考默认，见 interop 客户端组装）。
 const ANYTLS_MAX_STREAMS: usize = 16;
@@ -47,14 +51,9 @@ const ANYTLS_CLIENT_IDENT: &str = "lengsuo-node";
 const ANYTLS_DEFAULT_SCHEME_MD5: &str = "75cff2ad89aadf5e257059ee571ebe11";
 /// 认证块 padding：参考客户端按默认方案 `0=30-30` 生成，0 号记录恒 30 字节零值。
 const ANYTLS_AUTH_PADDING: [u8; 30] = [0; 30];
-/// trojan dry-run 缺省握手目标（discard 端口），见 `NodeConfig::probe_target`。
-const TROJAN_PROBE_FALLBACK_HOST: &str = "127.0.0.1";
-const TROJAN_PROBE_FALLBACK_PORT: u16 = 9;
 
 /// 已完成的 TLS 连接类型别名。
 pub type NodeTlsStream = TlsStream<TcpStream>;
-/// trojan 出站会话：握手（写头）已完成，可转发 TCP 载荷。
-pub type TrojanOutbound = TrojanSession<ReadHalf<NodeTlsStream>, WriteHalf<NodeTlsStream>>;
 
 /// 按协议分发建立的出口连接；返回即代表该协议“认证完成”的可观测判据满足。
 pub enum Outbound {
@@ -94,7 +93,7 @@ pub enum DialError {
     #[error("节点地址解析失败：{0}")]
     Resolve(String),
     #[error("trojan 握手失败：{0}")]
-    Trojan(#[from] lengsuo_trojan::stream::Error),
+    Trojan(#[from] TrojanError),
     #[error("anytls 协议错误：{0}")]
     AnyTls(#[from] lengsuo_anytls::Error),
     #[error("anytls 客户端状态机拒绝：{0}")]
@@ -128,7 +127,11 @@ pub enum DialError {
 }
 
 /// 解析节点端点：IP 直用，域名走异步解析后取首个地址。
-async fn resolve(host: &str, port: u16, wait: Duration) -> Result<SocketAddr, DialError> {
+pub(crate) async fn resolve(
+    host: &str,
+    port: u16,
+    wait: Duration,
+) -> Result<SocketAddr, DialError> {
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(SocketAddr::new(ip, port));
     }
@@ -153,7 +156,7 @@ pub(crate) async fn resolve_public(
 }
 
 /// 由配置构造 TLS 客户端：名称缺省用 endpoint.host，信任锚来自 `ca_pem`。
-fn tls_client(config: &NodeConfig, wait: Duration) -> Result<TlsClient, DialError> {
+pub(crate) fn tls_client(config: &NodeConfig, wait: Duration) -> Result<TlsClient, DialError> {
     let Some(tls) = config.tls.as_ref() else {
         return Err(DialError::InvalidTls(
             "本卡两协议都要求 tls 配置（参考默认均经 TLS）".to_owned(),
@@ -192,7 +195,7 @@ pub async fn dial(
     observe: Duration,
 ) -> Result<Outbound, DialError> {
     match config.protocol {
-        Protocol::Trojan => dial_trojan(config, wait, observe)
+        Protocol::Trojan => crate::outbound_trojan::dial_trojan(config, wait, observe)
             .await
             .map(Outbound::Trojan),
         Protocol::AnyTls => dial_anytls(config, wait)
@@ -259,44 +262,6 @@ pub(crate) async fn connect_tcp(
         .await
         .map_err(|_| DialError::Timeout)?
         .map_err(|err| DialError::Resolve(format!("连接 {} 失败：{}", config.endpoint.host, err)))
-}
-
-/// trojan 出站：TLS → 写请求头 → 观察窗负向排除。
-async fn dial_trojan(
-    config: &NodeConfig,
-    wait: Duration,
-    observe: Duration,
-) -> Result<TrojanOutbound, DialError> {
-    let client = tls_client(config, wait)?;
-    let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
-    let stream = client.connect(addr).await?;
-    let (read, write) = tokio::io::split(stream);
-    let credential = TrojanCredential::new(&config.auth.password);
-    let probe = config.probe_target.clone().unwrap_or_else(|| Endpoint {
-        host: TROJAN_PROBE_FALLBACK_HOST.to_owned(),
-        port: TROJAN_PROBE_FALLBACK_PORT,
-    });
-    let target = match probe.host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => TargetAddr::V4(v4.octets(), probe.port),
-        Ok(IpAddr::V6(v6)) => TargetAddr::V6(v6.octets(), probe.port),
-        Err(_) => TargetAddr::Domain(probe.host, probe.port),
-    };
-    let request = Request {
-        command: TrojanCommand::Tcp,
-        target,
-    };
-    let mut session = TrojanSession::connect(read, write, &request, &credential, wait).await?;
-    // 观察窗：对端关闭 = 认证被拒（参考服务端拒绝的唯一表达）；
-    // 安静或收到数据 = 未被拒绝，返回可继续转发业务的会话。
-    let mut probe = [0u8; 1];
-    match timeout(observe, session.read(&mut probe)).await {
-        Ok(Ok(0)) => Err(DialError::Rejected(
-            "连接被对端关闭（trojan 无响应头）".to_owned(),
-        )),
-        Ok(Ok(_)) => Ok(session),
-        Ok(Err(_)) => Err(DialError::Rejected("连接在观察窗内断开".to_owned())),
-        Err(_) => Ok(session),
-    }
 }
 
 /// anytls 出站：TLS → 认证块 → 客户端 Settings(v=2) → 等服务端 ServerSettings。
