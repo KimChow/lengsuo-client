@@ -24,9 +24,13 @@
 //!   帧格式规范见仓内 `docs/link-frame-spec.md`。
 //! - [`session`]：L2 会话状态机（握手封装、传输密钥落地、连接世代号）。
 //!   会话规范见仓内 `docs/link-session-spec.md`。
+//! - [`negotiate`]：L4 通道协商（`p2p` / `relay` 选择、能力集交集、
+//!   世代号确认、稳定错误码）。
+//!   协商规范见仓内 `docs/link-negotiate-spec.md`。
 //!
-//! 后续模块（通道协商）由后续卡在各自子目录里补齐；
+//! 后续模块由后续卡在各自子目录里补齐；
 //! 顶层模块声明统一由本文件维护。
 
 pub mod frame;
+pub mod negotiate;
 pub mod session;
