@@ -8,6 +8,7 @@ use tokio::{net::TcpStream, time::Instant};
 pub const WAIT: Duration = Duration::from_secs(8);
 #[allow(dead_code)]
 pub const ID: &str = "11111111-1111-1111-1111-111111111111";
+#[allow(dead_code)] // 共享测试夹具：各测试文件用到的符号不同
 pub const KEY: [u8; 16] = [0x11; 16];
 #[allow(dead_code)]
 pub struct Reference {
