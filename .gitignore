@@ -13,10 +13,9 @@ node_modules/
 .reference-platform/
 .claude/settings.local.json
 
-# ---- 本地调研文档（只留本地，不进仓）----
-docs/research/
-docs/harness-*
-docs/agent-roadmap.md
+# ---- 本地文档（只留本地，不进仓）----
+# 全部 docs/ 仅作本地智能体进展与对照记录，不随仓库分发。
+docs/
 
 # ---- 密钥与凭据（绝不入库）----
 *.pem
