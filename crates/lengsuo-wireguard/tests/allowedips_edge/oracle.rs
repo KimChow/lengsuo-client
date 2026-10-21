@@ -51,7 +51,7 @@ impl Ip {
         }
     }
 
-    /// 喂给本仓 `AllowedIps` 的字节（4 或 16 字节 ⇒ 走对应的族树）。
+    /// 喂给本仓 `AllowedIps` 的字节（4 或 16 字节 ⇒ 对应族树）。
     fn bytes(self) -> Vec<u8> {
         match self {
             Ip::V4(o) => o.to_vec(),
@@ -60,16 +60,12 @@ impl Ip {
     }
 }
 
-/// 待回放的操作，与探针的 ops 行一一对应。
+/// 待回放的操作，与探针的 ops 行一一对应（`I`/`R`/`D`/`L`）。
 #[derive(Clone, Copy, Debug)]
 enum Op {
-    /// 插入前缀（`I`）。
     Insert(usize, Ip, u8),
-    /// 删除前缀（`R`）。
     Remove(usize, Ip, u8),
-    /// 摘掉该 peer 的全部前缀（`D`）。
     RemoveByPeer(usize),
-    /// 查询归属（`L`）。
     Lookup(Ip),
 }
 
@@ -284,6 +280,25 @@ fn write_ops(ops: &[Op]) -> PathBuf {
     path
 }
 
+/// 临时 ops 文件的清理守卫：无论正常结束还是 panic 都不留残留。
+struct OpsFile(PathBuf);
+
+impl OpsFile {
+    fn new(ops: &[Op]) -> Self {
+        OpsFile(write_ops(ops))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for OpsFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 /// 跑参考探针，取回它打印的 lookup 归属序列。
 fn oracle_owners(ops_path: &Path) -> Vec<Option<usize>> {
     let binary = std::env::var_os("LENGSUO_WG_ALLOWEDIPS_ORACLE")
@@ -344,10 +359,9 @@ fn local_owners(ops: &[Op]) -> Vec<Option<usize>> {
 
 /// 同一串操作：参考与本仓的 lookup 归属必须逐条相等。
 fn assert_matches_reference(ops: &[Op], what: &str) -> usize {
-    let path = write_ops(ops);
-    let expected = oracle_owners(&path);
+    let ops_file = OpsFile::new(ops);
+    let expected = oracle_owners(ops_file.path());
     let actual = local_owners(ops);
-    let _ = fs::remove_file(&path);
     assert_eq!(
         expected.len(),
         actual.len(),
