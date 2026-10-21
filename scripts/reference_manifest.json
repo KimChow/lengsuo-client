@@ -89,9 +89,10 @@
         "xray_tcp",
         "xray_udp",
         "xray_errors",
-        "xray_tcp_errors"
+        "xray_tcp_errors",
+        "udp_atyp_mask"
       ],
-      "expected_passed": 9
+      "expected_passed": 12
     },
     {
       "crate": "lengsuo-wireguard",
@@ -105,11 +106,12 @@
       "crate": "lengsuo-hysteria",
       "targets": [
         "xray_hysteria",
-        "xray_hysteria_server"
+        "xray_hysteria_server",
+        "replay_matrix"
       ],
-      "expected_passed": 6,
+      "expected_passed": 8,
       "expected_passed_by_platform": {
-        "windows": 6
+        "windows": 8
       }
     }
   ]

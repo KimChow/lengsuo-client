@@ -29,11 +29,14 @@ EXTRA_TESTS = [
     # AnyTLS：Windows 上 `interop_udp` 的 2 个用例**不编译**——官方 anytls-go
     # v0.0.13 服务端在该平台自身崩溃（上游缺陷，见 docs/anytls-status.md
     # 偏离清单「平台差异」条）。按平台如实登记通过数，**不冒充通过**。
+    # `tamper_matrix` 的 3 条参考对端用例走**官方 anytls-server 的 TCP 路径**
+    # （篡改认证块 / 命令字节 / 长度字段），不经过 UDP 路径 ⇒ 不受上述上游
+    # 缺陷影响，与 Linux 同数。
     {"crate": "lengsuo-anytls",
      "targets": ["interop_client", "interop_server", "interop_udp", "interop",
-                 "lifecycle"],
-     "expected_passed": 9, "requires_commands": ["openssl"],
-     "expected_passed_by_platform": {"windows": 7}},
+                 "lifecycle", "tamper_matrix"],
+     "expected_passed": 12, "requires_commands": ["openssl"],
+     "expected_passed_by_platform": {"windows": 10}},
     # hysteria 混淆（ Salamander）互通：需要**参考生成的确定性向量**做逐字节对照。
     # 生成器已收进仓内 tools/reference/gen_salamander_vector.py（纯 Python，
     # 只依赖 hashlib），因此门禁可自洽生成，不依赖仓外夹具。
