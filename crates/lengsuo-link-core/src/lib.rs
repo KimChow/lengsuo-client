@@ -17,17 +17,13 @@
 //! ⚠️ **本 crate 不是标准 WireGuard 协议**：它复用 wireguard-go 的握手与
 //! AEAD 算法（开源参照，保留署名），但**不复用其 IP/TUN 封装**——
 //! 我方直接在 UDP 之上承载 ACP 帧。详见仓内 `docs/spec/`。
+//!
+//! # 模块
+//!
+//! - [`frame`]：L3 密文帧的边界格式与编解码（本卡交付）。
+//!   帧格式规范见仓内 `docs/link-frame-spec.md`。
+//!
+//! 后续模块（会话密钥协商、通道协商）由后续卡在各自子目录里补齐；
+//! 顶层模块声明统一由本文件维护。
 
-/// 骨架占位：随首批卡逐块填充。保持 crate 可编译、可被下游引用。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Placeholder;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn placeholder_is_constructible() {
-        assert_eq!(Placeholder, Placeholder);
-    }
-}
+pub mod frame;
