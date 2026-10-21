@@ -71,8 +71,30 @@ fn make_waker(ready: Arc<AtomicBool>) -> Waker {
     unsafe { Waker::from_raw(raw) }
 }
 
-/// 轮询一个 future 直到就绪，返回其输出。
+/// 轮询一个 future 直到就绪，返回其输出；**超时则 panic**。
+///
+/// 用于「这一步必须成功」的路径（握手、开流等）—— 超时属环境异常，
+/// 直接暴露而不是静默继续。
 pub fn block_on<F: Future>(mut future: F, timeout: Duration) -> F::Output {
+    block_on_inner(future, timeout)
+        .unwrap_or_else(|| panic!("block_on 超时（{timeout:?}）"))
+}
+
+/// 轮询一个 future 直到就绪，返回其输出；**超时返回 `None`（不 panic）**。
+///
+/// 用于「超时是可接受结局」的路径（如测量窗口内的单次流写入）——
+/// 调用方据此**放弃本次测量**而不是让整个用例 panic。
+///
+/// ⚠️ 之前 `brutal_e2e` 的写超时保护写了 `Err(_) => break`，
+/// 但 `block_on` 超时是 **panic** ⇒ 那个「放弃」分支是**死代码**，
+/// 于是负载下 10s 写超时直接把整个用例打成失败
+/// （`cargo test --workspace --locked` 的合流门禁随机打红）。
+pub fn block_on_timeout<F: Future>(mut future: F, timeout: Duration) -> Option<F::Output> {
+    block_on_inner(future, timeout)
+}
+
+/// `block_on` / `block_on_timeout` 的共同实现。
+fn block_on_inner<F: Future>(mut future: F, timeout: Duration) -> Option<F::Output> {
     let deadline = StdInstant::now() + timeout;
     let ready = Arc::new(AtomicBool::new(true));
     let waker = make_waker(ready.clone());
@@ -81,15 +103,15 @@ pub fn block_on<F: Future>(mut future: F, timeout: Duration) -> F::Output {
     let mut future = unsafe { Pin::new_unchecked(&mut future) };
     loop {
         if let Poll::Ready(out) = future.as_mut().poll(&mut cx) {
-            return out;
+            return Some(out);
         }
         if StdInstant::now() >= deadline {
-            panic!("block_on 超时（{timeout:?}）");
+            return None;
         }
         ready.store(false, Ordering::SeqCst);
         // 再轮询一次（可能在上一次 poll 期间已就绪）。
         if let Poll::Ready(out) = future.as_mut().poll(&mut cx) {
-            return out;
+            return Some(out);
         }
         std::thread::sleep(Duration::from_millis(1));
     }

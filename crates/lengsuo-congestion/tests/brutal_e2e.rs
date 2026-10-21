@@ -24,7 +24,7 @@ mod common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::runtime::{block_on, StdRuntime};
+use common::runtime::{block_on, block_on_timeout, StdRuntime};
 use lengsuo_congestion::brutal::BrutalConfig;
 use quinn::Runtime;
 
@@ -42,6 +42,15 @@ const LOWER_RATIO: f64 = 0.125;
 
 /// 传输时长（测量窗口）。
 const MEASURE: Duration = Duration::from_secs(2);
+
+/// 单次流写入的超时保护阈值。
+///
+/// ⚠️ 原为 10s ⇒ 负载下（多卡并发编译 + 强压测）QUIC 传输可能慢于该阈值
+/// ⇒ 用例随机失败，把 `cargo test --workspace --locked` 的合流门禁打红。
+/// 取与 [`TOTAL_TIMEOUT`] 同量级（60s）：既能在真卡死时及时放弃
+/// （超时后**放弃本次测量**而不是让整个测试进程 panic），
+/// 又不会因负载抖动误判。
+const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// 构造服务端 `TransportConfig`（按变体选择拥塞器）。
 fn server_transport(variant: Variant) -> Arc<quinn::TransportConfig> {
@@ -168,16 +177,19 @@ fn measure_throughput(variant: Variant) -> f64 {
     let start = Instant::now();
     let mut sent = 0u64;
     while start.elapsed() < MEASURE {
-        // 写超时保护：单个流写入超过 10 秒就放弃（避免整体卡死）。
-        match block_on(
+        // 写超时保护：单个流写入超过 WRITE_TIMEOUT 就**放弃本次测量**
+        // （不 panic）—— 负载下 QUIC 传输可能明显慢于空闲时，
+        // 阈值太紧会让整个用例随机失败。
+        match block_on_timeout(
             async {
                 send.write_all(&payload).await?;
                 Ok::<(), std::io::Error>(())
             },
-            Duration::from_secs(10),
+            WRITE_TIMEOUT,
         ) {
-            Ok(()) => sent += payload.len() as u64,
-            Err(_) => break,
+            Some(Ok(())) => sent += payload.len() as u64,
+            // 写入失败或超时 ⇒ 停止测量（保留已测到的字节数）。
+            _ => break,
         }
     }
     let elapsed = start.elapsed().as_secs_f64();
