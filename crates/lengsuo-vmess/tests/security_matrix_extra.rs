@@ -39,6 +39,8 @@ mod reference_interop;
 mod refharness;
 #[path = "security_matrix_extra/refhelpers.rs"]
 mod refhelpers;
+#[path = "security_matrix_extra/refzero.rs"]
+mod refzero;
 #[path = "security_matrix_extra/tier_cases.rs"]
 mod tier_cases;
 #[path = "security_matrix_extra/tier_policy.rs"]
