@@ -156,8 +156,16 @@ fn a_probe_timeout_is_reported_as_a_lifecycle_failure_and_the_process_is_reaped(
 fn the_lifecycle_crate_still_never_spawns_a_process() {
     // 契约边界的**文本**证据：lifecycle 的 crate 文档仍然声明它不碰进程，
     // 且本 crate 没有把进程代码塞进 lifecycle。
-    let lifecycle_src =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../lengsuo-browser-lifecycle/src");
+    // 定位兄弟 crate 的源码目录。
+    //
+    // ⛔ 不用 `env!("CARGO_MANIFEST_DIR")`：该宏在**编译期**把**绝对路径**
+    // 烘焙进二进制。门禁共用一个 target 目录（`targets/_gate`），合流时在
+    // **候选 worktree** 里编译，产物会烘焙该 worktree 的绝对路径；worktree
+    // 合流后被删除 ⇒ 之后在主仓跑 `--workspace` 时 cargo 复用这份陈旧产物
+    // （元数据哈希相同即判 Fresh）⇒ 运行时按已失效路径读文件 ⇒ NotFound。
+    //
+    // ⇒ 改为**运行期**从当前工作目录向上找仓库根，再拼相对路径。
+    let lifecycle_src = repo_root().join("crates/lengsuo-browser-lifecycle/src");
     let lib = std::fs::read_to_string(lifecycle_src.join("lib.rs"))
         .expect("lifecycle lib.rs must be readable");
     assert!(
@@ -220,5 +228,30 @@ fn process_alive(pid: u32) -> bool {
     {
         let _ = pid;
         false
+    }
+}
+
+/// 运行期定位**仓库根**（含 `[workspace]` 的那一层 `Cargo.toml`）。
+///
+/// 判据：从当前工作目录逐级向上找**带 `[workspace]` 段的 `Cargo.toml`**；
+/// 找不到就失败 —— fail-closed，不许猜一个路径继续跑
+/// （那正是本测试要防的「静默读不到证据」）。
+///
+/// ⛔ 不能只判「有 `Cargo.toml`」：`cargo test` 启动测试时的工作目录是**包目录**
+/// （`crates/lengsuo-browser-launch`），它自己也有 `Cargo.toml` ⇒ 会在包目录
+/// 停下，路径仍然错。
+fn repo_root() -> std::path::PathBuf {
+    let mut dir = std::env::current_dir().expect("current dir must be readable");
+    loop {
+        let manifest = dir.join("Cargo.toml");
+        if manifest.is_file() {
+            let text = std::fs::read_to_string(&manifest).expect("Cargo.toml must be readable");
+            if text.contains("[workspace]") {
+                return dir;
+            }
+        }
+        if !dir.pop() {
+            panic!("未能从当前目录向上找到 workspace 根（含 [workspace] 的 Cargo.toml）");
+        }
     }
 }
