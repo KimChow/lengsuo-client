@@ -6,6 +6,7 @@
 
 use std::io::Cursor;
 
+use super::seed::crc32_ieee;
 use super::*;
 
 #[test]
