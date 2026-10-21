@@ -52,6 +52,9 @@ LANES = {
         "lengsuo-browser-signature",
         "lengsuo-browser-package",
         "lengsuo-browser-lifecycle",
+        # 启动层：进程启动 + 代理注入（2026-10-21 补）——
+        # 不在 lane 里 ⇒ 永远派不出卡 ⇒ 该 crate 的生产消费者恒为 0。
+        "lengsuo-browser-launch",
     ],
     "core": ["ss-core", "ss-client", "ss-cli", "lengsuo-tls"],
     # 跨端链路：link-core 是无 IO 的协议核心（可编移动端静态库）；
