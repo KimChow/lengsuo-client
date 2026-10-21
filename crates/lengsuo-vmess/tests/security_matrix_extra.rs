@@ -35,6 +35,8 @@ mod common;
 mod mismatch;
 #[path = "security_matrix_extra/reference_interop.rs"]
 mod reference_interop;
+#[path = "security_matrix_extra/refharness.rs"]
+mod refharness;
 #[path = "security_matrix_extra/refhelpers.rs"]
 mod refhelpers;
 #[path = "security_matrix_extra/tier_cases.rs"]
