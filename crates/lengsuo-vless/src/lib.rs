@@ -7,6 +7,7 @@
 
 pub mod header;
 pub mod mux;
+pub mod mux_wire;
 pub mod reality;
 pub mod reality_config;
 pub mod reality_link;
