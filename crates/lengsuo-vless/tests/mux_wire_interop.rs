@@ -10,11 +10,15 @@
 mod support;
 
 use lengsuo_vless::mux::frame::{SessionStatus, TargetNetwork};
+use lengsuo_vless::mux::worker::Strategy;
 use lengsuo_vless::mux_wire::{MuxWire, DEFAULT_DEADLINE};
 use ss_core::target::TargetAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PAYLOAD: &[u8] = b"lengsuo-mux-interop-payload";
+
+/// 目标网络常量（TCP=1）。
+const TCP: TargetNetwork = TargetNetwork::Tcp;
 
 fn target(port: u16) -> (TargetAddr, TargetNetwork) {
     (
