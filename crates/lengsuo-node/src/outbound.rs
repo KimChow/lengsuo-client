@@ -103,6 +103,10 @@ pub enum DialError {
     Vless(#[from] lengsuo_vless::stream::Error),
     #[error("vless 请求头编码失败：{0}")]
     VlessHeader(#[from] lengsuo_vless::header::Error),
+    #[error("REALITY 配置非法：{0}")]
+    RealityConfig(#[from] lengsuo_vless::reality_config::ConfigError),
+    #[error("REALITY 握手失败：{0}")]
+    Reality(#[from] lengsuo_vless::reality_link::Error),
     #[error("vmess 协议错误：{0}")]
     Vmess(#[from] lengsuo_vmess::Error),
     #[error("shadowsocks 协议错误：{0}")]

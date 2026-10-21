@@ -163,6 +163,53 @@ fn redacted(value: &str) -> &'static str {
     }
 }
 
+/// REALITY 客户端配置（node 侧形态）。
+///
+/// 字段语义与参考 `realitySettings` 的客户端子集一致：
+/// `server_name`（SNI）/ `public_key`（base64 raw-url）/ `short_id`（十六进制）/
+/// `fingerprint`（uTLS 指纹名）/ `password`（`public_key` 的别名，非空即覆盖它）。
+///
+/// **本结构不做形态校验**：base64 解码、hex 解码、指纹查表全部由协议 crate 的
+/// `RealityConfig::from_settings` 负责（fail-closed），这里只做「反序列化 +
+/// 脱敏 Debug + 协议范围校验」，避免在 node 侧复制一份实现。
+///
+/// 凭据（`public_key` / `short_id` / `password`）不进 Debug 输出。
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeRealitySettings {
+    /// SNI。缺省取 `tls.server_name`，再缺省取 `endpoint.host`（见
+    /// `outbound_vless_reality::server_name`）。
+    #[serde(default)]
+    pub server_name: Option<String>,
+    /// 服务端 REALITY 公钥（base64 raw-url，解码后须恰好 32 字节）。
+    #[serde(default)]
+    pub public_key: String,
+    /// 短 ID（十六进制文本，最多 16 个字符 = 8 字节）。
+    #[serde(default)]
+    pub short_id: String,
+    /// uTLS 指纹名。缺省由协议 crate 归一为 chrome。
+    #[serde(default)]
+    pub fingerprint: Option<String>,
+    /// `password`：参考里非空即覆盖 `public_key`。
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+impl fmt::Debug for NodeRealitySettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 凭据全文不得进入任何日志/Debug 输出（与 AuthConfig 同惯例）。
+        f.debug_struct("NodeRealitySettings")
+            .field("server_name", &self.server_name)
+            .field("public_key", &redacted(&self.public_key))
+            .field("short_id", &redacted(&self.short_id))
+            .field("fingerprint", &self.fingerprint)
+            .field(
+                "password",
+                &redacted(self.password.as_deref().unwrap_or("")),
+            )
+            .finish()
+    }
+}
+
 /// 单个出口节点配置。
 #[derive(Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -183,6 +230,13 @@ pub struct NodeConfig {
     /// 其他协议忽略。缺省由 crate 默认决定，但本卡要求显式给出以便校验。
     #[serde(default)]
     pub method: Option<String>,
+    /// REALITY 客户端配置（**仅 vless**）：缺省即「不走 REALITY」，既有 JSON
+    /// 配置行为完全不变。
+    ///
+    /// 给了但 `protocol` 不是 `vless` ⇒ 配置加载阶段**显式报错**
+    /// （fail-closed，不静默忽略该配置段）。
+    #[serde(default)]
+    pub reality: Option<NodeRealitySettings>,
     /// 转发服务配置（监听地址 / 默认节点 / 路由规则 / 超时）。
     ///
     /// **缺省即无转发服务**：dry-run 行为与旧版完全一致（既有测试不退化）。
@@ -194,7 +248,7 @@ pub struct NodeConfig {
 
 impl fmt::Debug for NodeConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // 凭据经 AuthConfig 的脱敏 Debug；其余字段无敏感内容。
+        // 凭据经 AuthConfig / NodeRealitySettings 的脱敏 Debug；其余字段无敏感内容。
         f.debug_struct("NodeConfig")
             .field("name", &self.name)
             .field("protocol", &self.protocol)
@@ -203,6 +257,7 @@ impl fmt::Debug for NodeConfig {
             .field("tls", &self.tls)
             .field("auth", &self.auth)
             .field("method", &self.method)
+            .field("reality", &self.reality)
             .finish()
     }
 }
@@ -241,7 +296,39 @@ impl NodeConfig {
                 }
             }
         }
+        self.validate_reality(&invalid)?;
         self.validate_credentials(&invalid)?;
+        Ok(())
+    }
+
+    /// REALITY 配置段的协议范围校验（fail-closed）。
+    ///
+    /// 只判「该段能否出现在这个协议上」：**形态**校验（base64 / hex / 指纹）
+    /// 交给协议 crate 的 `RealityConfig::from_settings`，避免在 node 侧复制实现。
+    ///
+    /// - `protocol != vless` 却带 `reality` ⇒ 显式报错（不静默忽略）。
+    /// - `protocol == vless` 且带 `reality` ⇒ 公钥与口令**至少给一个**
+    ///   （两者都空时协议 crate 会 fail-closed，这里提前给出更贴近配置的报错）。
+    fn validate_reality(&self, invalid: &impl Fn(&str) -> ConfigError) -> Result<(), ConfigError> {
+        let Some(reality) = &self.reality else {
+            return Ok(());
+        };
+        if self.protocol != Protocol::Vless {
+            return Err(invalid("reality 配置段只允许用于 vless 协议"));
+        }
+        if reality.public_key.trim().is_empty()
+            && reality
+                .password
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err(invalid("reality.public_key 与 reality.password 至少给一个"));
+        }
+        if let Some(name) = reality.server_name.as_deref() {
+            if name.trim().is_empty() {
+                return Err(invalid("reality.server_name 不能为空"));
+            }
+        }
         Ok(())
     }
 
