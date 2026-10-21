@@ -13,6 +13,7 @@ pub mod reality_config;
 pub mod reality_link;
 pub mod stream;
 pub mod vision;
+pub mod vision_wire;
 pub mod xel;
 pub mod xel_wire;
 pub mod xudp;

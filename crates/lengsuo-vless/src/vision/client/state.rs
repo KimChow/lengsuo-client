@@ -44,6 +44,12 @@ pub struct OutboundState {
     pub uplink_writer_direct_copy: bool,
 }
 
+impl OutboundState {
+    /// 初始态判据：三个 `remaining_*` 均为 -1（与 [`InboundState`] 的同名判据一致）。
+    pub fn is_initial(&self) -> bool {
+        self.remaining_command == -1 && self.remaining_content == -1 && self.remaining_padding == -1
+    }
+}
 impl Default for OutboundState {
     fn default() -> Self {
         Self {

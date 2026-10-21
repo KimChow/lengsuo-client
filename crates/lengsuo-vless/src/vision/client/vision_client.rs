@@ -22,7 +22,13 @@ pub struct VisionClient {
     uuid: [u8; 16],
     uuid_once: Option<[u8; 16]>,
     testseed: [u32; 4],
-    rng: Box<dyn RngCore>,
+    /// 随机源。
+    ///
+    /// `+ Send`：本类型要能被生产链路（node 转发器的 `tokio::task::spawn`）持有，
+    /// 必须 `Send`。`Box<dyn RngCore>`（无 `Send`）会让整个 `VisionClient` 变成
+    /// `!Send`，那样 vision 就只能留在测试里用、无法进生产。`+ Send` 不改变任何
+    /// 语义：`rand_below` / `padding_length` 只要求 `RngCore`。
+    rng: Box<dyn RngCore + Send>,
     /// 下行初始态缓冲：参考依赖「首个缓冲 ≥21 字节且以 UUID 开头」的软约定；
     /// 本实现把不足 21 字节的首块攒满再判定，避免 TCP 短读破坏初始同步。
     downlink: Vec<u8>,
@@ -40,7 +46,8 @@ impl core::fmt::Debug for VisionClient {
 }
 
 impl VisionClient {
-    pub fn new(uuid: [u8; 16], testseed: Option<[u32; 4]>, rng: Box<dyn RngCore>) -> Self {
+    /// 建立客户端。`rng` 需 `Send`（生产链路要 `Send`）；测试可传确定性计数器 RNG。
+    pub fn new(uuid: [u8; 16], testseed: Option<[u32; 4]>, rng: Box<dyn RngCore + Send>) -> Self {
         Self {
             state: TrafficState::new(uuid),
             uuid,
@@ -199,8 +206,17 @@ impl VisionClient {
             return;
         }
         let o = self.state.outbound;
+        // **报告偏离（补强）**：参考 `VisionReader.ReadMultiBuffer` 的
+        // `*WithinPaddingBuffers` 更新（`remainingContent>0 || remainingPadding>0
+        // || currentCommand==0`）依赖「MultiBuffer 元素 = 完整块」这一软约定。本接口
+        // 接收的是可任意切分的线上字节，故在以上判据外**额外**把「块头尚未读完」
+        // （`remaining_command > 0`）也视为仍在 padding 阶段，否则短读到块头中段会
+        // 把剩余字节误判为直通明文（服务端上行读已做同一补强，见
+        // [`super::server::VisionServer::decode_uplink`]）。
+        let mid_block =
+            !self.state.outbound.is_initial() && self.state.outbound.remaining_command > 0;
         let do_padding_phase =
-            o.within_padding_buffers || self.state.number_of_packet_to_filter > 0;
+            o.within_padding_buffers || self.state.number_of_packet_to_filter > 0 || mid_block;
         if !do_padding_phase {
             out.extend_from_slice(&self.downlink);
             self.downlink.clear();
@@ -218,7 +234,15 @@ impl VisionClient {
         let mut scratch = Vec::with_capacity(buffered.len());
         self.xtls_unpadding(&buffered, &mut scratch);
         let o = &mut self.state.outbound;
-        if o.remaining_content > 0 || o.remaining_padding > 0 || o.current_command == 0 {
+        // 参考 `VisionReader.ReadMultiBuffer` 的 `*WithinPaddingBuffers` 更新；**补强**：
+        // 额外把「块头尚未读完」（`remaining_command > 0`）也判为仍在 padding 阶段
+        // （与 [`super::server::VisionServer::decode_uplink`] 的同一补强对称），
+        // 否则块头被切成多次读时，剩余头字节会被当成直通明文吐给调用方。
+        if o.remaining_command > 0
+            || o.remaining_content > 0
+            || o.remaining_padding > 0
+            || o.current_command == 0
+        {
             o.within_padding_buffers = true;
         } else if o.current_command == 1 {
             o.within_padding_buffers = false;
