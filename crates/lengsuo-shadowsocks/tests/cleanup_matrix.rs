@@ -10,8 +10,10 @@
 //!
 //! - **A 正常收尾后回收**（`normal`）：完整往返后上游会话被回收、salt 记忆池状态
 //!   符合实现真实语义、再开连接仍可用、端口可再 bind。
-//! - **B 异常结束后的回收**（`abnormal`）：对端中途断开 / 上游不可达 / 写入中途
-//!   被截断 ⇒ 有限时间内感知、会话被回收、错误如实返回（fail-closed）。
+//! - **B 异常结束后的回收**（`abnormal` + `multichunk`）：对端中途断开 / 上游
+//!   不可达 / 写入中途被截断 ⇒ 有限时间内感知、会话被回收、错误如实返回
+//!   （fail-closed）。`multichunk` 专测「同一条连接上连发多个 chunk」时的转发
+//!   与收尾（`copy_request` 的「后续 chunk」分支）。
 //! - **C 回收不误伤**（`isolation`）：一条连接异常结束后其它并行连接仍正常；
 //!   relay 关闭后在途连接按实现真实语义收尾，端口不残留占用。
 //!
@@ -36,6 +38,9 @@ mod normal;
 
 #[path = "cleanup_matrix/abnormal.rs"]
 mod abnormal;
+
+#[path = "cleanup_matrix/multichunk.rs"]
+mod multichunk;
 
 #[path = "cleanup_matrix/isolation.rs"]
 mod isolation;

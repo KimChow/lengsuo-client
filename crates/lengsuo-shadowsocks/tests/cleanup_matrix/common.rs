@@ -190,6 +190,32 @@ pub async fn write_request_chunks(stream: &mut TcpStream, target: &TargetAddr, p
     drop(writer);
 }
 
+/// 客户端方向的一次「写**多个** chunk → 半关闭写端」。
+///
+/// 与 [`write_request_chunks`] 同样的多 chunk 线上字节，但收尾时对写端做半关闭
+/// （`SHUT_WR`）⇒ 请求方向干净结束，中继对上游做写半关闭（参考
+/// `task.Close(link.Writer)`），回程方向随之收到干净 EOF。
+pub async fn send_request_chunks(stream: &mut TcpStream, target: &TargetAddr, payloads: &[&[u8]]) {
+    let mut writer =
+        TcpWriter::new(&mut *stream, SUITE, PASSWORD.as_bytes(), WAIT).expect("构造写端");
+    for (index, payload) in payloads.iter().enumerate() {
+        let mut request: Vec<u8> = Vec::new();
+        if index == 0 {
+            target.encode_checked(&mut request).expect("回环目标可编码");
+        }
+        request.extend_from_slice(payload);
+        timeout(WAIT, writer.send(&request))
+            .await
+            .expect("send 未被外层超时")
+            .expect("send 成功");
+    }
+    timeout(WAIT, writer.shutdown())
+        .await
+        .expect("shutdown 未被外层超时")
+        .expect("写半关闭应成功");
+    drop(writer);
+}
+
 /// 客户端方向的一次「写请求 → 半关闭写端」。
 pub async fn send_request(stream: &mut TcpStream, target: &TargetAddr, payload: &[u8]) {
     let mut request: Vec<u8> = Vec::new();
@@ -230,6 +256,25 @@ pub async fn read_response(mut stream: TcpStream) -> Vec<u8> {
             Ok(Some(chunk)) => got.extend_from_slice(&chunk),
             Ok(None) => break,
             Err(err) => panic!("回程读取失败（应等到干净 EOF）：{err}"),
+        }
+    }
+    got
+}
+
+/// 读回程方向直到累计收到 `expected` 字节，返回收到的全部字节。
+///
+/// **只读不等的读端**（连接仍打开时用）：每次 `recv` 最多等 [`WAIT`]，累计到
+/// `expected` 即返回；读端只用**一个** [`TcpReader`]（回程方向有自己的新 salt，
+/// 重复构造读端会重新读 salt ⇒ 破坏帧边界）。
+pub async fn read_response_exact(mut stream: TcpStream, expected: usize) -> Vec<u8> {
+    let (read_half, _write_half) = stream.split();
+    let mut reader = TcpReader::new(read_half, SUITE, PASSWORD.as_bytes(), WAIT).expect("构造读端");
+    let mut got = Vec::new();
+    while got.len() < expected {
+        match timeout(WAIT, reader.recv()).await.expect("recv 超时") {
+            Ok(Some(chunk)) => got.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(err) => panic!("回程读取失败（应等到收够字节）：{err}"),
         }
     }
     got

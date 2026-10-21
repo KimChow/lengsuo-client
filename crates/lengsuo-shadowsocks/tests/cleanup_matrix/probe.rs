@@ -49,6 +49,14 @@ pub enum Flavor {
     Reset,
     /// 持住：接受后既不读也不写，连接一直开着（用于「relay 关闭时在途连接」）。
     Hold,
+    /// **分段**回声：每读到一段就**单独**写回并 flush，不等后续字节。
+    ///
+    /// 与 [`Flavor::Echo`] 的关键区别：`Echo` 把读到的字节原样写回，但**读**的粒度
+    /// 由 TCP 决定（多段可能被**合并**成一次读）⇒ 回程方向看到的是「合并后」的
+    /// 字节流，无法区分「上游发了几段」。`Segmented` 每次读到就立刻写回并 flush，
+    /// 让**回程方向**的每次读对应上游的**每一次写**——这样「回程方向漏掉了某一段」
+    /// 这类缺陷才会暴露成可观测的**字节数缺失**。
+    Segmented,
 }
 
 /// 起一个回环上游目标。
@@ -81,7 +89,7 @@ pub async fn spawn_target(flavor: Flavor) -> Target {
                         }
                         let _ = tx.send(TargetEvent::PeerEof);
                     }
-                    Flavor::Echo => {
+                    Flavor::Echo | Flavor::Segmented => {
                         let mut buffer = vec![0u8; 8192];
                         loop {
                             let got = match stream.read(&mut buffer).await {
@@ -99,6 +107,11 @@ pub async fn spawn_target(flavor: Flavor) -> Target {
                             if stream.write_all(&buffer[..got]).await.is_err() {
                                 let _ = tx.send(TargetEvent::Failed);
                                 break;
+                            }
+                            // `Segmented`：每次写完立刻 flush，不等后续字节 ⇒ 回程
+                            // 方向的每次读对应上游的每次写（段不会被合并）。
+                            if flavor == Flavor::Segmented {
+                                let _ = stream.flush().await;
                             }
                         }
                         let _ = stream.shutdown().await;
@@ -141,6 +154,52 @@ pub async fn drain_events(target: &mut Target, limit: Duration, gap: Duration) -
         }
     }
     events
+}
+
+/// 等上游**本次调用期间**累计收到的字节数达到 `expected`（在期限内），返回该累计值。
+///
+/// 返回值是**增量**（从本次调用开始算起），不是历史总和：调用方据此判断
+/// 「这一批 chunk 是否已被完整转发到上游」。用于「先确认上游已收到 N 字节，
+/// 再制造异常」的同步点：否则 RST 可能与转发并发，断言就变成竞态。
+///
+/// **超时不会被当成通过**——返回最后一次读到的累计值，调用方据此断言失败。
+pub async fn wait_received_delta(target: &mut Target, expected: usize, limit: Duration) -> usize {
+    let deadline = Instant::now() + limit;
+    let mut total = 0usize;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match timeout(
+            remaining.min(Duration::from_millis(200)),
+            target.events.recv(),
+        )
+        .await
+        {
+            Ok(Some(TargetEvent::Received(len))) => {
+                total += len;
+                if total >= expected {
+                    return total;
+                }
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => {}
+        }
+    }
+    total
+}
+
+/// 事件序列里 `Received` 事件的字节数总和。
+pub fn received_bytes(events: &[TargetEvent]) -> usize {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            TargetEvent::Received(len) => Some(*len),
+            _ => None,
+        })
+        .sum()
 }
 
 /// 读**原始字节**（不解帧）到 EOF 或首次错误。
