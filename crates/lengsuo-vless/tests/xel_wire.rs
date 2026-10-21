@@ -16,6 +16,18 @@
 //! 「注入会话密钥 / 只开记录层」的入口。既有 `tests/xel_golden.rs` 已用参考端
 //! 实跑产出的黄金字节证明**记录层本身**与参考逐字节一致；本文件在此之上证明
 //! **新 API 与既有原语**逐字节一致。两者串起来即：本 API 未改变记录层语义。
+//!
+//! **组合形态（AEAD ⊕ XOR 同时开启）的金标对齐**见子模块
+//! [`reference_golden`]：既有金标只分别锁定两层，没有锁定「两层同时开启」时
+//! 参考产出的线上字节——而那正是生产配置（参考 `XorMode == 2`）的形态。
+
+/// 组合形态（AEAD 记录层 ⊕ XOR 头部掩蔽）的参考金标字节对拍。
+#[path = "xel_wire/reference_golden.rs"]
+mod reference_golden;
+
+/// 参考二进制侧的互通边界取证（`#[ignore]`，须显式 `--ignored` 实跑）。
+#[path = "xel_wire/reference_binary.rs"]
+mod reference_binary;
 
 use std::time::Duration;
 
@@ -556,4 +568,58 @@ async fn xel_stream_close_succeeds_on_clean_eof() {
     stream.shutdown().await.expect("客户端关写");
     stream.close().await.expect("干净 EOF 下 close 必须成功");
     server.await.expect("服务端任务不得 panic");
+}
+
+/// 出站原语：读方向的失败必须在**读操作本身**报出，不能只藏在 `close()` 里。
+///
+/// 回归用例（fail-open 缺陷）：读任务失败时会把失败原因放进失败槽并关闭管道
+/// 写端。管道只能表达 EOF ⇒ 若读操作不把失败槽里的原因报出来，应用侧读到的是
+/// 一个**干净的 EOF**，「认证失败的流」被误读成「对端正常结束」（静默降级）。
+/// 只调用 `read()` 不调用 `close()` 的调用方（流式读取、只读一次载荷）根本不会
+/// 发现异常。
+///
+/// 判据：错钥下 `read()` 必须返回**错误**（`Err`），不得返回 `Ok(0)`（干净 EOF）。
+#[tokio::test]
+async fn xel_stream_read_surfaces_read_direction_failure() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("绑定回环");
+    let address = listener.local_addr().expect("本端地址");
+    let server = tokio::spawn(async move {
+        let (transport, _) = listener.accept().await.expect("接受连接");
+        // 服务端用**错钥**发送 ⇒ 客户端的接收方向必然认证失败。
+        let config = XelWireConfig {
+            cipher: XelCipher::Aes256Gcm,
+            uplink_key: wrong_key(),
+            downlink_key: uplink_key(),
+            xor: None,
+        };
+        let mut stream = XelStream::new(transport, config).expect("构造出站原语");
+        let _ = stream
+            .write_all(b"payload sealed under the wrong key")
+            .await;
+        let _ = stream.shutdown().await;
+        let _ = stream.close().await;
+    });
+
+    let transport = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("连接回环");
+    let config = XelWireConfig {
+        cipher: XelCipher::Aes256Gcm,
+        uplink_key: uplink_key(),
+        downlink_key: downlink_key(),
+        xor: None,
+    };
+    let mut stream = XelStream::new(transport, config).expect("构造出站原语");
+    let mut buffer = vec![0u8; 4096];
+    // 只调 `read()`，**不**调 `close()`：失败必须在这里就可见。
+    let outcome = timeout(Duration::from_secs(10), stream.read(&mut buffer))
+        .await
+        .expect("错钥下读必须快速失败，而不是等到超时");
+    assert!(
+        outcome.is_err(),
+        "读方向的认证失败必须在 read() 里报出（不得返回干净的 EOF）"
+    );
+    // 显式丢弃客户端流：关掉传输，服务端的 `close()` 才能立刻收尾（不靠超时兜底）。
+    drop(stream);
+    let _ = server.await;
 }
