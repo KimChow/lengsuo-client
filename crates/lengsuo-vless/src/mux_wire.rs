@@ -251,7 +251,12 @@ impl MuxWire {
             // 参考 `ClientWorker.Dispatch`：`sm.Allocate` 后登记会话。
             let strategy = state.strategy;
             let id = state.client.manager.allocate(&strategy)?;
-            if !state.client.manager.add(id, SessionState { target: target.clone() }) {
+            if !state.client.manager.add(
+                id,
+                SessionState {
+                    target: target.clone(),
+                },
+            ) {
                 return Err(Error::SessionTableClosed);
             }
             let mut writer = SessionWriter::request(id, target.clone(), target.1);
@@ -377,7 +382,7 @@ impl MuxWire {
             .client
             .manager
             .get(id)
-            .map_or(true, |session| session.target.1 == TargetNetwork::Tcp)
+            .is_none_or(|session| session.target.1 == TargetNetwork::Tcp)
     }
 }
 
