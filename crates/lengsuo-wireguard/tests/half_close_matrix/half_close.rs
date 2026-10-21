@@ -24,9 +24,7 @@
 //!
 //! 因此下面四条用例按上述真实语义书写，不套用 TCP 的 EOF 语义。
 
-use super::fixture::{
-    establish, open_fd_count, serial_guard, thread_count, SessionSpec, PAYLOAD_A, PAYLOAD_B,
-};
+use super::fixture::{establish, serial_guard, SessionSpec, PAYLOAD_A, PAYLOAD_B};
 
 /// A-1：单向结束后反向仍可用。
 ///
@@ -204,63 +202,11 @@ fn half_close_rejects_stale_packets_fail_closed() {
     );
 }
 
-/// A-3：半关闭不产生悬挂任务。
-///
-/// 本仓 `lengsuo-wireguard` 的**已编译**源码里没有任何 `std::thread`、
-/// `tokio::spawn` 或 `async fn`（`src/device.rs` 未被 `lib.rs` 挂载，不参与
-/// 编译），所以「关闭后残留读循环」在实现上不可能发生。本用例用两个可观测点
-/// 证明这一点，而不是凭空断言：
-///
-/// - **fd 数**（`/proc/self/fd`）：建立会话 + 半关闭前后**必须相等**——socket
-///   与密钥材料都没有泄漏成常驻句柄。
-/// - **线程数**（`/proc/self/task`）：本仓不创建线程，所以「建立会话」这一步
-///   **不得**让线程数增加。注意不能用「前后绝对值相等」来判：Rust 测试
-///   harness 自身按并行度创建 worker 线程，与本用例无关，且会让绝对值漂移。
-///   正确判据是**自参照**——把「建立会话」当作基线，断言它没有增加线程数。
-///
-/// 若某平台没有这两个可观测点，断言退化为「跳过」而不是伪造通过。
-#[test]
-fn half_close_leaves_no_pending_tasks() {
-    // 串行执行：本文件用进程级读数（线程数/fd 数）观测「无悬挂任务」，
-    // 必须把并行执行的其它用例挡在观测窗外。
-    let _guard = serial_guard();
-
-    // 基线：本仓的任何会话建立动作都不得创建线程。
-    let threads_baseline = thread_count();
-    let fds_baseline = open_fd_count();
-
-    let (client, server) = establish(&SessionSpec::default());
-    let mut a_sender = client.sender();
-    let mut b_receiver = server.receiver();
-    let packet = a_sender.seal(PAYLOAD_A).expect("封装");
-    b_receiver.open(&packet).expect("解封");
-
-    // 半关闭：A 方向停止产出报文。
-    a_sender.poison();
-    assert!(
-        a_sender.seal(PAYLOAD_A).is_err(),
-        "已结束方向不得再产出报文"
-    );
-
-    // 建立会话 + 半关闭**不得**新增线程（自参照判据）。
-    if let (Some(baseline), Some(after)) = (threads_baseline, thread_count()) {
-        assert_eq!(
-            baseline, after,
-            "建立会话与半关闭不得创建任何线程（不得残留读循环/后台任务）"
-        );
-    } else {
-        eprintln!("[half_close] 本平台无 /proc/self/task 观测点，线程数断言跳过");
-    }
-
-    // 会话材料析构后，fd 数必须回到基线。
-    drop((client, server, b_receiver));
-    match (fds_baseline, open_fd_count()) {
-        (Some(baseline), Some(after)) => assert_eq!(
-            baseline, after,
-            "半关闭前后打开的 fd 数必须不变（socket 不得泄漏）"
-        ),
-        _ => {
-            eprintln!("[half_close] 本平台无 /proc/self/fd 观测点，fd 数断言跳过");
-        }
-    }
-}
+// A-3（半关闭不产生悬挂任务）已移到**独立测试二进制**
+// `tests/half_close_no_pending.rs`：该用例断言的是**进程级**读数
+// （`/proc/self/task` 线程数、`/proc/self/fd` fd 数），而本文件里其它 14 个
+// 用例会与它在同一个 libtest harness 下并行执行 ⇒ harness 自身的 worker
+// 线程池与 `tokio` 阻塞池线程会在观测窗内增删 ⇒ 进程级读数随机漂移
+// （实测 8↔14 之间跳），断言必然 flaky，并连带把
+// `cargo test --workspace` 的合流门禁**随机打红**。
+// 独立二进制里只有该用例一个 ⇒ 读数稳定 ⇒ 断言真正反映本仓代码的行为。
