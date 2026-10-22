@@ -34,14 +34,11 @@ use lengsuo_tun::tcp::listener::TcpListener;
 
 use super::device::{DeviceError, TunDevice};
 
-/// 出口运行时需要额外提供的「回程字节」取回能力。
+/// 出口运行时的「回程字节」取回能力。
 ///
-/// `egress::OutboundRuntime` 只覆盖去程（建连、转发）；回程字节（对端发来的应用
-/// 数据）由本 trait 单独承载。真实实现接节点/出口的读端；测试用内存替身。
-pub trait OutboundExchange {
-    /// 取回某个会话已就绪的回程字节；没有就绪数据时返回 `None`。
-    fn take_response(&mut self, session: OutboundSession) -> Option<Vec<u8>>;
-}
+/// 定义在库侧（`lengsuo_tun::egress::OutboundExchange`）：库里的真实出口运行时
+/// 也要实现它，因此它不能只活在 bin 里。这里转出以保持既有引用路径可用。
+pub use lengsuo_tun::egress::OutboundExchange;
 
 /// 事件循环的预算。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

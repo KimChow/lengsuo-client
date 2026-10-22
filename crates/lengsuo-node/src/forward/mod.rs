@@ -39,7 +39,9 @@
 
 mod config;
 mod relay;
-mod session;
+// `pub(crate)`：让 `crate::relay_bridge` 能取到 `session::open`，
+// 同时不把转发层的内部模块暴露到 crate 之外。
+pub(crate) mod session;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
