@@ -44,6 +44,48 @@ EXTRA_TESTS = [
      "targets": ["xray_hysteria_obfs"],
      "expected_passed": 2,
      "env": {"LENGSUO_OBFS_VECTOR": "@@SALAMANDER_VECTOR@@"}},
+    # hysteria Salamander 混淆互通：需参考 Xray（Salamander + 端口跳跃），
+    # 已实跑通过 4 个用例，补登记。
+    {"crate": "lengsuo-hysteria",
+     "targets": ["obfs_hop_wire"],
+     "expected_passed": 4},
+    # hysteria 0-RTT：参考 Xray 作服务端，本仓客户端两次建连的 0-RTT 取证。
+    # 实跑日志显示参考侧早数据上限为 0（回退 1-RTT），用例按该结果断言并
+    # 通过 1 个用例，补登记。
+    {"crate": "lengsuo-hysteria",
+     "targets": ["zero_rtt"],
+     "expected_passed": 1},
+    # vless Vision 响应头与参考 Xray 逐字节互通：已实跑通过 1 个用例，补登记。
+    {"crate": "lengsuo-vless",
+     "targets": ["vision_wire"],
+     "expected_passed": 1},
+    # vless XEL 二进制协议与参考 Xray 的拒收/接受取证：已实跑通过 2 个用例，补登记。
+    {"crate": "lengsuo-vless",
+     "targets": ["xel_wire"],
+     "expected_passed": 2},
+    # vless 传输（WS/HTTPUpgrade）与参考 Xray 双向互通：已实跑通过 4 个用例，补登记。
+    {"crate": "lengsuo-vless",
+     "targets": ["vless_transport"],
+     "expected_passed": 4},
+    # AnyTLS UDP-over-TCP 服务端：官方 anytls-client ↔ 本仓服务端，已实跑通过
+    # 1 个用例，需 openssl，补登记。
+    {"crate": "lengsuo-anytls",
+     "targets": ["udp_over_tcp_server"],
+     "expected_passed": 1, "requires_commands": ["openssl"]},
+    # vmess 安全档位矩阵与参考 Xray 的档位互通/拒收：已实跑通过 3 个用例，
+    # 补登记。
+    {"crate": "lengsuo-vmess",
+     "targets": ["security_matrix_extra"],
+     "expected_passed": 3},
+    # 跳过登记：lengsuo-tun node_runtime —— 需 root 与真实 TUN 设备（`sudo -n`），
+    # 门禁机器无此环境，实跑以 exit 101 收场，结构性不可达，不登记。
+    # 证据：crates/lengsuo-tun/tests/node_runtime.rs:346-349
+    # `#[ignore = "需要 root 与真实 TUN 设备"]`。
+    #
+    # 非候选（不登记）：`tests/support/` 与 `tests/xray_mux_helpers/` 是 support
+    # 模块（顶层无同名 .rs 测试入口，cargo 不会把它们当 target）；
+    # `tests/reality_main_link.rs` 无 `#[ignore]` 且只做本仓回环，不在
+    # 「带参考对端但未进门禁」之列。
 ]
 
 
