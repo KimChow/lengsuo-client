@@ -1,0 +1,415 @@
+{
+  "schema": "lengsuo-native-host-transport-vectors",
+  "schema_version": 1,
+  "source_of_truth": "Chromium 155 chrome/browser/extensions/api/messaging/native_message_process_host.cc (写侧 OnMessage / 读侧 ProcessIncomingData)；扩展 ID 格式见 components/crx_file/id_util.cc IdIsValid；来源参数见 chrome/browser/extensions/api/messaging/launch_context.cc",
+  "note": "本文件钉的是「宿主进程 ⇄ Chromium」的管道帧（传输层），不是凭据线契约 §5.2 的「扩展 ⇄ 宿主」消息帧（协议层）—— 两者是两层不同的东西。长度前缀是【本机字节序】（native endian），不是大端。本文件里的长度前缀按小端记录（作者机器的字节序）；本卡实现用本机字节序收发，与 Chromium 收发两侧对称。改本文件必须同时核 Chromium 源码。本文件刻意保持为【单个文件】（派卡书指定的固定路径 tests/vectors/native-host-transport-v1.json），故略超仓库 400 行软目标；不拆分的理由就是「固定向量文件必须是一个可被逐字节引用的整体」。",
+  "pipe_frame": {
+    "header_len": 4,
+    "length_prefix_field": {
+      "offset": 0,
+      "width": 4,
+      "endian": "native",
+      "endian_in_this_file": "little",
+      "meaning": "payload byte count",
+      "excludes_frame_header": true
+    },
+    "payload_offset": 4,
+    "max_payload_len": 1048576,
+    "total_len": "header_len + len",
+    "layout": "[0..4) length_prefix u32 native-endian = payload byte count | [4..) payload (JSON text)",
+    "payload_is_json_text": true,
+    "note": "1 MiB 上限的编码侧依据是 Chromium 的 kMaximumNativeMessageSize；解码侧的 1 MiB 是本卡自设（Chromium 写侧不检查长度），两者的依据不同，见报告。"
+  },
+  "origin": {
+    "scheme_prefix": "chrome-extension://",
+    "extension_id_len": 32,
+    "extension_id_alphabet": "a-p",
+    "case_sensitive": false,
+    "case_sensitive_note": "照 Chromium IdIsValid：先 ToLowerASCII 再比，故大小写不敏感",
+    "canonical_form": "chrome-extension://<extension_id>/",
+    "canonical_form_note": "chrome-extension 登记在 kChromeStandardURLSchemes（SCHEME_WITH_HOST）⇒ 标准 scheme ⇒ url/url_canon_path.cc DoPath 把空路径补成 '/' ⇒ Chromium 的 GURL::spec() 带尾斜杠",
+    "trailing_slash_accepted": true,
+    "argv_position": 1
+  },
+  "legal_frames": [
+    {
+      "name": "V_LEN_0",
+      "note": "空载荷：长度前缀必须是 00000000",
+      "payload_len": 0,
+      "payload_hex": "",
+      "length_prefix_hex": "00000000",
+      "frame_hex": "00000000",
+      "frame_len": 4
+    },
+    {
+      "name": "V_LEN_1",
+      "note": "单字节载荷",
+      "payload_len": 1,
+      "payload_hex": "5a",
+      "length_prefix_hex": "01000000",
+      "frame_hex": "010000005a",
+      "frame_len": 5
+    },
+    {
+      "name": "V_LEN_2_EMPTY_JSON",
+      "note": "最短的合法 JSON 业务载荷",
+      "payload_len": 2,
+      "payload_hex": "7b7d",
+      "length_prefix_hex": "02000000",
+      "frame_hex": "020000007b7d",
+      "frame_len": 6
+    },
+    {
+      "name": "V_LEN_255",
+      "note": "载荷长度 255（0xFF）",
+      "payload_len": 255,
+      "payload_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "length_prefix_hex": "ff000000",
+      "frame_hex": "ff0000005a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "frame_len": 259
+    },
+    {
+      "name": "V_LEN_256",
+      "note": "载荷长度 256：跨过低字节进位，长度前缀必须是 00010000",
+      "payload_len": 256,
+      "payload_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "length_prefix_hex": "00010000",
+      "frame_hex": "000100005a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "frame_len": 260
+    },
+    {
+      "name": "V_JSON_ASCII",
+      "note": "纯 ASCII 的 JSON 业务载荷",
+      "payload_len": 23,
+      "payload_hex": "7b2274797065223a302c227061796c6f6164223a22227d",
+      "length_prefix_hex": "17000000",
+      "frame_hex": "170000007b2274797065223a302c227061796c6f6164223a22227d",
+      "frame_len": 27
+    },
+    {
+      "name": "V_UTF8_CJK",
+      "note": "含多字节 UTF-8（中文）的 JSON 载荷",
+      "payload_len": 16,
+      "payload_hex": "7b226d7367223a22e587ade68dae227d",
+      "length_prefix_hex": "10000000",
+      "frame_hex": "100000007b226d7367223a22e587ade68dae227d",
+      "frame_len": 20
+    }
+  ],
+  "fragmented_frames": [
+    {
+      "name": "V_FRAG_BYTE_BY_BYTE",
+      "note": "一帧切成 1 字节一段逐段喂：前 5 段都凑不齐，第 6 段才交付",
+      "payload_len": 2,
+      "payload_hex": "7b7d",
+      "length_prefix_hex": "02000000",
+      "frame_hex": "020000007b7d",
+      "frame_len": 6,
+      "concat_hex": "020000007b7d",
+      "expect_final_pending": 0,
+      "chunks": [
+        {
+          "hex": "02",
+          "expect_frames": [],
+          "expect_pending": 1
+        },
+        {
+          "hex": "00",
+          "expect_frames": [],
+          "expect_pending": 2
+        },
+        {
+          "hex": "00",
+          "expect_frames": [],
+          "expect_pending": 3
+        },
+        {
+          "hex": "00",
+          "expect_frames": [],
+          "expect_pending": 4
+        },
+        {
+          "hex": "7b",
+          "expect_frames": [],
+          "expect_pending": 5
+        },
+        {
+          "hex": "7d",
+          "expect_frames": [
+            "7b7d"
+          ],
+          "expect_pending": 0
+        }
+      ]
+    },
+    {
+      "name": "V_FRAG_HALF_HEADER_THEN_REST",
+      "note": "先喂半个帧头（2 字节），再喂剩下的帧头，再喂载荷",
+      "payload_len": 2,
+      "payload_hex": "7b7d",
+      "length_prefix_hex": "02000000",
+      "frame_hex": "020000007b7d",
+      "frame_len": 6,
+      "concat_hex": "020000007b7d",
+      "expect_final_pending": 0,
+      "chunks": [
+        {
+          "hex": "0200",
+          "expect_frames": [],
+          "expect_pending": 2
+        },
+        {
+          "hex": "0000",
+          "expect_frames": [],
+          "expect_pending": 4
+        },
+        {
+          "hex": "7b7d",
+          "expect_frames": [
+            "7b7d"
+          ],
+          "expect_pending": 0
+        }
+      ]
+    },
+    {
+      "name": "V_FRAG_TWO_FRAMES_AND_HALF",
+      "note": "一次喂两整帧 + 半帧：应取出 2 帧，剩半帧",
+      "payload_len": 2,
+      "payload_hex": "7b7d",
+      "length_prefix_hex": "02000000",
+      "frame_hex": "020000007b7d",
+      "frame_len": 6,
+      "concat_hex": "020000007b7d020000007b7d0200",
+      "expect_final_pending": 2,
+      "chunks": [
+        {
+          "hex": "020000007b7d",
+          "expect_frames": [
+            "7b7d"
+          ],
+          "expect_pending": 0
+        },
+        {
+          "hex": "020000007b7d",
+          "expect_frames": [
+            "7b7d"
+          ],
+          "expect_pending": 0
+        },
+        {
+          "hex": "0200",
+          "expect_frames": [],
+          "expect_pending": 2
+        }
+      ]
+    },
+    {
+      "name": "V_FRAG_CHUNK_SIZE_3",
+      "note": "一帧切成 3 字节一段（N 段）逐段喂",
+      "payload_len": 2,
+      "payload_hex": "7b7d",
+      "length_prefix_hex": "02000000",
+      "frame_hex": "020000007b7d",
+      "frame_len": 6,
+      "concat_hex": "020000007b7d",
+      "expect_final_pending": 0,
+      "chunks": [
+        {
+          "hex": "020000",
+          "expect_frames": [],
+          "expect_pending": 3
+        },
+        {
+          "hex": "007b7d",
+          "expect_frames": [
+            "7b7d"
+          ],
+          "expect_pending": 0
+        }
+      ]
+    }
+  ],
+  "illegal_frames": [
+    {
+      "name": "V_ILLEGAL_HEADER_OVER_LIMIT",
+      "category": "frame_too_long",
+      "note": "长度头声明 1048577 字节（1 MiB + 1）超过解码侧上限",
+      "input_hex": "01001000",
+      "error": {
+        "declared": 1048577,
+        "limit": 1048576
+      }
+    },
+    {
+      "name": "V_ILLEGAL_HEADER_MAX_U32",
+      "category": "frame_too_long",
+      "note": "长度头声明 u32::MAX：绝不能照此去申请内存",
+      "input_hex": "ffffffff",
+      "error": {
+        "declared": 4294967295,
+        "limit": 1048576
+      }
+    },
+    {
+      "name": "V_ILLEGAL_HEADER_SHORT",
+      "category": "incomplete",
+      "note": "帧头被截断（只有 2 字节）：等更多数据，不返回部分数据",
+      "input_hex": "0100",
+      "error": {
+        "needed": 4,
+        "available": 2
+      }
+    },
+    {
+      "name": "V_ILLEGAL_PAYLOAD_TRUNCATED",
+      "category": "incomplete",
+      "note": "长度头说 3 字节，载荷只到 2 字节：等更多数据，不凑帧",
+      "input_hex": "030000007b7d",
+      "error": {
+        "needed": 7,
+        "available": 6
+      }
+    }
+  ],
+  "limit_cases": [
+    {
+      "name": "V_LIMIT_ENCODE_EXACT_MAX",
+      "op": "encode",
+      "note": "编码侧恰好 1 MiB：合法（上限含在内）",
+      "payload_len": 1048576,
+      "expect": "ok"
+    },
+    {
+      "name": "V_LIMIT_ENCODE_OVER_MAX",
+      "op": "encode",
+      "note": "编码侧 1 MiB + 1：报错，不截断、不分帧",
+      "payload_len": 1048577,
+      "expect": "payload_too_long",
+      "error": {
+        "declared": 1048577,
+        "limit": 1048576
+      }
+    },
+    {
+      "name": "V_LIMIT_DECODE_HEADER_EXACT_MAX",
+      "op": "decode_header",
+      "note": "解码侧长度头恰好 1 MiB：不超限，但帧没收全 ⇒ 等更多数据",
+      "length_header_hex": "00001000",
+      "expect": "incomplete",
+      "error": {
+        "needed": 1048580,
+        "available": 4
+      }
+    },
+    {
+      "name": "V_LIMIT_DECODE_HEADER_OVER_MAX",
+      "op": "decode_header",
+      "note": "解码侧长度头 1 MiB + 1：报错，绝不按它申请内存",
+      "length_header_hex": "01001000",
+      "expect": "frame_too_long",
+      "error": {
+        "declared": 1048577,
+        "limit": 1048576
+      }
+    }
+  ],
+  "legal_origins": [
+    {
+      "name": "V_ORIGIN_CANONICAL",
+      "note": "Chromium 的规范形式：chrome-extension://<32位ID>/（标准 scheme ⇒ 空路径补成 '/' ⇒ 带尾斜杠）",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+      "extension_id": "abcdefghijklmnopabcdefghijklmnop"
+    },
+    {
+      "name": "V_ORIGIN_NO_TRAILING_SLASH",
+      "note": "防御性接受无尾斜杠形式（若 chrome-extension 日后不再登记为标准 scheme，spec() 就会是这个形状）",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+      "extension_id": "abcdefghijklmnopabcdefghijklmnop"
+    },
+    {
+      "name": "V_ORIGIN_UPPERCASE",
+      "note": "照 IdIsValid 的大小写不敏感语义：大写也接受",
+      "origin": "chrome-extension://ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP",
+      "extension_id": "ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP"
+    },
+    {
+      "name": "V_ORIGIN_SECOND_ID",
+      "note": "另一个合法 ID：本卡不硬编码任何扩展 ID，两个都应通过",
+      "origin": "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba",
+      "extension_id": "ponmlkjihgfedcbaponmlkjihgfedcba"
+    }
+  ],
+  "illegal_origins": [
+    {
+      "name": "V_ORIGIN_WRONG_SCHEME",
+      "category": "not_extension_origin",
+      "note": "scheme 不是 chrome-extension",
+      "origin": "https://abcdefghijklmnopabcdefghijklmnop"
+    },
+    {
+      "name": "V_ORIGIN_NO_SCHEME",
+      "category": "not_extension_origin",
+      "note": "根本没有 scheme://",
+      "origin": "abcdefghijklmnopabcdefghijklmnop"
+    },
+    {
+      "name": "V_ORIGIN_EMPTY_HOST",
+      "category": "not_extension_origin",
+      "note": "主机部分为空：连 host 都没有 ⇒ 形状就不对（Chromium 只会传一个 32 字符的 host）",
+      "origin": "chrome-extension://"
+    },
+    {
+      "name": "V_ORIGIN_SHORT_ID",
+      "category": "invalid_extension_id",
+      "note": "ID 只有 16 个字符",
+      "origin": "chrome-extension://abcdefghijklmnop",
+      "error": {
+        "reason": "length",
+        "actual": 16
+      }
+    },
+    {
+      "name": "V_ORIGIN_LONG_ID",
+      "category": "invalid_extension_id",
+      "note": "ID 有 33 个字符",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnopa",
+      "error": {
+        "reason": "length",
+        "actual": 33
+      }
+    },
+    {
+      "name": "V_ORIGIN_BAD_ALPHABET",
+      "category": "invalid_extension_id",
+      "note": "ID 含字母表 a-p 之外的字符 q",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnoq",
+      "error": {
+        "reason": "char",
+        "char": "q"
+      }
+    },
+    {
+      "name": "V_ORIGIN_WITH_PATH",
+      "category": "not_extension_origin",
+      "note": "带路径：Chromium 不会这么传",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/foo"
+    },
+    {
+      "name": "V_ORIGIN_WITH_QUERY",
+      "category": "not_extension_origin",
+      "note": "带查询串",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop?x=1"
+    },
+    {
+      "name": "V_ORIGIN_WITH_PORT",
+      "category": "invalid_extension_id",
+      "note": "带端口：冒号不在字母表 a-p 里",
+      "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop:123",
+      "error": {
+        "reason": "char",
+        "char": ":"
+      }
+    }
+  ]
+}
