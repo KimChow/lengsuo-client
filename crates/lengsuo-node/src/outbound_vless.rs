@@ -49,9 +49,9 @@ use crate::outbound::{connect_tls, probe_target, resolve_public, DialError, Node
 
 /// VLESS Vision 的出站接线（流量层 / 记录层 → 承载）。
 ///
-/// 用 `#[path]` 声明（而非在 `lib.rs` 里加 `pub mod`）：本卡的边界限定了可改动的
-/// 文件清单，`lib.rs` 不在其中。
-#[path = "outbound_vless_vision.rs"]
+/// 目录模块：`outbound_vless/outbound_vless_vision.rs` 为模块根，
+/// 子模块按「配置翻译 / 流类型 / 装配」三分。模块声明留在本文件，
+/// `lib.rs` 不需要新增 `pub mod`。
 pub mod outbound_vless_vision;
 use outbound_vless_vision::VlessVisionStream;
 
