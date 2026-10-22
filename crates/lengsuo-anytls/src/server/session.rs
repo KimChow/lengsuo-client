@@ -7,13 +7,16 @@
 //! 2. Settings 必须是首个非 Waste 帧；收到后若客户端 `v>=2`，回 `cmdServerSettings`；
 //!    若 `padding-md5` 与本地方案不符，回 `cmdUpdatePaddingScheme`（携带本地方案原文）。
 //! 3. SYN 建立流；首帧 PUSH 的前缀是 SOCKS5 目标地址，解析后拨号（TCP）。
+//!    若该地址是 UDP-over-TCP 魔法域 ⇒ 转 [`super::udp`] 的 UoT 承载，
+//!    **绝不**回落成 TCP 拨号（参考 `inbound_tcp.go` 的 `strings.Contains` 分派）。
 //! 4. SYNACK 只在 v2 且只汇报一次；失败带错误文本（参考 `HandshakeSuccess/Failure`）。
 //! 5. 实时数据 PUSH → 目标；FIN → 本地关流；HeartRequest → 原样回 HeartResponse。
 //!
 //! 未实现（与 `docs/anytls-status.md` 的「未覆盖」一致）：空闲复用池、主动心跳计时、
-//! UDP-over-TCP（v2）、认证失败时的明文 fallback（参考为空实现 = 断连）。
+//! 认证失败时的明文 fallback（参考为空实现 = 断连）。
 use super::sink::Sink;
-use super::streams::Stream;
+use super::streams::{destination_host, Stream};
+use super::udp::{classify, version_matches, Magic, UotTable};
 use crate::auth::Credential;
 use crate::frame::{self, Command, Eof, Frame};
 use crate::padding::PaddingScheme;
@@ -21,6 +24,7 @@ use crate::server_state::{Event, ServerState, StateError};
 use crate::Error;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -96,6 +100,7 @@ async fn serve(
 ) -> Result<SessionStats, Error> {
     let mut state = ServerState::new(max_streams).map_err(|_| Error::Invalid)?;
     let mut streams: HashMap<u32, Stream> = HashMap::new();
+    let mut uot = UotTable::new();
     let mut stats = SessionStats::default();
     loop {
         let frame = match sink.read(u16::MAX).await {
@@ -107,7 +112,7 @@ async fn serve(
                 // `io.ErrUnexpectedEOF`（截断 ⇒ fail-closed）。
                 match frame::eof_kind(&err) {
                     Some(Eof::Clean) => {
-                        finish(&mut streams, &mut stats);
+                        finish(&mut streams, &mut uot, &mut stats);
                         return Ok(stats);
                     }
                     Some(Eof::Truncated) => {
@@ -115,7 +120,7 @@ async fn serve(
                         // 资源照常回收（关出站通道、汇总计数），但**不**返回
                         // `Ok(stats)`——调用方必须能区分「对方正常关闭」与
                         // 「连接被中途截断」。
-                        finish(&mut streams, &mut stats);
+                        finish(&mut streams, &mut uot, &mut stats);
                         return Err(err);
                     }
                     // 超时、连接重置等其它错误：直接失败。
@@ -123,7 +128,16 @@ async fn serve(
                 }
             }
         };
-        dispatch(&sink, &mut state, &mut streams, &mut stats, &padding, frame).await?;
+        dispatch(
+            &sink,
+            &mut state,
+            &mut streams,
+            &mut uot,
+            &mut stats,
+            &padding,
+            frame,
+        )
+        .await?;
     }
 }
 
@@ -132,6 +146,7 @@ async fn dispatch(
     sink: &Sink,
     state: &mut ServerState,
     streams: &mut HashMap<u32, Stream>,
+    uot: &mut UotTable,
     stats: &mut SessionStats,
     padding: &PaddingScheme,
     frame: Frame,
@@ -157,16 +172,47 @@ async fn dispatch(
             Ok(())
         }
         Ok(Event::Data(id)) => {
+            let version = stats.peer_version.unwrap_or(1);
+            // ① 已是 UoT 流：字节直接进 UoT 承载（绝不回落 TCP 拨号）。
+            if uot.owns(id) {
+                return uot.feed(id, &frame.data, sink).await;
+            }
+            // ② 尚未识别：先解析流首目的地址，再决定走 UoT 还是 TCP。
             let Some(entry) = streams.get_mut(&id) else {
                 return Err(Error::Invalid);
             };
-            let version = stats.peer_version.unwrap_or(1);
-            relay(entry, id, &frame.data, version, sink).await
+            if entry.sender_ready() {
+                entry.write_to_target(&frame.data);
+                return Ok(());
+            }
+            entry.push_pending(&frame.data);
+            let Some(destination) = entry.take_destination()? else {
+                // 首地址还没跨帧到齐：等下一帧。
+                return Ok(());
+            };
+            match classify(&destination_host(&destination)) {
+                Magic::NotUot => relay_tcp(entry, id, &destination, version, sink).await,
+                Magic::Invalid => {
+                    // 魔法域无法识别 ⇒ 拒绝，**不得**回落成 TCP 拨号。
+                    Err(Error::Invalid)
+                }
+                Magic::Uot(magic) => {
+                    if !version_matches(version, magic) {
+                        // 魔数与版本不符 ⇒ 拒绝，**不得**当普通 PUSH 处理。
+                        return Err(Error::Invalid);
+                    }
+                    let flags = Arc::clone(&entry.flags);
+                    let rest = entry.take_pending();
+                    uot.open(id, magic, version, flags);
+                    uot.feed(id, &rest, sink).await
+                }
+            }
         }
         Ok(Event::Close(id)) => {
             if let Some(entry) = streams.get_mut(&id) {
                 entry.close_local();
             }
+            uot.remove(id);
             stats.streams_closed += 1;
             Ok(())
         }
@@ -186,34 +232,38 @@ async fn dispatch(
     }
 }
 
-/// 数据帧：未建连时先解析目标地址（可跨帧），再拨号并转发剩余载荷。
-async fn relay(
+/// 普通 TCP 流：解析目标地址（可跨帧）后拨号，并转发剩余载荷。
+async fn relay_tcp(
     entry: &mut Stream,
     sid: u32,
-    data: &[u8],
+    destination: &ss_core::target::TargetAddr,
     version: u8,
     sink: &Sink,
 ) -> Result<(), Error> {
-    if entry.sender_ready() {
-        entry.write_to_target(data);
-        return Ok(());
-    }
-    entry.push_pending(data);
-    let Some(endpoint) = entry.take_endpoint()? else {
-        return Ok(());
+    let endpoint = match destination {
+        ss_core::target::TargetAddr::V4(octets, port) => {
+            std::net::SocketAddr::from((std::net::Ipv4Addr::from(*octets), *port))
+        }
+        ss_core::target::TargetAddr::V6(octets, port) => {
+            std::net::SocketAddr::from((std::net::Ipv6Addr::from(*octets), *port))
+        }
+        // 域名目标无法直接拨号 ⇒ 拒绝（与参考侧同理）。
+        ss_core::target::TargetAddr::Domain(_, _) => return Err(Error::Invalid),
     };
+    entry.set_endpoint(endpoint);
     entry.connect(sid, endpoint, version, sink).await?;
     entry.flush_pending();
     Ok(())
 }
 
 /// 收尾：关闭出站通道，汇总统计（回程任务已把已读字节写入 Sink）。
-fn finish(streams: &mut HashMap<u32, Stream>, stats: &mut SessionStats) {
+fn finish(streams: &mut HashMap<u32, Stream>, uot: &mut UotTable, stats: &mut SessionStats) {
     for entry in streams.values_mut() {
         entry.close_local();
         stats.bytes_to_target += entry.flags.to_target.swap(0, Ordering::Relaxed);
         stats.bytes_to_client += entry.flags.to_client.swap(0, Ordering::Relaxed);
     }
+    uot.clear();
 }
 
 /// 无额外依赖的子串查找（本地方案 md5 是固定 32 字节 ASCII）。
