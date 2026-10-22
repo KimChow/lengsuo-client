@@ -8,6 +8,7 @@
 //! 注意：棱梭产品语境下，本 crate 是 engine 数据面的底层拨号组件之一，
 //! 不做协议外的任何产品逻辑（节点选择/健康探测归 net-egress，后续迁入）。
 
+pub mod config;
 pub mod error;
 
 pub use error::Error;
