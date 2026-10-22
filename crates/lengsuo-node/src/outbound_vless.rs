@@ -55,6 +55,15 @@ use crate::outbound::{connect_tls, probe_target, resolve_public, DialError, Node
 pub mod outbound_vless_vision;
 use outbound_vless_vision::VlessVisionStream;
 
+/// VLESS **XEL 记录层**的出站接线（记录层 → 承载）。
+#[path = "outbound_vless_xel.rs"]
+pub mod outbound_vless_xel;
+
+/// VLESS **Mux 承载**的出站接线（一条承载承载多条逻辑会话）。
+#[path = "outbound_vless_mux.rs"]
+pub mod outbound_vless_mux;
+use outbound_vless_mux::MuxSessionIo;
+
 /// vless 出站的承载流：普通 TLS、REALITY 或 Vision。
 ///
 /// 三种承载都实现 `AsyncRead` + `AsyncWrite`（REALITY 侧由
@@ -73,6 +82,15 @@ pub enum VlessStream {
     ///
     /// 装箱理由同 `Tls` 变体：Vision 的两层包装体积最大。
     Vision(Box<VlessVisionStream>),
+    /// XEL 记录层承载（记录层紧贴传输层，VLESS 头与载荷都走记录层）。
+    ///
+    /// 装箱理由同 `Tls` 变体：XEL 记录层内部是两个后台任务 + 管道，体积最大。
+    Xel(Box<lengsuo_vless::xel_wire::XelStream>),
+    /// Mux 承载（一条 VLESS 连接上承载多条逻辑会话）。
+    ///
+    /// 本变体对应**一条逻辑会话**的字节流；承载连接在内部共享（见
+    /// [`MuxSessionIo::open_session`]：同一条承载上可再开会话）。
+    Mux(Box<MuxSessionIo>),
 }
 
 impl AsyncRead for VlessStream {
@@ -85,6 +103,8 @@ impl AsyncRead for VlessStream {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_read(cx, buf),
             Self::Reality(stream) => Pin::new(stream).poll_read(cx, buf),
             Self::Vision(stream) => Pin::new(&mut **stream).poll_read(cx, buf),
+            Self::Xel(stream) => Pin::new(&mut **stream).poll_read(cx, buf),
+            Self::Mux(stream) => Pin::new(&mut **stream).poll_read(cx, buf),
         }
     }
 }
@@ -99,6 +119,8 @@ impl AsyncWrite for VlessStream {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_write(cx, buf),
             Self::Reality(stream) => Pin::new(stream).poll_write(cx, buf),
             Self::Vision(stream) => Pin::new(&mut **stream).poll_write(cx, buf),
+            Self::Xel(stream) => Pin::new(&mut **stream).poll_write(cx, buf),
+            Self::Mux(stream) => Pin::new(&mut **stream).poll_write(cx, buf),
         }
     }
 
@@ -107,6 +129,8 @@ impl AsyncWrite for VlessStream {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_flush(cx),
             Self::Reality(stream) => Pin::new(stream).poll_flush(cx),
             Self::Vision(stream) => Pin::new(&mut **stream).poll_flush(cx),
+            Self::Xel(stream) => Pin::new(&mut **stream).poll_flush(cx),
+            Self::Mux(stream) => Pin::new(&mut **stream).poll_flush(cx),
         }
     }
 
@@ -115,6 +139,8 @@ impl AsyncWrite for VlessStream {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_shutdown(cx),
             Self::Reality(stream) => Pin::new(stream).poll_shutdown(cx),
             Self::Vision(stream) => Pin::new(&mut **stream).poll_shutdown(cx),
+            Self::Xel(stream) => Pin::new(&mut **stream).poll_shutdown(cx),
+            Self::Mux(stream) => Pin::new(&mut **stream).poll_shutdown(cx),
         }
     }
 }
@@ -151,6 +177,12 @@ pub async fn dial_vless(config: &NodeConfig, wait: Duration) -> Result<VlessOutb
     };
     if outbound_vless_vision::vision_enabled(config) {
         return dial_vision(config, wait, request, credential).await;
+    }
+    if outbound_vless_xel::xel_enabled(config) {
+        return dial_xel(config, wait, request, credential).await;
+    }
+    if outbound_vless_mux::mux_enabled(config) {
+        return dial_mux(config, wait, target).await;
     }
     let mut stream = open_stream(config, wait).await?;
     send_request(&mut stream, &request, &credential, wait).await?;
@@ -193,6 +225,67 @@ async fn dial_vision(
 /// Vision 线路错误 → 拨号错误（fail-closed；消息不含密钥材料）。
 fn vision_dial_error(error: outbound_vless_vision::VisionConfigError) -> DialError {
     DialError::Rejected(format!("vision 配置非法：{error}"))
+}
+
+/// XEL 出站：承载（TLS / REALITY）→ XEL 记录层 → 请求头 → 成功响应头。
+///
+/// 承载选择与普通路径一致（`reality` 段优先 ⇒ REALITY，否则 TLS）。XEL 记录层的
+/// 分帧 / AEAD / XOR 掩蔽语义**全部**来自 `lengsuo_vless::xel_wire`，node 侧只做
+/// 「配置 → 建流」的编排。
+///
+/// 认证判据与 Vision 侧**一致**：拿到成功响应头（`[0, 0]`）才算认证完成——记录层
+/// 把响应头也包在里面，读到 `[0,0]` 说明 AEAD 认证通过且对端认可该 UUID。
+async fn dial_xel(
+    config: &NodeConfig,
+    wait: Duration,
+    request: Request,
+    credential: [u8; 16],
+) -> Result<VlessOutbound, DialError> {
+    // 先校验 XEL 配置，再拨任何连接（坏配置不得建立 TCP/TLS）。
+    outbound_vless_xel::precheck(config).map_err(outbound_vless_xel::xel_dial_error)?;
+    let carrier = open_stream(config, wait).await?;
+    let mut stream =
+        outbound_vless_xel::wrap(carrier, config).map_err(outbound_vless_xel::xel_dial_error)?;
+    outbound_vless_xel::handshake(&mut stream, &request, credential, wait).await?;
+    Ok(VlessOutbound {
+        stream: VlessStream::Xel(Box::new(stream)),
+        target: request.target,
+    })
+}
+
+/// Mux 出站：承载（TLS / REALITY）→ `command=Mux` 请求头 → 开一条逻辑会话。
+///
+/// 承载连接的帧流与多会话语义**全部**来自 `lengsuo_vless::mux_wire`；node 侧只做
+/// 「配置 → 建承载 → 开会话」的编排。
+///
+/// ⚠️ 与其它承载不同：mux 承载**不等** VLESS 响应头（参考把响应头滞留到首个 mux
+/// 帧才 flush，见 `outbound_vless_mux` 模块文档）⇒ 认证判据落在**会话能否开出来**
+/// 上：`New` 帧写出成功即承载可用；真正的对端确认由首个 mux 回程帧给出。
+async fn dial_mux(
+    config: &NodeConfig,
+    wait: Duration,
+    target: TargetAddr,
+) -> Result<VlessOutbound, DialError> {
+    let credential = uuid_bytes(&config.auth.password)?;
+    // XEL 记录层在**承载之下**（参考 `outbound.go:211-216` 先握手再写请求头）
+    // ⇒ 给了 `xel` 段时，mux 帧流整体走记录层。
+    let carrier = if outbound_vless_xel::xel_enabled(config) {
+        outbound_vless_xel::precheck(config).map_err(outbound_vless_xel::xel_dial_error)?;
+        let stream = outbound_vless_xel::wrap(open_stream(config, wait).await?, config)
+            .map_err(outbound_vless_xel::xel_dial_error)?;
+        outbound_vless_mux::open_carrier(stream, config, credential, wait).await?
+    } else {
+        outbound_vless_mux::open_carrier(open_stream(config, wait).await?, config, credential, wait)
+            .await?
+    };
+    let session = carrier
+        .open_session(target.clone())
+        .await
+        .map_err(|error| DialError::Rejected(format!("mux 会话建立失败：{error}")))?;
+    Ok(VlessOutbound {
+        stream: VlessStream::Mux(Box::new(session)),
+        target,
+    })
 }
 
 /// 选承载并建流：配置了 `reality` 段走 REALITY，否则走普通 TLS。

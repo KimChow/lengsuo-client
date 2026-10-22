@@ -40,6 +40,20 @@ use crate::route::RouteError;
 mod config_vision;
 pub use config_vision::{NodeEncryptionSettings, NodeVisionSettings};
 
+/// VLESS **XEL 记录层**配置段（`xel`）。
+///
+/// 拆到独立文件（同上）：结构与校验语义见 [`crate::config_xel::NodeXelSettings`]。
+#[path = "config_xel.rs"]
+mod config_xel;
+pub use config_xel::{NodeXelSettings, NodeXelXorSettings};
+
+/// VLESS **Mux 承载**配置段（`mux`）。
+///
+/// 拆到独立文件（同上）：结构与校验语义见 [`crate::config_mux::NodeMuxSettings`]。
+#[path = "config_mux.rs"]
+mod config_mux;
+pub use config_mux::NodeMuxSettings;
+
 /// 配置错误：解析失败（serde）、结构非法（校验）或读取文件失败。
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -263,6 +277,21 @@ pub struct NodeConfig {
     /// 结构与校验见 [`crate::config_vision::NodeEncryptionSettings`]。
     #[serde(default)]
     pub encryption: Option<NodeEncryptionSettings>,
+    /// VLESS **XEL 记录层**配置（**仅 vless**）：缺省即「不走 XEL 记录层」，
+    /// 既有 JSON 配置行为逐字节不变。
+    ///
+    /// 与 `encryption`（Vision 记录层）**不得同时给出**（二者都作用于 VLESS
+    /// 记录层）：配置加载阶段**显式报错**（fail-closed）。
+    ///
+    /// 结构与校验见 [`crate::config_xel::NodeXelSettings`]。
+    #[serde(default)]
+    pub xel: Option<NodeXelSettings>,
+    /// VLESS **Mux 承载**配置（**仅 vless**）：缺省即「不走 mux 承载」，
+    /// 既有 JSON 配置行为逐字节不变。
+    ///
+    /// 结构与校验见 [`crate::config_mux::NodeMuxSettings`]。
+    #[serde(default)]
+    pub mux: Option<NodeMuxSettings>,
     /// 转发服务配置（监听地址 / 默认节点 / 路由规则 / 超时）。
     ///
     /// **缺省即无转发服务**：dry-run 行为与旧版完全一致（既有测试不退化）。
@@ -286,6 +315,8 @@ impl fmt::Debug for NodeConfig {
             .field("reality", &self.reality)
             .field("vision", &self.vision)
             .field("encryption", &self.encryption)
+            .field("xel", &self.xel)
+            .field("mux", &self.mux)
             .finish()
     }
 }
@@ -327,6 +358,8 @@ impl NodeConfig {
         self.validate_reality(&invalid)?;
         self.validate_vision(&invalid)?;
         self.validate_encryption(&invalid)?;
+        self.validate_xel(&invalid)?;
+        self.validate_mux(&invalid)?;
         self.validate_credentials(&invalid)?;
         Ok(())
     }
