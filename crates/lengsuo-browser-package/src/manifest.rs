@@ -111,8 +111,9 @@ pub struct KernelManifestV1 {
     pub platform: Platform,
     /// CPU architecture the artifact was built for.
     pub arch: Arch,
-    /// Safe basename only. This crate does not build download URLs and does not
-    /// touch the filesystem, so nothing here is a path.
+    /// Safe basename only. This crate does not build download URLs, and this
+    /// field is a basename rather than a path: it is checked against a
+    /// lexical grammar and never resolved against the filesystem.
     pub artifact_name: String,
     /// Exact artifact length in bytes: at least 1, at most the internal
     /// `MAX_SIZE_BYTES` bound (16 GiB).
@@ -131,6 +132,23 @@ pub struct KernelManifestV1 {
     /// this is "required by the kernel from the host" rather than "provided by
     /// the kernel".
     pub required_capabilities: BTreeSet<String>,
+    /// Name of the extension directory shipped alongside the kernel, e.g.
+    /// `lengsuo-credential`. A single path component, not a path.
+    ///
+    /// Optional, but paired with [`extension_sha256`](Self::extension_sha256):
+    /// either both are present or neither is. A manifest that names an
+    /// extension without a digest for it claims a payload the client cannot
+    /// verify, so it is rejected rather than half-accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_dir_name: Option<String>,
+    /// Deterministic digest of the extension directory named by
+    /// [`extension_dir_name`](Self::extension_dir_name): 64 lowercase hex
+    /// characters. See [`crate::digest_directory`] for the algorithm.
+    ///
+    /// Optional, and paired with
+    /// [`extension_dir_name`](Self::extension_dir_name) as described there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_sha256: Option<String>,
 }
 
 impl KernelManifestV1 {

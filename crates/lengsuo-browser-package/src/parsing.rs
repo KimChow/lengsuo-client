@@ -11,7 +11,7 @@ pub(crate) fn parse(text: &str) -> Result<KernelManifestV1, PackageError> {
         });
     }
     let pairs = strict_json_object(text)?;
-    const FIELDS: &[&str] = &[
+    const REQUIRED_FIELDS: &[&str] = &[
         "schema_version",
         "version",
         "chromium_revision",
@@ -25,9 +25,21 @@ pub(crate) fn parse(text: &str) -> Result<KernelManifestV1, PackageError> {
         "pool_versions",
         "required_capabilities",
     ];
-    check_field_names(&pairs, FIELDS)?;
+    const OPTIONAL_FIELDS: &[&str] = &["extension_dir_name", "extension_sha256"];
+    check_field_names(&pairs, REQUIRED_FIELDS, OPTIONAL_FIELDS)?;
+    // The two extension fields are one declaration split in half: a manifest
+    // that names an extension without a digest for it claims a payload the
+    // client cannot verify, so the pair is rejected here rather than being
+    // half-ignored later.
+    let has_dir_name = pairs.iter().any(|(k, _)| k == "extension_dir_name");
+    let has_digest = pairs.iter().any(|(k, _)| k == "extension_sha256");
+    crate::validation::check_extension_pair(has_dir_name, has_digest)?;
     for (key, value) in &pairs {
-        let field = *FIELDS.iter().find(|f| **f == key).expect("checked field");
+        let field = *REQUIRED_FIELDS
+            .iter()
+            .chain(OPTIONAL_FIELDS.iter())
+            .find(|f| **f == key)
+            .expect("checked field");
         let valid = match field {
             "schema_version" => value.as_u64().is_some_and(|n| u32::try_from(n).is_ok()),
             "size_bytes" => value.as_u64().is_some(),
@@ -44,6 +56,8 @@ pub(crate) fn parse(text: &str) -> Result<KernelManifestV1, PackageError> {
             "arch" => value
                 .as_str()
                 .is_some_and(|s| ["X86_64", "Aarch64"].contains(&s)),
+            // Everything else is a string field, including the two optional
+            // extension fields: a number, null or array there is a type error.
             _ => value.is_string(),
         };
         if !valid {

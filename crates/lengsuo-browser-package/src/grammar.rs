@@ -16,6 +16,8 @@ use crate::error::PackageError;
 pub(crate) const MAX_VERSION_LEN: usize = 64;
 /// Longest accepted `artifact_name`.
 pub(crate) const MAX_ARTIFACT_NAME_LEN: usize = 255;
+/// Longest accepted `extension_dir_name`.
+pub(crate) const MAX_EXTENSION_DIR_NAME_LEN: usize = 255;
 /// Longest accepted identifier token (capability, pool version, ...).
 pub(crate) const MAX_TOKEN_LEN: usize = 64;
 /// Longest accepted set of tokens, so one hostile manifest cannot make a
@@ -101,9 +103,51 @@ pub(crate) fn artifact_name_ok(s: &str) -> bool {
     !is_win_reserved(s)
 }
 
+/// True if `s` is a safe single-path-component extension directory name.
+///
+/// The manifest names a directory that ships inside the kernel package
+/// layout, so the value must be a *name*, never a path: anything containing
+/// `/` or `\` is refused. The alphabet is ASCII letters, digits, `.`, `_`
+/// and `-`.
+///
+/// Also refused: the empty name, a name longer than
+/// [`MAX_EXTENSION_DIR_NAME_LEN`], the relative names `.` and `..`, a name
+/// starting or ending with `.` or `-` (hidden entries, accidental CLI
+/// flags, and the trailing-dot names Windows folds onto their base), and
+/// the Win32 reserved device names — reused verbatim from
+/// [`artifact_name_ok`], because a directory name that can be a device name
+/// can still hijack a write.
+pub(crate) fn extension_dir_name_ok(s: &str) -> bool {
+    if s.is_empty() || s.len() > MAX_EXTENSION_DIR_NAME_LEN {
+        return false;
+    }
+    if !s
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return false;
+    }
+    // A name, not a path.
+    if s.contains('/') || s.contains('\\') {
+        return false;
+    }
+    if s == "." || s == ".." {
+        return false;
+    }
+    let first = s.as_bytes()[0];
+    if first == b'.' || first == b'-' {
+        return false;
+    }
+    let last = s.as_bytes()[s.len() - 1];
+    if last == b'.' || last == b'-' {
+        return false;
+    }
+    !is_win_reserved(s)
+}
+
 /// Win32 reserved device names, compared the way Windows does: case- and
 /// trailing-dot-insensitive, and `COM`/`LPT` accept 1..=9.
-fn is_win_reserved(name: &str) -> bool {
+pub(crate) fn is_win_reserved(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
     let stem = upper.split('.').next().unwrap_or_default();
     if matches!(stem, "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$") {
@@ -124,7 +168,6 @@ fn is_win_reserved(name: &str) -> bool {
 pub(crate) fn pool_version_ok(s: &str) -> bool {
     token_ok(s, true)
 }
-
 /// Capability identifier: must start with a lowercase ASCII letter, then
 /// `[a-z0-9._-]`. Uppercase is rejected so that `VA-API` and `va-api` cannot be
 /// two spellings of one capability, which would make a compatibility check
@@ -210,9 +253,14 @@ pub(crate) fn strict_json_object(text: &str) -> Result<Vec<(String, Value)>, Pac
 /// Reject keys that are not part of the schema, and report the ones missing.
 /// Done before typed parsing so the error names the offender instead of a
 /// generic serde message.
+///
+/// `required` fields must all be present; `optional` fields may be absent.
+/// The union of the two is the closed set of known keys, so a key in neither
+/// list is still an [`PackageError::UnknownField`].
 pub(crate) fn check_field_names(
     pairs: &[(String, Value)],
-    known: &[&'static str],
+    required: &[&'static str],
+    optional: &[&'static str],
 ) -> Result<(), PackageError> {
     let present: BTreeSet<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
     if present.len() != pairs.len() {
@@ -222,14 +270,15 @@ pub(crate) fn check_field_names(
             reason: "duplicate object key",
         });
     }
+    let known: BTreeSet<&str> = required.iter().chain(optional.iter()).copied().collect();
     for (key, _) in pairs {
-        if !known.contains(&key.as_str()) {
+        if !known.contains(key.as_str()) {
             return Err(PackageError::UnknownField {
                 field: sanitize(key),
             });
         }
     }
-    for name in known {
+    for name in required {
         if !present.contains(name) {
             return Err(PackageError::MissingField { field: name });
         }
@@ -336,5 +385,40 @@ mod tests {
         assert!(!pool_version_ok(".."));
         assert!(!pool_version_ok("../etc"));
         assert!(!pool_version_ok(&"p".repeat(MAX_TOKEN_LEN + 1)));
+    }
+
+    #[test]
+    fn extension_dir_name_shape() {
+        assert!(extension_dir_name_ok("lengsuo-credential"));
+        assert!(extension_dir_name_ok("credential"));
+        assert!(extension_dir_name_ok("cred_2026.10"));
+        for hostile in [
+            "",
+            ".",
+            "..",
+            "../evil",
+            "a/b",
+            "sub\\dir",
+            "/absolute",
+            "C:\\windows",
+            ".hidden",
+            "-flag",
+            "trailing.",
+            "trailing-",
+            "with space",
+            "nul",
+            "CON",
+            "COM1",
+            "aux.txt",
+            "ünïcode",
+        ] {
+            assert!(!extension_dir_name_ok(hostile), "accepted {hostile:?}");
+        }
+        assert!(!extension_dir_name_ok(
+            &"a".repeat(MAX_EXTENSION_DIR_NAME_LEN + 1)
+        ));
+        assert!(extension_dir_name_ok(
+            &"a".repeat(MAX_EXTENSION_DIR_NAME_LEN)
+        ));
     }
 }

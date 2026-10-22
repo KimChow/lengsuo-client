@@ -1,0 +1,230 @@
+{
+  "schema": "lengsuo-extension-digest-vectors",
+  "schema_version": 1,
+  "algorithm": "sha256-tree-v1",
+  "algorithm_spec": "for each file sorted by UTF-8 byte order of relative POSIX path: sha256_update(path_utf8) || 0x00 || sha256(content)[raw 32 bytes] || 0x00 ; final = sha256(stream)",
+  "rules": [
+    "only regular files (symlinks skipped entirely, never followed)",
+    "relative POSIX path, '/' separator, never backslash",
+    "sort by UTF-8 byte order (NOT locale, NOT UTF-16 code unit order)",
+    "empty directories contribute nothing",
+    "per-file digest is the raw 32 bytes, never hex",
+    "path and content digest joined by a single 0x00 byte each"
+  ],
+  "vectors": [
+    {
+      "name": "empty_dir",
+      "section": "cross_repo",
+      "note": "空目录：空目录项不参与摘要",
+      "files": [],
+      "expected_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "contents_hex": {}
+    },
+    {
+      "name": "single_file",
+      "section": "cross_repo",
+      "note": "单文件",
+      "files": [
+        {
+          "path": "a.txt",
+          "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+          "size": 1
+        }
+      ],
+      "expected_digest": "8aaa1f4586dbb75990ae533eebc59be02265b07ad7691bd31dc5bb48f987796d",
+      "contents_hex": {
+        "a.txt": "61"
+      }
+    },
+    {
+      "name": "nested",
+      "section": "cross_repo",
+      "note": "嵌套目录；写入顺序无关",
+      "files": [
+        {
+          "path": "one.txt",
+          "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+          "size": 3
+        },
+        {
+          "path": "sub/two.txt",
+          "sha256": "3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3",
+          "size": 3
+        }
+      ],
+      "expected_digest": "cac4bc5fb186765c677156461b43be61ceea3ff14979f550883bfebec7fe8c05",
+      "contents_hex": {
+        "one.txt": "6f6e65",
+        "sub/two.txt": "74776f"
+      }
+    },
+    {
+      "name": "byte_order",
+      "section": "cross_repo",
+      "note": "锁字节序排序：'.'(0x2E) < '/'(0x2F) < '0'(0x30)",
+      "files": [
+        {
+          "path": "a.txt",
+          "sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+          "size": 1
+        },
+        {
+          "path": "a/b.txt",
+          "sha256": "a1fce4363854ff888cff4b8e7875d600c2682390412a8cf79b37d0b11148b0fa",
+          "size": 1
+        },
+        {
+          "path": "a0.txt",
+          "sha256": "594e519ae499312b29433b7dd8a97ff068defcba9755b6d5d00e84c524d67b06",
+          "size": 1
+        }
+      ],
+      "expected_digest": "605567c7df82e78fba6fb32bee0226e99c97cdce95dd5b3cdf865b262c35a4c1",
+      "contents_hex": {
+        "a.txt": "78",
+        "a/b.txt": "79",
+        "a0.txt": "7a"
+      }
+    },
+    {
+      "name": "binary_content",
+      "section": "cross_repo",
+      "note": "二进制内容含 0x00（分隔符字节不得出现在路径里）",
+      "files": [
+        {
+          "path": "bin.dat",
+          "sha256": "55fdfada0cc4296055e364ea3c0ecf500ff9284b9aef3ac53100d4dbf97e39f4",
+          "size": 5
+        }
+      ],
+      "expected_digest": "0cf45feb19edec32e47dadb5abc0c277dc635adc44dbf26cb37b0fa816cb1a93",
+      "contents_hex": {
+        "bin.dat": "0001ff0080"
+      }
+    },
+    {
+      "name": "empty_file",
+      "section": "cross_repo",
+      "note": "零字节文件：参与摘要（内容 sha256 = 空串的 sha256）",
+      "files": [
+        {
+          "path": "empty.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        }
+      ],
+      "expected_digest": "4b28c031f5cca0276cbb3633daf330b3fe81fb8c2a68255cc47f91a8f6684715",
+      "contents_hex": {
+        "empty.txt": ""
+      }
+    },
+    {
+      "name": "rename_changes",
+      "section": "cross_repo",
+      "note": "与 a.txt 同内容不同名 ⇒ 摘要必须不同",
+      "files": [
+        {
+          "path": "b.txt",
+          "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+          "size": 1
+        }
+      ],
+      "expected_digest": "ad72aaa9b96aad092dd5267d1af11476197436a7ec509bb3e44173f81c2f6235",
+      "contents_hex": {
+        "b.txt": "61"
+      }
+    },
+    {
+      "name": "bmp_unicode",
+      "section": "cross_repo",
+      "note": "BMP 非 ASCII 文件名（UTF-8 字节序与 JS 的 UTF-16 序一致）",
+      "files": [
+        {
+          "path": "é.txt",
+          "sha256": "3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea",
+          "size": 1
+        }
+      ],
+      "expected_digest": "696029ab308ae9628242e96cba5d26ab7120eb2d2eff16310dc500759463f18d",
+      "contents_hex": {
+        "é.txt": "65"
+      }
+    },
+    {
+      "name": "astral_unicode",
+      "section": "rust_only",
+      "note": "astral 字符文件名：UTF-8 字节序(契约) 与 JS 的 UTF-16 码元序在此分叉 —— 本向量只钉 Rust 侧契约行为",
+      "files": [
+        {
+          "path": ".txt",
+          "sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+          "size": 1
+        },
+        {
+          "path": "😀.txt",
+          "sha256": "3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea",
+          "size": 1
+        }
+      ],
+      "expected_digest": "25c14558538bb11a3c3ab86e236c64816d56662f9b58134e33540551e7c2b912",
+      "contents_hex": {
+        "😀.txt": "65",
+        ".txt": "78"
+      }
+    }
+  ],
+  "cross_repo_anchor": {
+    "source": "lengsuo-extension/dist/credential (构建产物布局：manifest.json + src/**)",
+    "source_commit": "d113888",
+    "expected_digest": "cad5376ed54dc3a7128a5df681c1beb1d2a07007c5f90cb128a5fd8e4b59c820",
+    "file_count": 9,
+    "files": [
+      {
+        "path": "manifest.json",
+        "sha256": "ab65449866f55b6c7b87f21be5ae951c6261eced48d94bdc1c5c872cf48ef1cc",
+        "size": 1000
+      },
+      {
+        "path": "src/autofill/autofill.js",
+        "sha256": "f2d49b8aa39e347a366ae4cca0204f3c89341ce3f73de282817d5b129b700203",
+        "size": 857
+      },
+      {
+        "path": "src/background/native_bridge.js",
+        "sha256": "27f8644b15842f91b844326701c1582bd6fa8055a9c9f63b6cce87afd2480e38",
+        "size": 2102
+      },
+      {
+        "path": "src/background/policy.js",
+        "sha256": "1d96a7f8b57d1fb90cef861b1b2fe3b03d5b489d923fcca6b500cd0a7692eff2",
+        "size": 1935
+      },
+      {
+        "path": "src/background/service_worker.js",
+        "sha256": "cff30dfdd36afe001c400c48b8300bd9d56d38be4d28325c3f9a0eb4ac1829a9",
+        "size": 2525
+      },
+      {
+        "path": "src/content/fido2_content.js",
+        "sha256": "63a13abdccf619cb14700695a1e852310ca3744cc64b392c41a080ebec98845e",
+        "size": 867
+      },
+      {
+        "path": "src/content/password_content.js",
+        "sha256": "35e638e8d0b940097f9921ba20fc0a9ccebf8ff3487d8a7814cdb81e901e153c",
+        "size": 827
+      },
+      {
+        "path": "src/content/twostep_content.js",
+        "sha256": "9273c47f0be7395f111ca1402b108535a0b7ec9a884d85361d289dc2be220162",
+        "size": 562
+      },
+      {
+        "path": "src/main_world/fido2_page_script.js",
+        "sha256": "15b3bcf4e4cd007a81bc77a0aece903f2b0c07370af18a3457d8a11ea1524b7e",
+        "size": 1535
+      }
+    ],
+    "note": "⚠️ 这 9 个 sha256 是扩展仓当前 commit d113888 的事实快照。扩展仓改动后本组会过期 —— 这是有意的：它是『两侧同源向量』的锚，任何一侧漂移都能被发现。JS 与 Python 两份独立实现已在本仓外算得同一 digest。"
+  }
+}
