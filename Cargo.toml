@@ -27,6 +27,7 @@ members = [
 "crates/lengsuo-tunnel",
 "crates/lengsuo-ipc",
     "crates/lengsuo-credential-crypto",
+    "crates/lengsuo-browser-extension",
 ]
 
 [workspace.package]

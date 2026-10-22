@@ -1,0 +1,21 @@
+[package]
+name = "lengsuo-browser-extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# 凭据体系的 Native Messaging host 侧协议层（纯函数、无 IO、可单测）。
+# 字节布局的唯一真相是浏览器仓 `docs/credential-wire-contract.md` §5.2 / §5.3
+# （docs/ 只留本地，不入库；派卡时按路径把任务书与契约传给本机）。
+#
+# 依赖说明（**零新外部依赖**，全部已在 Cargo.lock 里）：
+#   thiserror —— 帧解码失败的类型化错误。
+#   hex       —— 仅 dev：固定向量文件里字节用 hex 记。
+#   serde_json—— 仅 dev：读固定向量 JSON。
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+hex.workspace = true
