@@ -1,0 +1,63 @@
+{
+  "TEST FIXTURES ONLY": "本文件全部为合成夹具：不含任何真实凭据、私钥、机器标识。",
+  "schema": "lengsuo-wired-envelope-vectors",
+  "schema_version": 1,
+  "source_of_truth": "凭据线契约 §5.2.1（JSON 信封 frame_b64）+ RFC 4648（标准 base64，编码不带 padding）+ W3b-2a（lengsuo-browser-extension 的 decode_frame_b64 / encode_frame_b64）",
+  "note": "所有 hex / base64 / JSON 都是独立手算的字面量，不是实现输出回灌（用 Python 标准库 base64 交叉核对）。管道帧长度头按小端记录（参考平台），大端主机由测试换序。",
+  "anchors": {
+    "business_frame_hex": "000000040000000000000000",
+    "business_frame_len": 12,
+    "business_frame_layout": "len=4（大端 u32）, type=0, reserved=0×3, payload=4 字节零",
+    "base64": "AAAABAAAAAAAAAAA",
+    "envelope": "{\"frame_b64\":\"AAAABAAAAAAAAAAA\"}",
+    "envelope_len": 32,
+    "pipe_frame_hex": "200000007b226672616d655f623634223a2241414141424141414141414141414141227d",
+    "note": "三段锚点：业务帧 00 00 00 04 00 00 00 00 00 00 00 00 → base64 AAAABAAAAAAAAAAA（16 字符，12 字节、无 padding）→ 信封本字段。任务书正文此处的 base64 多写了两个 A（18 字符会解出 13 字节），以本文件为准；见报告。"
+  },
+  "save_password": {
+    "business_frame_hex": "000000070500000070772d68696e74",
+    "base64": "AAAABwUAAABwdy1oaW50",
+    "envelope": "{\"frame_b64\":\"AAAABwUAAABwdy1oaW50\"}",
+    "pipe_frame_hex": "240000007b226672616d655f623634223a224141414142775541414142776479316f61573530227d",
+    "frame_type": 5,
+    "payload_hex": "70772d68696e74"
+  },
+  "bad_business_frames": [
+    {
+      "name": "unknown_type_11",
+      "frame_hex": "000000000b000000",
+      "envelope": "{\"frame_b64\":\"AAAAAAsAAAA\"}",
+      "reason": "未知消息类型"
+    },
+    {
+      "name": "reserved_nonzero",
+      "frame_hex": "0000000000010000",
+      "envelope": "{\"frame_b64\":\"AAAAAAABAAA\"}",
+      "reason": "保留位非零"
+    },
+    {
+      "name": "payload_truncated",
+      "frame_hex": "000000040000000001",
+      "envelope": "{\"frame_b64\":\"AAAABAAAAAAB\"}",
+      "reason": "载荷被截断"
+    },
+    {
+      "name": "trailing_bytes",
+      "frame_hex": "000000000000000009",
+      "envelope": "{\"frame_b64\":\"AAAAAAAAAAAJ\"}",
+      "reason": "帧后有多余字节"
+    }
+  ],
+  "invalid_envelopes": [
+    { "name": "bad_base64_char", "text": "{\"frame_b64\":\"!!!\"}" },
+    { "name": "length_1_mod_4", "text": "{\"frame_b64\":\"A\"}" },
+    { "name": "extra_field", "text": "{\"frame_b64\":\"AA\",\"x\":1}" },
+    { "name": "value_not_string", "text": "{\"frame_b64\":1}" },
+    { "name": "missing_field", "text": "{}" },
+    { "name": "escape_sequence", "text": "{\"frame_b64\":\"AA\\n\"}" },
+    { "name": "not_an_object", "text": "[]" }
+  ],
+  "limits": {
+    "max_envelope_len": 1048576
+  }
+}

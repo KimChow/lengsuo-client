@@ -8,10 +8,15 @@ authors.workspace = true
 # 字节布局的唯一真相是 Chromium 155 自身的实现
 # （`chrome/browser/extensions/api/messaging/`），不是本仓的契约文档。
 #
-# 依赖说明（**零新外部依赖**，全部已在 Cargo.lock 里）：
+# 依赖说明（**零新外部依赖**）：
 #   thiserror —— 帧编解码失败的类型化错误。
+#   lengsuo-browser-extension —— W3b-2a 的信封层（decode_frame_b64 /
+#     encode_frame_b64）。生产用 EnvelopeCodec（WiredEnvelope）直接复用它，
+#     ⛔ 不复制 base64 / JSON 解析。它是工作区成员 crate 的 path 依赖，
+#     不引入新的外部 crate。
 [dependencies]
 thiserror.workspace = true
+lengsuo-browser-extension = { path = "../lengsuo-browser-extension" }
 [dev-dependencies]
 serde_json.workspace = true
 hex.workspace = true
