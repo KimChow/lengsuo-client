@@ -2,11 +2,11 @@
 //!
 //! 默认跳过（`#[ignore]`）：它只做打印，不参与断言。用
 //! `cargo test -p lengsuo-link-core --test vectors_main -- --ignored --nocapture`
-//! 实跑，把输出贴回 `session_vectors.rs` / `error_vectors.rs` 的常量里。
+//! 实跑，把输出**写进**仓根 `vectors/*.json`（常量 `include_str!` 指向那里）。
 //!
 //! ⚠️ 生成器**重算**每个字节（不读旧常量）⇒ 输出的就是「按当前实现应得的
-//! 期望字节」。仓内的常量必须与生成器输出**逐字节相同**（由
-//! `session_vectors_json_is_canonical` / `every_session_vector_is_reproducible`
+//! 期望字节」。仓根 `vectors/*.json` 的内容必须与生成器输出**逐字节相同**
+//! （由 `session_vectors_json_is_canonical` / `every_session_vector_is_reproducible`
 //! 这两条用例守住）。
 
 use super::json::{arr, n, obj, render, s};

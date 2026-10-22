@@ -1,0 +1,166 @@
+{
+  "format": "lengsuo-link-session-vectors",
+  "version": 1,
+  "spec": "docs/link-vectors-spec.md",
+  "links": [
+    {
+      "name": "link-a",
+      "initiator_static_private_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "initiator_static_public_hex": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+      "responder_static_private_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "responder_static_public_hex": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
+      "rounds": [
+        {
+          "round": 1,
+          "initiator_index": 286331153,
+          "responder_index": 572662306,
+          "initiator_ephemeral_seed_hex": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "responder_ephemeral_seed_hex": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "generation": 0,
+          "initiation": {
+            "volatile_ranges": "88-132",
+            "volatile_layout": "bytes[88..116]=TAI64N 时间戳密文(28B), bytes[116..132]=覆盖前者的 MAC1(16B)",
+            "canonical_hex": "0100000011111111c306fb0ef2bf8b7f93bad98155fa37daec74db0c4cbeda6c6f1dba9d3655825251de5c44736e6a8515addf38008400bf40741e01d34db7f396a65906c5e74bd9dce4b1e0b5ae50e9a97da90afedd017e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "response": {
+            "volatile_ranges": "44-76",
+            "volatile_layout": "bytes[44..60]=empty 密文(16B, AAD=当前 hash 链), bytes[60..76]=覆盖前者的 MAC1(16B)",
+            "canonical_hex": "0200000022222222111111113c5c6ce2dd99e10d2c3de05d773aa15e3e6d971ed4e41389c93b4bbdda177212000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "transport_keys": {
+            "initiator_send_hex": "8a309c281295f3273a8abc3c4c8566231dad5db2404566c3c3bb0d92a73eaa68",
+            "initiator_receive_hex": "114030d0105e15b4b85483e6d036698445fea9a072b8fb32cc97bac60528622b",
+            "responder_send_hex": "114030d0105e15b4b85483e6d036698445fea9a072b8fb32cc97bac60528622b",
+            "responder_receive_hex": "8a309c281295f3273a8abc3c4c8566231dad5db2404566c3c3bb0d92a73eaa68"
+          },
+          "frames": [
+            {
+              "name": "i2r-data-ascii",
+              "direction": "initiator_to_responder",
+              "frame_type": "data",
+              "seq": 1,
+              "counter": 0,
+              "plaintext_hex": "68656c6c6f414350",
+              "frame_hex": "4c530101000000000000000100280000b1a4e6370400000022222222000000000000000069ca1e5dd83804151171f902ca0c36bd05a9ce14eaa53932"
+            },
+            {
+              "name": "r2i-data-reply",
+              "direction": "responder_to_initiator",
+              "frame_type": "data",
+              "seq": 1,
+              "counter": 0,
+              "plaintext_hex": "706f6e67",
+              "frame_hex": "4c530101000000000000000100240000b8be1f530400000011111111000000000000000058e230036552e5f7390d953bbea8f853a8ffce11"
+            },
+            {
+              "name": "i2r-control",
+              "direction": "initiator_to_responder",
+              "frame_type": "control",
+              "seq": 2,
+              "counter": 1,
+              "plaintext_hex": "00ff10",
+              "frame_hex": "4c530102000000000000000200230000479b1fc804000000222222220100000000000000e3f83f0976b5cfc7ca5a58f3367a0f5e4926cc"
+            },
+            {
+              "name": "r2i-keepalive",
+              "direction": "responder_to_initiator",
+              "frame_type": "keepalive",
+              "seq": 2,
+              "counter": 1,
+              "plaintext_hex": "",
+              "frame_hex": "4c530103000000000000000200200000984b7814040000001111111101000000000000009bcf48f738207a77f92c77c799a9abf1"
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "initiator_index": 858993459,
+          "responder_index": 1145324612,
+          "initiator_ephemeral_seed_hex": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+          "responder_ephemeral_seed_hex": "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4",
+          "generation": 1,
+          "initiation": {
+            "volatile_ranges": "88-132",
+            "volatile_layout": "bytes[88..116]=TAI64N 时间戳密文(28B), bytes[116..132]=覆盖前者的 MAC1(16B)",
+            "canonical_hex": "01000000333333335fc2f8a124437afcee7d4567fe31e02c2d042939de96f07b06e28c0c4c3af740b9aab791c81fa099321e7ad910dd7f179a0a6671050702e949e36f01af0958f3458b34266c54e8258871c7f51210717e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "response": {
+            "volatile_ranges": "44-76",
+            "volatile_layout": "bytes[44..60]=empty 密文(16B, AAD=当前 hash 链), bytes[60..76]=覆盖前者的 MAC1(16B)",
+            "canonical_hex": "020000004444444433333333d6a2527c018dfce085a4a50ad66e0010dd3413be94cbb0a75233299a6afe1800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "transport_keys": {
+            "initiator_send_hex": "76514ae91a8f838552817cc831e4fed763cb0e7c66f078bdfec83f9ffccaacea",
+            "initiator_receive_hex": "2b52ddbf017859e8c61891e7354fd2585660273988afa66aa36b403a8d77333a",
+            "responder_send_hex": "2b52ddbf017859e8c61891e7354fd2585660273988afa66aa36b403a8d77333a",
+            "responder_receive_hex": "76514ae91a8f838552817cc831e4fed763cb0e7c66f078bdfec83f9ffccaacea"
+          },
+          "frames": [
+            {
+              "name": "i2r-data-reconnect",
+              "direction": "initiator_to_responder",
+              "frame_type": "data",
+              "seq": 3,
+              "counter": 0,
+              "plaintext_hex": "61667465725265636f6e6e656374",
+              "frame_hex": "4c5301010000000000000003002e0000cfe9c9e50400000044444444000000000000000046b8ec250f06bc072d509a916ecc1126e4ef52460c7d95c3fef2d248ba57"
+            },
+            {
+              "name": "r2i-data-reconnect-reply",
+              "direction": "responder_to_initiator",
+              "frame_type": "data",
+              "seq": 3,
+              "counter": 0,
+              "plaintext_hex": "6f6b",
+              "frame_hex": "4c530101000000000000000300220000c6f3308104000000333333330000000000000000cb4a8393d39a183395efacd0e8489e3df94c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "link-b",
+      "initiator_static_private_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+      "initiator_static_public_hex": "7b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14",
+      "responder_static_private_hex": "4444444444444444444444444444444444444444444444444444444444444444",
+      "responder_static_public_hex": "ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b",
+      "rounds": [
+        {
+          "round": 1,
+          "initiator_index": 1431655765,
+          "responder_index": 1717986918,
+          "initiator_ephemeral_seed_hex": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+          "responder_ephemeral_seed_hex": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+          "generation": 0,
+          "initiation": {
+            "volatile_ranges": "88-132",
+            "volatile_layout": "bytes[88..116]=TAI64N 时间戳密文(28B), bytes[116..132]=覆盖前者的 MAC1(16B)",
+            "canonical_hex": "0100000055555555d3337e4d4ee503a66976feb1fadf5bd21ba96fc2b1571b3e980d87cf49797510b971febf7277bfb3e4aebab84ad2cd599e4ef4a94e83346031df77de488568082f196d4be90024835c9c43982d827e54000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "response": {
+            "volatile_ranges": "44-76",
+            "volatile_layout": "bytes[44..60]=empty 密文(16B, AAD=当前 hash 链), bytes[60..76]=覆盖前者的 MAC1(16B)",
+            "canonical_hex": "020000006666666655555555db48257e1237976a74ad8cfedca00213408fe89ac6251f1b930245f242b5c31a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "transport_keys": {
+            "initiator_send_hex": "31e6ded37a375610e85c881d5a6deb517995eac29fa7264aff1daa4249cfc0cd",
+            "initiator_receive_hex": "8f539b7953ac5e47a6f2cd68de20ad3173e95d677ba080303a4330c6f28470b5",
+            "responder_send_hex": "8f539b7953ac5e47a6f2cd68de20ad3173e95d677ba080303a4330c6f28470b5",
+            "responder_receive_hex": "31e6ded37a375610e85c881d5a6deb517995eac29fa7264aff1daa4249cfc0cd"
+          },
+          "frames": [
+            {
+              "name": "i2r-data-binary",
+              "direction": "initiator_to_responder",
+              "frame_type": "data",
+              "seq": 1,
+              "counter": 0,
+              "plaintext_hex": "00ff807f01fe",
+              "frame_hex": "4c530101000000000000000100260000bb3acb3d0400000066666666000000000000000075999956c585658e2db455b0c2c2b29f40cf34f389e1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

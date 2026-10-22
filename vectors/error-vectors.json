@@ -1,0 +1,59 @@
+{
+  "format": "lengsuo-link-error-vectors",
+  "version": 1,
+  "spec": "docs/link-vectors-spec.md",
+  "vectors": [
+    {
+      "name": "frame-bad-magic",
+      "scenario": "帧头魔数被改坏（不是 0x4C53）",
+      "operation": "decode_frame",
+      "expected_label": "frame.bad_magic",
+      "expect_no_plaintext": true,
+      "expect_session_invalidated": false,
+      "input_hex": "4d53010100000000000000010014000000000000",
+      "parameters": {}
+    },
+    {
+      "name": "frame-header-crc-mismatch",
+      "scenario": "帧头前 16 字节被改坏，CRC 与声明不符",
+      "operation": "decode_frame",
+      "expected_label": "frame.header_crc_mismatch",
+      "expect_no_plaintext": true,
+      "expect_session_invalidated": false,
+      "input_hex": "4c530101000000000000000100140000deadbeef",
+      "parameters": {}
+    },
+    {
+      "name": "frame-incomplete",
+      "scenario": "帧被截短，不足以切出一帧",
+      "operation": "decode_frame",
+      "expected_label": "frame.incomplete",
+      "expect_no_plaintext": true,
+      "expect_session_invalidated": false,
+      "input_hex": "4c53010100000000000000",
+      "parameters": {}
+    },
+    {
+      "name": "frame-payload-too-long",
+      "scenario": "明文长度超过上限（1401 字节 > 1368）",
+      "operation": "seal_frame_oversize",
+      "expected_label": "frame.payload_too_long",
+      "expect_no_plaintext": true,
+      "expect_session_invalidated": false,
+      "input_hex": "",
+      "parameters": {
+        "plain_len": "1401"
+      }
+    },
+    {
+      "name": "session-auth-failed",
+      "scenario": "用另一条链路的密钥封出的帧，在本链路解封",
+      "operation": "session_open_frame",
+      "expected_label": "session.auth_failed",
+      "expect_no_plaintext": true,
+      "expect_session_invalidated": true,
+      "input_hex": "63726f73732d6c696e6b",
+      "parameters": {}
+    }
+  ]
+}

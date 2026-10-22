@@ -100,59 +100,13 @@ fn array_items(text: &str, key: &str) -> Vec<String> {
 
 // ---------------------------------------------------------------- 常量与工具
 
-/// **规范化 JSON 文本**：本文件内嵌的向量源。
+/// **规范化 JSON 文本**：向量源 = 仓根 `vectors/frame-vectors.json`。
+///
+/// 用 `include_str!` 指向那**一个文件** ⇒ 编译产物里的常量**就是**文件内容，
+/// **结构上不可能**与文件漂移（移动端也直接读同一份文件）。
 ///
 /// 格式与移动端读取方式见本文件头部说明。
-const VECTORS_JSON: &str = r##"{
-  "format": "lengsuo-link-frame-vectors",
-  "version": 1,
-  "spec": "docs/link-frame-spec.md",
-  "key_hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
-  "receiver": 287454020,
-  "vectors": [
-    {
-      "name": "data-ascii",
-      "frame_type": "data",
-      "seq": 1,
-      "counter": 0,
-      "plaintext_hex": "68656c6c6f414350",
-      "frame_hex": "4c530101000000000000000100280000b1a4e63704000000443322110000000000000000a13616c2b3244ebf3423fa8b6f19be0ab0e76f13ae3770f5"
-    },
-    {
-      "name": "data-binary",
-      "frame_type": "data",
-      "seq": 72623859790382856,
-      "counter": 1,
-      "plaintext_hex": "00ff807f01fe",
-      "frame_hex": "4c530101010203040506070800260000f50dbd0b040000004433221101000000000000009e8982e52ac8771ea67d9b5875965bc8d49508143308"
-    },
-    {
-      "name": "control-utf8",
-      "frame_type": "control",
-      "seq": 42,
-      "counter": 2,
-      "plaintext_hex": "e9809ae981933d703270",
-      "frame_hex": "4c530102000000000000002a002a0000b9fb40820400000044332211020000000000000005ed65cf471c5b531d5502655dc2cb6ee014d6c3fab1e8b93c93"
-    },
-    {
-      "name": "keepalive-empty",
-      "frame_type": "keepalive",
-      "seq": 0,
-      "counter": 3,
-      "plaintext_hex": "",
-      "frame_hex": "4c530103000000000000000000200000e28b2b7404000000443322110300000000000000c8f1b801e02a7b2daa000e84903e28e6"
-    },
-    {
-      "name": "data-seq-max",
-      "frame_type": "data",
-      "seq": 18446744073709551615,
-      "counter": 4,
-      "plaintext_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
-      "frame_hex": "4c530101ffffffffffffffff00600000ecba0af904000000443322110400000000000000922aa21127d39f337cdcb1335915860e6885f17b6a6e4e565d89d1c4a48c907ae58a194be798bae17965eb497ebc415f3b6416a468d7f6baa5e771dfd7d28656b2314faf6c2335a1389f3aad7b7d88de"
-    }
-  ]
-}
-"##;
+const VECTORS_JSON: &str = include_str!("../../../vectors/frame-vectors.json");
 
 /// 测试专用密钥字节（全 0x5A）。**仅用于测试**，不得用于任何真实会话。
 const TEST_KEY: [u8; 32] = [0x5Au8; 32];
