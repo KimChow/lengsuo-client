@@ -29,11 +29,17 @@ use super::common::{
 use super::probe::{
     drain_events, next_event, read_raw_until_end, spawn_target, Flavor, TargetEvent,
 };
+use super::proc::{
+    assert_reclaimed, baseline, runtime_password, serial_guard, start_relay_with_password,
+    write_request_with_password,
+};
 
 /// B3：客户端中途 RST（不发 EOF）⇒ 本仓侧在有限时间内感知断开，上游会话被回收，
 /// 之后的新连接仍可用。
 #[test]
 fn peer_reset_is_detected_within_deadline_and_session_is_reclaimed() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -108,6 +114,8 @@ fn peer_reset_is_detected_within_deadline_and_session_is_reclaimed() {
 /// 看「入站连接被回收」。两条合起来才覆盖「底层会话资源被回收」的两端。
 #[test]
 fn peer_reset_makes_relay_close_the_inbound_connection() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -157,6 +165,8 @@ fn peer_reset_makes_relay_close_the_inbound_connection() {
 /// 会话被回收（上游侧没有留下连接），之后的新连接仍可用。
 #[test]
 fn unreachable_upstream_reports_error_and_reclaims_session() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -209,6 +219,8 @@ fn unreachable_upstream_reports_error_and_reclaims_session() {
 /// **半截数据不得被当成成功转交上游**，且会话被回收。
 #[test]
 fn truncated_write_fails_closed_without_forwarding_partial_data() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -269,6 +281,8 @@ fn truncated_write_fails_closed_without_forwarding_partial_data() {
 /// 「不回退直连」，本条断言「**会话被回收**」+「之后新连接仍可用」。
 #[test]
 fn failed_handshake_reclaims_session_and_keeps_relay_usable() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -299,6 +313,56 @@ fn failed_handshake_reclaims_session_and_keeps_relay_usable() {
             b"after-bad-password".to_vec(),
             "认证失败后新连接必须仍能正常往返"
         );
+
+        handle.shutdown().await.expect("中继应干净停止");
+    });
+}
+
+/// B11（**进程级资源回收**，异常路径）：客户端 RST（不发 EOF）之后，进程级的
+/// fd 数与线程数必须**回落到基线**。
+///
+/// 为什么必须单独测异常路径：B3~B7 只证明了「会话在**逻辑上**结束了」（上游
+/// 看到 EOF / 客户端看到关闭），没证明「底层的 fd / 线程真的没了」。异常路径
+/// 恰恰是最容易漏收资源的地方（正常路径靠 `read_response` 收尾，异常路径靠
+/// 错误传播收尾）——这条把「异常结束**不**留下悬挂句柄/线程」变成可断言的事实。
+///
+/// 判据：基线（中继已启动、尚无本用例的连接）→ 建立连接 + 写请求 → RST →
+/// **等中继把会话收掉**（上游看到 EOF）→ 再取读数 ⇒ fd 数 ≤ 基线 + 0、
+/// 线程数 ≤ 基线 + 0。
+#[test]
+fn abnormal_close_reclaims_process_level_file_descriptors_and_threads() {
+    let _guard = serial_guard();
+
+    let runtime = local_set();
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        // 运行时生成的**假口令**（与任何生产凭据无关）。
+        let password = runtime_password();
+        let mut upstream = spawn_target(Flavor::Echo).await;
+        let target = TargetAddr::V4([127, 0, 0, 1], upstream.addr.port());
+        let (relay, handle) = start_relay_with_password(&password).await;
+
+        // ① 基线：中继已在跑、本用例还没建连接。
+        let base = baseline().await;
+
+        // ② 建立连接 + 写请求（**不半关闭**，保持打开），随后 RST 掉它。
+        let mut stream = tokio::net::TcpStream::connect(relay)
+            .await
+            .expect("连接中继");
+        write_request_with_password(&mut stream, &target, b"abnormal", &password).await;
+        stream.set_zero_linger().expect("设置 SO_LINGER=0");
+        drop(stream);
+
+        // ③ **先等中继把会话收掉**（上游看到 EOF）：否则读数窗口里仍有在途
+        //    任务，「回落」只是「还没来得及涨」而不是「真的回收了」。
+        let events = drain_events(&mut upstream, OBSERVE, Duration::from_millis(200)).await;
+        assert!(
+            events.contains(&TargetEvent::PeerEof) || events.contains(&TargetEvent::Failed),
+            "中继应在 {OBSERVE:?} 内感知 RST 并关闭上游连接，实际事件：{events:?}"
+        );
+
+        // ④ 连接已结束 ⇒ 资源必须回落。
+        assert_reclaimed(base, "B11 异常结束后").await;
 
         handle.shutdown().await.expect("中继应干净停止");
     });

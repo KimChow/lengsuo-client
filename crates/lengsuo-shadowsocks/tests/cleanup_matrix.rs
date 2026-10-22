@@ -33,6 +33,10 @@ mod common;
 #[allow(dead_code)]
 mod probe;
 
+#[path = "cleanup_matrix/proc.rs"]
+#[allow(dead_code)]
+mod proc;
+
 #[path = "cleanup_matrix/normal.rs"]
 mod normal;
 

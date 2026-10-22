@@ -27,6 +27,10 @@ use super::probe::{
     drain_events, next_event, port_has_listener, read_raw_until_end, spawn_target,
     wait_pool_entries, Flavor, TargetEvent,
 };
+use super::proc::{
+    assert_reclaimed, baseline, roundtrip_with_password, runtime_password, serial_guard,
+    start_relay_with_password,
+};
 
 /// 记忆池的窗口取足够大（连接结束后仍能数到条目），时间窗取足够长
 /// （本组只观察「连接收尾后条目是否仍在」，不观察过期逐出——那是 `salt_persist_runtime.rs`
@@ -37,6 +41,8 @@ const POOL_WINDOW: Duration = Duration::from_secs(600);
 /// A1：完整往返后，上游会话被回收（上游看到 EOF），且 salt 记忆池状态符合真实语义。
 #[test]
 fn clean_roundtrip_reclaims_upstream_session_and_keeps_salt_pool_semantics() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -93,6 +99,8 @@ fn clean_roundtrip_reclaims_upstream_session_and_keeps_salt_pool_semantics() {
 /// A2：收尾后**再开一条连接**必须能正常往返 ⇒ 上一条的清理没把共享状态搞坏。
 #[test]
 fn new_connection_after_clean_close_roundtrips_normally() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -139,6 +147,8 @@ fn new_connection_after_clean_close_roundtrips_normally() {
 /// （=「已用」标记**确实**留在了正确的记忆池里，没有被连接收尾误清）。
 #[test]
 fn salt_pool_remembers_closed_connection_salt_for_replay_detection() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -194,6 +204,8 @@ fn salt_pool_remembers_closed_connection_salt_for_replay_detection() {
 /// A4：正常收尾后，**端口**不得被 listener 占着（中继停止后端口可再 bind）。
 #[test]
 fn relay_stop_releases_listening_port() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -229,6 +241,8 @@ fn relay_stop_releases_listening_port() {
 /// 后续连接仍按同一套件工作（状态没有跨连接串味）。
 #[test]
 fn subsequent_connections_keep_same_suite_semantics() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -252,6 +266,8 @@ fn subsequent_connections_keep_same_suite_semantics() {
 /// 而不是永远挂着）——这正是「不得留下未关闭的读任务」的直接断言。
 #[test]
 fn client_read_side_finishes_with_clean_eof_after_close() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -267,6 +283,56 @@ fn client_read_side_finishes_with_clean_eof_after_close() {
             OBSERVE < WAIT,
             "读端超时必须显著大于观察窗口，否则「及时结束」判据没有意义"
         );
+        handle.shutdown().await.expect("中继应干净停止");
+    });
+}
+
+/// A7（**进程级资源回收**）：一次完整往返结束后，打开的 fd 数与线程数必须
+/// **回落到基线**——这是「会话被回收」的**资源侧**证据（A1~A6 只证明了**逻辑
+/// 层**的「连接结束了」，没证明「底层的 fd / 线程真的没了」）。
+///
+/// 判据：
+///
+/// 1. **基线**在「中继已启动、尚无本用例的连接」时取（`/proc/self/fd` 与
+///    `/proc/self/task`）；此时基线里的 fd 就是「常驻的那些」。
+/// 2. 完整往返（写请求 → 半关闭 → 读到干净 EOF）**之后**再取读数 ⇒ 差值 =
+///    「这条连接残留了多少 fd / 线程」。
+/// 3. fd 数 ≤ 基线（**不多于**基线 + 0），线程数 ≤ 基线（**不多于**基线 + 0）。
+///    容忍度取 0 的论证见 `proc.rs` 的 [`FD_SLACK`] / [`THREAD_SLACK`]。
+///
+/// ⚠️ 断言在**同一进程内**、连接结束**之后**读数——不是「进程退出后当然没有
+/// fd」那种无效断言。⚠️ 读数窗口由**独占锁**串行化（见本文件各用例开头的
+/// `serial_guard()`），否则并行用例的 fd / 线程会污染读数 ⇒ 假红。
+#[test]
+fn clean_roundtrip_reclaims_process_level_file_descriptors_and_threads() {
+    let _guard = serial_guard();
+
+    let runtime = local_set();
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        // 运行时生成的**假口令**（与任何生产凭据无关）。
+        let password = runtime_password();
+        let upstream = spawn_target(Flavor::Echo).await;
+        let target = TargetAddr::V4([127, 0, 0, 1], upstream.addr.port());
+        let (relay, handle) = start_relay_with_password(&password).await;
+
+        // ① 基线：中继已在跑、本用例还没建连接 ⇒ 基线里只有「常驻」的 fd。
+        //    线程基线取「派发突发结束后的稳定值」（libtest 会为每个用例派发
+        //    一个线程，那些线程随用例结束而退出 ⇒ 读数只减不增）。
+        let base = baseline().await;
+
+        // ② 一次完整往返：客户端读到干净 EOF ⇒ 中继的两个方向都结束 ⇒ 连接
+        //    任务被 drop ⇒ socket 随之关闭。
+        let reply = roundtrip_with_password(relay, &target, b"resource-probe", &password).await;
+        assert_eq!(
+            reply,
+            b"resource-probe".to_vec(),
+            "回程应与载荷一致（连接确实完整往返过）"
+        );
+
+        // ③ 连接已结束 ⇒ 资源必须回落。
+        assert_reclaimed(base, "A7 正常收尾后").await;
+
         handle.shutdown().await.expect("中继应干净停止");
     });
 }
