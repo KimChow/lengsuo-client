@@ -77,6 +77,12 @@ EXTRA_TESTS = [
     {"crate": "lengsuo-vmess",
      "targets": ["security_matrix_extra"],
      "expected_passed": 3},
+    # anytls 截断帧的参考侧取证：官方 anytls-server↔本仓客户端，断言截断帧后
+    # 断连 / 不错误拨号目标。`#[ignore]` 用例在 tests/truncated_frame/official.rs:68/117，
+    # 已实跑 2 passed，补登记。需要 openssl 与官方 anytls 服务端夹具。
+    {"crate": "lengsuo-anytls",
+     "targets": ["truncated_frame"],
+     "expected_passed": 2, "requires_commands": ["openssl"]},
     # 跳过登记：lengsuo-tun node_runtime —— 需 root 与真实 TUN 设备（`sudo -n`），
     # 门禁机器无此环境，实跑以 exit 101 收场，结构性不可达，不登记。
     # 证据：crates/lengsuo-tun/tests/node_runtime.rs:346-349
