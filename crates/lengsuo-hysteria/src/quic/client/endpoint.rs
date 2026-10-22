@@ -12,7 +12,7 @@ use lengsuo_congestion::Mode;
 use crate::congestion::{Bandwidth, CcHeader};
 use crate::h3_auth::{self, AuthOutcome, H3ControlStreams};
 
-use super::config::{ClientConfig, ConnectError};
+use super::config::{ClientConfig, ConnectError, ObfsHopConfig};
 use super::constants::{FIRST_UDP_SESSION_ID, UDP_MESSAGE_CHAN_SIZE, UDP_SESSION_ID_LEN};
 use super::udp::{UdpManager, UdpSession};
 use crate::quic::early::{self, EarlyDataConfig, MemorySessionCache, SessionCache, ZeroRttStatus};
@@ -36,6 +36,17 @@ impl HysteriaClient {
         Self::connect_with_early_data(config, EarlyDataConfig::default()).await
     }
 
+    /// 带混淆/跳跃参数建连（参考 `finalmask.udp[].settings.password` 与
+    /// `finalmask.quicParams.udpHop`）。
+    ///
+    /// `obfs` 为 [`ObfsHopConfig::none`] 时行为与 [`Self::connect`] 逐字节一致。
+    pub async fn connect_with_obfs(
+        config: ClientConfig,
+        obfs: ObfsHopConfig,
+    ) -> Result<Self, ConnectError> {
+        Self::connect_with_early_data_and_obfs(config, EarlyDataConfig::default(), obfs).await
+    }
+
     /// 以显式 0-RTT 配置建连。`enabled = false` 时代码路径与 [`Self::connect`]
     /// 完全一致（仍走普通 1-RTT 握手，不设置任何 rustls 早数据字段）。
     pub async fn connect_with_early_data(
@@ -45,7 +56,19 @@ impl HysteriaClient {
         let cache = early.enabled.then(|| {
             Arc::new(MemorySessionCache::new(early.resumption_capacity)) as Arc<dyn SessionCache>
         });
-        Self::connect_inner(config, &early, cache).await
+        Self::connect_inner(config, &early, cache, ObfsHopConfig::none()).await
+    }
+
+    /// 以显式 0-RTT 配置 + 混淆/跳跃参数建连。
+    pub async fn connect_with_early_data_and_obfs(
+        config: ClientConfig,
+        early: EarlyDataConfig,
+        obfs: ObfsHopConfig,
+    ) -> Result<Self, ConnectError> {
+        let cache = early.enabled.then(|| {
+            Arc::new(MemorySessionCache::new(early.resumption_capacity)) as Arc<dyn SessionCache>
+        });
+        Self::connect_inner(config, &early, cache, obfs).await
     }
 
     /// 使用调用方显式持有的 [`SessionCache`] 建连，使票据可跨多次连接复用
@@ -55,7 +78,7 @@ impl HysteriaClient {
         early: EarlyDataConfig,
         cache: Arc<dyn SessionCache>,
     ) -> Result<Self, ConnectError> {
-        Self::connect_inner(config, &early, Some(cache)).await
+        Self::connect_inner(config, &early, Some(cache), ObfsHopConfig::none()).await
     }
 
     /// 探测连接：用缺省配置建连并认证，读服务端 `Hysteria-CC-RX` 后立即关闭，
@@ -100,14 +123,30 @@ impl HysteriaClient {
         config: ClientConfig,
         early: &EarlyDataConfig,
         cache: Option<Arc<dyn SessionCache>>,
+        obfs: ObfsHopConfig,
     ) -> Result<Self, ConnectError> {
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| ConnectError::Bind(e.to_string()))?;
-        let runtime = quinn::default_runtime()
-            .ok_or_else(|| ConnectError::Bind("无可用异步运行时".into()))?;
-        let mut endpoint =
-            quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime)
-                .map_err(|e| ConnectError::Bind(e.to_string()))?;
+        // 混淆/跳跃（参考 dialer.go:206-217）：先跳端口、再混淆。无混淆也无
+        // 跳跃时不套包装层，socket 路径与改动前一致。
+        // fail-closed：口令不足 4 字节 / 跳端口配置非法 ⇒ 直接报错，不静默
+        // 退化为明文。
+        let (mut endpoint, mask) = crate::transport::endpoint::bind(
+            "0.0.0.0:0".parse().expect("固定字面量地址"),
+            config.server_addr,
+            obfs.psk().map(<[u8]>::to_vec),
+            obfs.hop().cloned(),
+        )
+        .map_err(|e| match e {
+            crate::transport::endpoint::EndpointError::Io(e) => ConnectError::Bind(e.to_string()),
+            crate::transport::endpoint::EndpointError::Wire(
+                crate::transport::wire::WireError::Psk(e),
+            ) => ConnectError::Obfs(e),
+            crate::transport::endpoint::EndpointError::Wire(
+                crate::transport::wire::WireError::Hop(e),
+            ) => ConnectError::Hop(e),
+        })?;
+        if let Some(mask) = &mask {
+            crate::transport::endpoint::spawn_hop_loop(mask);
+        }
 
         let tls = build_tls_config(&config, early, cache)?;
         let mut quic_config = quinn::ClientConfig::new(Arc::new(

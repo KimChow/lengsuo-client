@@ -69,4 +69,6 @@ pub enum ServerError {
     MissingCredentials,
     #[error("拥塞控制配置非法: {0}")]
     Congestion(#[from] crate::congestion::CongestionError),
+    #[error("混淆口令非法: {0}")]
+    Obfs(#[from] crate::obfs::PskTooShort),
 }

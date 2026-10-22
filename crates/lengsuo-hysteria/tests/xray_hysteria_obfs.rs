@@ -10,6 +10,12 @@
 //! 本用例直接跑上面脚本产出的向量文件（`LENGSUO_OBFS_VECTOR` 指向它），
 //! 逐字段与 Rust 实现比对；并附一张「Xray 服务端 + Salamander 口令」
 //! 的实跑连接，确认混淆层不破坏 H3 认证与 TCP 回显。
+//!
+//! 混淆口令**两端都真的生效**：参考服务端配置里的
+//! `streamSettings.finalmask.udp[].settings.password`
+//! （`infra/conf/transport_internet.go:1889`）与本仓客户端的
+//! `connect_with_obfs`。口令不符的拒绝路径（两个方向 + 对照组）见
+//! `tests/obfs_hop_wire.rs` 的 `wrong_password_is_rejected`。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -18,13 +24,14 @@ use std::time::Duration;
 
 use lengsuo_hysteria::obfs::{B2sumDeriver, Obfuscator};
 use lengsuo_hysteria::proxy;
-use lengsuo_hysteria::quic::{ClientConfig, HysteriaClient};
-use lengsuo_hysteria::transport::OsRng;
+use lengsuo_hysteria::quic::{ClientConfig, HysteriaClient, ObfsHopConfig};
 
 mod support;
 
 const AUTH: &str = "lengsuo-interop-password";
 const SERVER_NAME: &str = "localhost";
+/// 混淆口令（参考 `finalmask.udp[].settings.password`）。
+const PSK: &str = "lengsuo-obfs-psk";
 
 fn xray_bin() -> PathBuf {
     let path = std::env::var_os("LENGSUO_XRAY")
@@ -88,7 +95,11 @@ fn free_udp_port() -> u16 {
 
 /// Xray 服务端：hysteria v2 + Salamander 口令（`finalmask` 里的
 /// `salamander.password`）。
-fn xray_config(port: u16, cert: &std::path::Path, key: &std::path::Path, _psk: &str) -> String {
+///
+/// `psk` **必须**真的落到 `finalmask.udp[]` 里 —— 之前的实现把它标成
+/// `_psk` 直接丢弃、配置里也没有 `finalmask` 段，于是参考服务端**根本没
+/// 开掩码**，本用例变成「两边都不混淆」的假阳性。
+fn xray_config(port: u16, cert: &std::path::Path, key: &std::path::Path, psk: &str) -> String {
     format!(
         r#"{{
   "log": {{"loglevel": "warning"}},
@@ -105,13 +116,17 @@ fn xray_config(port: u16, cert: &std::path::Path, key: &std::path::Path, _psk: &
         "serverName": "{SERVER_NAME}",
         "alpn": ["h3"],
         "certificates": [{{"certificateFile": "{}", "keyFile": "{}"}}]
+      }},
+      "finalmask": {{
+        "udp": [{{"type": "salamander", "settings": {{"password": "{}"}}}}]
       }}
     }}
   }}],
   "outbounds": [{{"protocol": "freedom"}}]
 }}"#,
         support::json_escape(&cert.to_string_lossy()),
-        support::json_escape(&key.to_string_lossy())
+        support::json_escape(&key.to_string_lossy()),
+        support::json_escape(psk)
     )
 }
 
@@ -136,11 +151,7 @@ async fn start_world(tag: &str) -> World {
     let der = cert_der(&cert, &dir);
     let port = free_udp_port();
     let cfg_path = dir.join("xray.json");
-    std::fs::write(
-        &cfg_path,
-        xray_config(port, &cert, &key, "lengsuo-obfs-psk"),
-    )
-    .expect("写配置");
+    std::fs::write(&cfg_path, xray_config(port, &cert, &key, PSK)).expect("写配置");
     let log_out = std::fs::File::create(dir.join("xray-stdout.log")).expect("建日志");
     let log_err = std::fs::File::create(dir.join("xray-stderr.log")).expect("建日志");
     let child = Command::new(xray_bin())
@@ -161,7 +172,9 @@ async fn start_world(tag: &str) -> World {
     // `connect()` 会无限等待，把 20s 总预算架空 ⇒ 用例永久挂起。
     let mut last = String::new();
     for _ in 0..80 {
-        match support::with_attempt_timeout(connect(&world, AUTH)).await {
+        // 就绪探测必须用**与服务端相同的混淆口令**：服务端开了掩码时，
+        // 不混淆的握手永远等不到回应。
+        match support::with_attempt_timeout(connect(&world, AUTH, PSK)).await {
             Ok(Ok(_)) => return world,
             Ok(Err(e)) => last = format!("{e}"),
             Err(_) => {
@@ -179,20 +192,29 @@ async fn start_world(tag: &str) -> World {
     );
 }
 
+/// 本仓客户端 → 参考服务端，**带 Salamander 混淆**。
+///
+/// `psk` 真的参与收发（走 `connect_with_obfs` ⇒ 混淆层建在 UDP socket 上），
+/// 不是「建了不用」。
 async fn connect(
     world: &World,
     auth: &str,
+    psk: &str,
 ) -> Result<HysteriaClient, lengsuo_hysteria::quic::ConnectError> {
-    HysteriaClient::connect(ClientConfig {
-        server_addr: SocketAddr::from(([127, 0, 0, 1], world.port)),
-        server_name: SERVER_NAME.to_string(),
-        auth: auth.to_string(),
-        roots_der: vec![world.cert_der.clone()],
-        brutal_down: 0,
-        brutal_up: 0,
-        congestion: String::new(),
-        peer_cc_rx: None,
-    })
+    let obfs = ObfsHopConfig::obfs(psk.as_bytes().to_vec()).expect("口令长度合法");
+    HysteriaClient::connect_with_obfs(
+        ClientConfig {
+            server_addr: SocketAddr::from(([127, 0, 0, 1], world.port)),
+            server_name: SERVER_NAME.to_string(),
+            auth: auth.to_string(),
+            roots_der: vec![world.cert_der.clone()],
+            brutal_down: 0,
+            brutal_up: 0,
+            congestion: String::new(),
+            peer_cc_rx: None,
+        },
+        obfs,
+    )
     .await
 }
 
@@ -288,14 +310,16 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 
 /// 端到端实跑：Xray 服务端启用 Salamander，客户端混淆层与之一致时
 /// TCP 回显应当逐字节一致（若混淆层不透明则 H3 认证必失败）。
+///
+/// 混淆口令**两端都真的生效**：参考服务端配置里的 `finalmask.udp[]` 与
+/// 本仓客户端的 `connect_with_obfs`。口令不符的拒绝路径见
+/// `tests/obfs_hop_wire.rs` 的 `wrong_password_is_rejected`。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "需要 LENGSUO_XRAY 指向参考 xray 二进制"]
 async fn obfs_matches_xray_server() {
     let world = start_world("hop-obfs").await;
     // 客户端侧用同一口令做混淆；参考服务端配置里已带同一口令。
-    let _obfs = Obfuscator::new(b"lengsuo-obfs-psk".to_vec(), std::sync::Arc::new(OsRng))
-        .expect("口令合法");
-    let client = connect(&world, AUTH).await.expect("建连失败");
+    let client = connect(&world, AUTH, PSK).await.expect("建连失败");
     let echo = spawn_tcp_echo().await;
     let payload = b"lengsuo-salamander-interop".to_vec();
     let fut = async {

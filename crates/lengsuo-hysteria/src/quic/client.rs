@@ -26,7 +26,7 @@ mod constants;
 mod endpoint;
 mod udp;
 
-pub use config::{ClientConfig, ConnectError};
+pub use config::{ClientConfig, ConnectError, ObfsHopConfig};
 pub use constants::{FIRST_UDP_SESSION_ID, UDP_MESSAGE_CHAN_SIZE, UDP_SESSION_ID_LEN};
 pub use endpoint::HysteriaClient;
 pub use udp::{UdpSendError, UdpSession};
