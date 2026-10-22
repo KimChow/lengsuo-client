@@ -33,19 +33,23 @@
 //! | L4 通道协商 | 通道模式、能力集、世代号核对 | `lengsuo-link-core::negotiate`（协议真相）＋ **本 crate** [`negotiate`]（装配接线） |
 //! | L5 ACP 语义 | — | 不动 |
 //!
-//! ⚠️ **`lengsuo-link-core::transport` 目前只有 `Loopback`**（内存环回，自检用）
-//! ——⛔ **未接生产路径**：本 crate 的 L1 走自己的 UDP socket，
-//! 没有接到那个 `Transport` trait 上。
+//! ⚠️ **`lengsuo-link-core::transport` 现在已接到生产路径**：[`link`] 把
+//! 本 crate 的 UDP 端点适配成 `Transport`，PC 端可用 `link_core::transport::Link::send_frame` /
+//! `recv_frame` 与移动端跑**同一套 L2**。旧的 [`assembly`] 路径（自己调
+//! `Keypair::seal`）保留不动。
 //!
 //! # 模块
 //!
 //! - [`udp`]：**L1 传输**。socket 封装、收发循环、两级错误、keepalive 驱动。
+//! - [`link`]：**L1×L2 接线**。把 UDP 端点适配成 `link-core` 的 `Transport`，
+//!   用 [`Link`]（会话 + 搬运）收发。
 //! - [`assembly`]：**L1 装配**。握手编排、密钥落地、endpoint 漫游接线、
 //!   keepalive 接线——把上面三块拼成「一个 peer 的完整链路生命周期」。
 //! - [`negotiate`]：**L4 装配接线**。把 `lengsuo-link-core::negotiate`
 //!   的协议真相挂进 [`assembly`]：控制帧 ⇄ 协商驱动器、世代号核对。
 
 pub mod assembly;
+pub mod link;
 pub mod negotiate;
 pub mod udp;
 
