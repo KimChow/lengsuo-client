@@ -34,6 +34,21 @@ fn unsupported_device_keeps_its_name() {
     assert_eq!(UnsupportedDevice::new("lstest0").name(), "lstest0");
 }
 
+/// 桩设备在任何平台上都不静默 no-op。
+///
+/// 这条在所有平台都成立，故**不** `#[ignore]`；放在本文件（平台无关的设备层
+/// 用例）而不是 `linux_device`（Linux 专属），这样 Windows 上也照跑。
+#[test]
+fn stub_device_never_pretends_to_work() {
+    let mut device = UnsupportedDevice::new("lstest0");
+    let error = device
+        .receive(Duration::from_millis(1))
+        .expect_err("桩不得假装收到包");
+    assert!(matches!(error, DeviceError::Unsupported { .. }));
+    let error = device.send(&[0u8; 20]).expect_err("桩不得假装写回成功");
+    assert!(matches!(error, DeviceError::Unsupported { .. }));
+}
+
 /// 在**非 Linux** 平台上，`open_device` 显式报不支持；Linux 上则真去开设备
 /// （无权限时也必须显式报错，不是静默返回空设备）。
 #[test]

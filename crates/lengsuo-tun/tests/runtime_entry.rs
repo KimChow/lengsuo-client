@@ -37,6 +37,7 @@ mod device;
 #[path = "runtime_entry/entry.rs"]
 mod entry;
 #[path = "runtime_entry/linux_device.rs"]
+#[cfg(target_os = "linux")]
 mod linux_device;
 #[path = "runtime_entry/runtime.rs"]
 mod runtime;

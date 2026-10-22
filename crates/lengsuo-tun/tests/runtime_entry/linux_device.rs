@@ -118,18 +118,3 @@ fn real_tun_device_reports_errors_explicitly() {
         "期望显式错误，实际 {error:?}"
     );
 }
-
-/// 桩设备在任何平台上都不静默 no-op。
-///
-/// 这条在所有平台都成立，故**不** `#[ignore]`；放在本文件是为了和设备相关用例
-/// 待在一起。
-#[test]
-fn stub_device_never_pretends_to_work() {
-    let mut device = crate::runtime_entry::UnsupportedDevice::new("lstest0");
-    let error = device
-        .receive(Duration::from_millis(1))
-        .expect_err("桩不得假装收到包");
-    assert!(matches!(error, DeviceError::Unsupported { .. }));
-    let error = device.send(&[0u8; 20]).expect_err("桩不得假装写回成功");
-    assert!(matches!(error, DeviceError::Unsupported { .. }));
-}
