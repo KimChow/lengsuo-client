@@ -5,7 +5,8 @@
 //! 职责：服务器帧方向、ServerSettings 协商、自配 Stream ID 生命周期、
 //! SYNACK 就绪标记、迟到帧归类、心跳关联值透传与 Alert 终止。
 //! 不含：SYNACK 超时与隧道恢复、心跳定时、padding 方案解析与重写、
-//! 空闲会话复用池、认证、UDP-over-TCP 与任何参考互通。
+//! 空闲会话复用池（在 [`crate::client_pool`]，本文件不含）、
+//! 认证、UDP-over-TCP 与任何参考互通。
 use crate::frame::{Command, Frame};
 use std::collections::{BTreeMap, HashSet};
 

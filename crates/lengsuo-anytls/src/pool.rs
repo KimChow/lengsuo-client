@@ -29,6 +29,8 @@ pub enum PoolError {
     Closed,
     #[error("时间戳早于上一次结算")]
     NonMonotonic,
+    #[error("会话序号已耗尽")]
+    SessionIdExhausted,
 }
 
 /// 一个可复用的空闲会话。池只搬运编号与时间戳，不持有连接本身。
