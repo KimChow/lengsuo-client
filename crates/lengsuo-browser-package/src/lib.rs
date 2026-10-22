@@ -12,6 +12,14 @@
 //! It never fetches, never extracts, never installs and never launches a
 //! kernel. Those belong to the installer/runner.
 //!
+//! It does **read** one thing from the filesystem: an unpacked extension
+//! directory, to compute the deterministic digest a kernel manifest declares
+//! in `extension_sha256` ([`digest_directory`]). That read is what lets a
+//! client check an extension was not tampered with before handing it to the
+//! kernel. The crate still never writes to the filesystem, never installs
+//! what it read, and never touches the kernel artifact bytes beyond hashing
+//! them.
+//!
 //! # Trust boundary — read this before shipping an installer
 //!
 //! SHA-256 proves **integrity only**: that the bytes you verified are the
@@ -50,6 +58,7 @@
 
 mod artifact;
 mod error;
+mod extension;
 mod grammar;
 mod manifest;
 mod parsing;
@@ -63,6 +72,11 @@ pub use artifact::READ_CHUNK_BYTES;
 
 pub use error::PackageError;
 pub use error::VerifyError;
+
+pub use extension::digest_directory;
+pub use extension::digest_entries;
+pub use extension::ExtensionDigest;
+pub use extension::ExtensionDigestError;
 
 pub use manifest::Arch;
 pub use manifest::KernelManifestV1;

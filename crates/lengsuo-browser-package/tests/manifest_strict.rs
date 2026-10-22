@@ -8,8 +8,8 @@ use lengsuo_browser_package::KernelManifestV1;
 use lengsuo_browser_package::PackageError;
 use lengsuo_browser_package::MANIFEST_SCHEMA_VERSION;
 
-/// Every field the schema defines, in declaration order.
-const ALL_FIELDS: &[&str] = &[
+/// Every field the schema requires, in declaration order.
+const REQUIRED_FIELDS: &[&str] = &[
     "schema_version",
     "version",
     "chromium_revision",
@@ -23,6 +23,10 @@ const ALL_FIELDS: &[&str] = &[
     "pool_versions",
     "required_capabilities",
 ];
+
+/// Fields the schema allows to be absent. Their absence is legal; their
+/// presence is still type-checked and grammared.
+const OPTIONAL_FIELDS: &[&str] = &["extension_dir_name", "extension_sha256"];
 
 /// Keys a hostile (or merely newer) publisher might add, none of which the
 /// schema may tolerate.
@@ -83,6 +87,7 @@ fn is_schema_rejection(err: &PackageError) -> bool {
             | PackageError::FieldType { .. }
             | PackageError::EmptyCollection { .. }
             | PackageError::CollectionTooLarge { .. }
+            | PackageError::ExtensionFieldsUnpaired { .. }
     )
 }
 
@@ -178,7 +183,7 @@ fn extra_field_with_object_value_is_rejected() {
 
 #[test]
 fn each_missing_required_field_is_rejected() {
-    for field in ALL_FIELDS {
+    for field in REQUIRED_FIELDS {
         let text = without(64, field);
         let err = must_reject(&text, &format!("missing `{field}`"));
         assert!(
@@ -186,6 +191,23 @@ fn each_missing_required_field_is_rejected() {
             "dropping `{field}` produced {err:?}"
         );
     }
+}
+
+#[test]
+fn each_optional_field_may_be_absent() {
+    // The opposite rule: an absent optional field is not a missing field.
+    // A kernel package that ships no extension says nothing about one, and
+    // the fixture declares neither field.
+    for field in OPTIONAL_FIELDS {
+        assert!(
+            !fixture_fields(64).iter().any(|(k, _)| k == field),
+            "the fixture must not carry the optional field `{field}`"
+        );
+    }
+    let manifest = KernelManifestV1::from_json_str(&json_for(64)).expect("parse");
+    manifest.validate().expect("validate");
+    assert_eq!(manifest.extension_dir_name, None);
+    assert_eq!(manifest.extension_sha256, None);
 }
 
 #[test]

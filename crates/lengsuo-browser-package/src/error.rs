@@ -146,6 +146,18 @@ pub enum PackageError {
         /// Sanitized, sorted, comma-separated list.
         missing: String,
     },
+
+    /// Exactly one of the two extension fields is present.
+    ///
+    /// The manifest is untrusted input: a document that names an extension
+    /// directory but carries no digest for it claims a payload the client
+    /// cannot check, so the pair is refused instead of one half being ignored
+    /// or defaulted.
+    #[error("manifest declares only `{present}`; `extension_dir_name` and `extension_sha256` must both be present or both absent")]
+    ExtensionFieldsUnpaired {
+        /// The field that was present.
+        present: &'static str,
+    },
 }
 
 /// Failure while verifying artifact bytes against a validated manifest.
