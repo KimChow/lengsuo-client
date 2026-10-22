@@ -31,6 +31,15 @@ use serde::{Deserialize, Serialize};
 use crate::forward::ForwardConfig;
 use crate::route::RouteError;
 
+/// VLESS Vision 的两个配置段（**流量层** `vision` / **记录层** `encryption`）。
+///
+/// 拆到独立文件：`config.rs` 已超 400 行软目标。结构与校验语义与拆分前逐字
+/// 一致；公共路径仍是 `crate::config::NodeVisionSettings` /
+/// `crate::config::NodeEncryptionSettings`（本模块的转出）。
+#[path = "config_vision.rs"]
+mod config_vision;
+pub use config_vision::{NodeEncryptionSettings, NodeVisionSettings};
+
 /// 配置错误：解析失败（serde）、结构非法（校验）或读取文件失败。
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -155,7 +164,7 @@ impl fmt::Debug for AuthConfig {
 }
 
 /// 脱敏占位：非空即输出 `<redacted>`，空串输出 `<empty>`（长度也不泄漏）。
-fn redacted(value: &str) -> &'static str {
+pub(crate) fn redacted(value: &str) -> &'static str {
     if value.is_empty() {
         "<empty>"
     } else {
@@ -237,6 +246,23 @@ pub struct NodeConfig {
     /// （fail-closed，不静默忽略该配置段）。
     #[serde(default)]
     pub reality: Option<NodeRealitySettings>,
+    /// VLESS **Vision 流量层**配置（**仅 vless**）：缺省即「不走流量层」，
+    /// 既有 JSON 配置行为逐字节不变。
+    ///
+    /// 给了但 `protocol` 不是 `vless` ⇒ 配置加载阶段**显式报错**
+    /// （fail-closed，不静默忽略该配置段）。
+    ///
+    /// 结构与校验见 [`crate::config_vision::NodeVisionSettings`]。
+    #[serde(default)]
+    pub vision: Option<NodeVisionSettings>,
+    /// VLESS **记录层**（AEAD）配置（**仅 vless**）：缺省即「不走记录层」。
+    ///
+    /// 与 `vision` 是**两个独立开关**（参考的 `flow` 与 `encryption` 是两个不同
+    /// 的特性）；给了但 `protocol` 不是 `vless` ⇒ 配置加载阶段**显式报错**。
+    ///
+    /// 结构与校验见 [`crate::config_vision::NodeEncryptionSettings`]。
+    #[serde(default)]
+    pub encryption: Option<NodeEncryptionSettings>,
     /// 转发服务配置（监听地址 / 默认节点 / 路由规则 / 超时）。
     ///
     /// **缺省即无转发服务**：dry-run 行为与旧版完全一致（既有测试不退化）。
@@ -258,6 +284,8 @@ impl fmt::Debug for NodeConfig {
             .field("auth", &self.auth)
             .field("method", &self.method)
             .field("reality", &self.reality)
+            .field("vision", &self.vision)
+            .field("encryption", &self.encryption)
             .finish()
     }
 }
@@ -297,6 +325,8 @@ impl NodeConfig {
             }
         }
         self.validate_reality(&invalid)?;
+        self.validate_vision(&invalid)?;
+        self.validate_encryption(&invalid)?;
         self.validate_credentials(&invalid)?;
         Ok(())
     }

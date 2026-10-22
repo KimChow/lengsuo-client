@@ -10,21 +10,28 @@
 //! 本仓 `lengsuo-vless` 的 `stream::receive_response` 正是这两个字节的校验
 //! （非 `[0, 0]` 一律 `Err(Unsupported)`），因此这里不需要观察窗。
 //!
-//! ## 两条安全层路径（判据相同）
+//! ## 三条安全层路径（判据相同）
 //!
 //! | 配置 | 承载 | 说明 |
 //! | --- | --- | --- |
 //! | 无 `reality` 段 | 普通 TLS（`lengsuo_tls`） | 既有行为，逐字节不变 |
 //! | 有 `reality` 段 | REALITY + TLS 1.3（`lengsuo_vless::reality_link`） | 库级原语接进产品链路 |
+//! | 有 `vision` 段 | Vision 流量层（+ 可选 `encryption` 记录层） | 库级原语接进产品链路 |
 //!
-//! 两条路径**共用同一段 VLESS 主链路**：`stream::send_request` →
-//! `stream::receive_response`。认证完成判据都是「收到 `[0, 0]`」。
-//! REALITY 分支的握手语义**全部**来自协议 crate
+//! 无 `reality` 段与有 `reality` 段这**两条**路径**共用同一段 VLESS 主链路**：
+//! `stream::send_request` → `stream::receive_response`。认证完成判据都是
+//! 「收到 `[0, 0]`」。REALITY 分支的握手语义**全部**来自协议 crate
 //! （`lengsuo_vless::reality_config` / `lengsuo_vless::reality_link`），
 //! node 侧只做「配置 → 建流」的编排。
 //!
+//! Vision 路径**不走**上面那段主链路（请求头带 flow addons、首块是 vision 块、
+//! 响应头由 Vision 层解出），但**认证判据相同**：拿到**成功响应头**才认为
+//! 连接已认证。分帧 / padding / AEAD 记录**全部**来自
+//! `lengsuo_vless::vision_wire`（`outbound_vless_vision` 只做「配置 → 建流」的
+//! 编排），node 侧不复制任何协议实现。
+//!
 //! 偏离：uuid → 16 字节凭据直接取 UUID 文本的十六进制字节（`ss_core` 无 UUID
-//! 类型，且参考的 ID 在线上就是原始 16 字节）；Vision/flow 不在本卡范围。
+//! 类型，且参考的 ID 在线上就是原始 16 字节）。
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -40,11 +47,20 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use crate::config::NodeConfig;
 use crate::outbound::{connect_tls, probe_target, resolve_public, DialError, NodeTlsStream};
 
-/// vless 出站的承载流：普通 TLS 或 REALITY。
+/// VLESS Vision 的出站接线（流量层 / 记录层 → 承载）。
 ///
-/// 两种承载都实现 `AsyncRead` + `AsyncWrite`（REALITY 侧由
-/// `lengsuo_vless::reality_link::RealityStream` 提供），所以 **VLESS 主链路
-/// 函数（`send_request` / `receive_response`）对两者完全一致**。
+/// 用 `#[path]` 声明（而非在 `lib.rs` 里加 `pub mod`）：本卡的边界限定了可改动的
+/// 文件清单，`lib.rs` 不在其中。
+#[path = "outbound_vless_vision.rs"]
+pub mod outbound_vless_vision;
+use outbound_vless_vision::VlessVisionStream;
+
+/// vless 出站的承载流：普通 TLS、REALITY 或 Vision。
+///
+/// 三种承载都实现 `AsyncRead` + `AsyncWrite`（REALITY 侧由
+/// `lengsuo_vless::reality_link::RealityStream` 提供，Vision 侧由
+/// `lengsuo_vless::vision_wire` 提供），所以 **VLESS 主链路
+/// 函数（`send_request` / `receive_response`）对三者完全一致**。
 pub enum VlessStream {
     /// 普通 TLS 承载（`TlsStream<TcpStream>`）。
     ///
@@ -53,6 +69,10 @@ pub enum VlessStream {
     Tls(Box<NodeTlsStream>),
     /// REALITY + TLS 1.3 承载（记录层已摊平成字节流）。
     Reality(RealityStream),
+    /// Vision 承载（流量层在外；记录层可选）。
+    ///
+    /// 装箱理由同 `Tls` 变体：Vision 的两层包装体积最大。
+    Vision(Box<VlessVisionStream>),
 }
 
 impl AsyncRead for VlessStream {
@@ -64,6 +84,7 @@ impl AsyncRead for VlessStream {
         match &mut *self {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_read(cx, buf),
             Self::Reality(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Vision(stream) => Pin::new(&mut **stream).poll_read(cx, buf),
         }
     }
 }
@@ -77,6 +98,7 @@ impl AsyncWrite for VlessStream {
         match &mut *self {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_write(cx, buf),
             Self::Reality(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Vision(stream) => Pin::new(&mut **stream).poll_write(cx, buf),
         }
     }
 
@@ -84,6 +106,7 @@ impl AsyncWrite for VlessStream {
         match &mut *self {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_flush(cx),
             Self::Reality(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Vision(stream) => Pin::new(&mut **stream).poll_flush(cx),
         }
     }
 
@@ -91,6 +114,7 @@ impl AsyncWrite for VlessStream {
         match &mut *self {
             Self::Tls(stream) => Pin::new(&mut **stream).poll_shutdown(cx),
             Self::Reality(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Vision(stream) => Pin::new(&mut **stream).poll_shutdown(cx),
         }
     }
 }
@@ -113,15 +137,22 @@ impl std::fmt::Debug for VlessOutbound {
     }
 }
 
-/// vless 出站：TLS（或 REALITY）→ 请求头 → 等服务端成功响应头。
+/// vless 出站：TLS（或 REALITY / Vision）→ 请求头 → 等服务端成功响应头。
+///
+/// - 无 `vision` 段 ⇒ 既有路径逐字节不变（`send_request` + `receive_response`）。
+/// - 有 `vision` 段 ⇒ 走 Vision 握手（请求头带 `flow=xtls-rprx-vision` addons +
+///   首个 padding 块；响应头由 Vision 层解出），判据同样是「拿到成功响应头」。
 pub async fn dial_vless(config: &NodeConfig, wait: Duration) -> Result<VlessOutbound, DialError> {
-    let mut stream = open_stream(config, wait).await?;
     let credential = uuid_bytes(&config.auth.password)?;
     let target = probe_target(config);
     let request = Request {
         command: VlessCommand::Tcp,
         target: target.clone(),
     };
+    if outbound_vless_vision::vision_enabled(config) {
+        return dial_vision(config, wait, request, credential).await;
+    }
+    let mut stream = open_stream(config, wait).await?;
     send_request(&mut stream, &request, &credential, wait).await?;
     // 正向证据：服务端在目标连接建立后才写 [0, 0]；超时/非零字节都是失败。
     receive_response(&mut stream, wait).await?;
@@ -130,6 +161,38 @@ pub async fn dial_vless(config: &NodeConfig, wait: Duration) -> Result<VlessOutb
         .await
         .map_err(lengsuo_tls::Error::from)?;
     Ok(VlessOutbound { stream, target })
+}
+
+/// Vision 出站：承载（TLS / REALITY）→ Vision 握手 → 成功响应头。
+///
+/// 承载选择与普通路径一致（`reality` 段优先 ⇒ REALITY，否则 TLS）。Vision 的
+/// 流量层 / 记录层语义**全部**来自 `lengsuo_vless::vision_wire`，node 侧只做
+/// 「配置 → 建流」的编排。
+async fn dial_vision(
+    config: &NodeConfig,
+    wait: Duration,
+    request: Request,
+    credential: [u8; 16],
+) -> Result<VlessOutbound, DialError> {
+    // 先校验 Vision 配置，再拨任何连接（坏配置不得建立 TCP/TLS）。
+    outbound_vless_vision::precheck(config).map_err(vision_dial_error)?;
+    let carrier: outbound_vless_vision::BoxedCarrier = if config.reality.is_some() {
+        Box::new(connect_reality(config, wait).await?)
+    } else {
+        Box::new(connect_tls(config, wait).await?)
+    };
+    let mut stream =
+        outbound_vless_vision::build(carrier, config, credential).map_err(vision_dial_error)?;
+    outbound_vless_vision::handshake(&mut stream, &request, credential, wait).await?;
+    Ok(VlessOutbound {
+        stream: VlessStream::Vision(Box::new(stream)),
+        target: request.target,
+    })
+}
+
+/// Vision 线路错误 → 拨号错误（fail-closed；消息不含密钥材料）。
+fn vision_dial_error(error: outbound_vless_vision::VisionConfigError) -> DialError {
+    DialError::Rejected(format!("vision 配置非法：{error}"))
 }
 
 /// 选承载并建流：配置了 `reality` 段走 REALITY，否则走普通 TLS。
