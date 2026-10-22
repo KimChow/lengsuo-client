@@ -25,4 +25,5 @@ pub mod outbound_trojan;
 pub mod outbound_vless;
 pub mod outbound_vmess;
 pub mod outbound_wireguard;
+pub mod relay_bridge;
 pub mod route;

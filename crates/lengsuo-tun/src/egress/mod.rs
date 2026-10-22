@@ -36,13 +36,17 @@
 //!   **不重写** ingress 的事件循环。
 
 mod authority;
+mod node_runtime;
 mod runtime;
 mod selector;
 
 pub use authority::{
     Attribution, AuthorityError, BindingAuthority, BindingId, DeviceId, EnvironmentId, Lease,
 };
-pub use runtime::{OutboundProtocol, OutboundRuntime, OutboundSession, RuntimeError};
+pub use node_runtime::NodeOutboundRuntime;
+pub use runtime::{
+    OutboundExchange, OutboundProtocol, OutboundRuntime, OutboundSession, RuntimeError,
+};
 pub use selector::{
     DenyReason, EgressDecision, EgressError, EgressHandle, EgressSelector, SelectionReason,
 };

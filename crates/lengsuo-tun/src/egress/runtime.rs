@@ -77,3 +77,15 @@ pub trait OutboundRuntime {
 /// 运行时分配的出口会话句柄。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutboundSession(pub u64);
+
+/// 出口运行时的**回程**取回能力。
+///
+/// [`OutboundRuntime`] 只覆盖去程（建连、转发载荷）；回程字节（对端发来的应用
+/// 数据）由本 trait 单独承载。真实实现接 node 的读端；测试用内存替身。
+///
+/// 与 [`OutboundRuntime`] 分成两个 trait 的原因：去程是**必须**的（没有它就无法把
+/// 报文送出），回程是**可选**的（只有出站方向的最小实现可以不实现回程）。
+pub trait OutboundExchange {
+    /// 取回某个会话已就绪的回程字节；没有就绪数据时返回 `None`。
+    fn take_response(&mut self, session: OutboundSession) -> Option<Vec<u8>>;
+}
