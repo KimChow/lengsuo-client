@@ -48,7 +48,9 @@
 //! 移动端只用 `lengsuo-link-core`（无 IO）。
 
 pub mod config;
+pub mod control;
 pub mod error;
+pub mod event;
 pub mod handshake;
 pub mod keepalive;
 pub mod reason;
@@ -56,6 +58,7 @@ pub mod session;
 
 pub use self::config::{AssemblyConfig, Role};
 pub use self::error::AssemblyError;
+pub use self::event::AssemblyEvent;
 pub use self::handshake::{HandshakeCodec, InitiatorHandshake, ResponderHandshake, SessionKeys};
 pub use self::keepalive::{keepalive_frame, KeepaliveDriver};
-pub use self::session::{Assembly, AssemblyEvent};
+pub use self::session::Assembly;

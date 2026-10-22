@@ -28,23 +28,33 @@
 //! |---|---|---|
 //! | **L1 传输** | UDP socket、收发循环、endpoint 漫游入口、keepalive 驱动 | **本 crate** |
 //! | **L1 装配** | 握手编排、密钥落地、漫游接线、keepalive 接线 | **本 crate** |
-//! | L2 密钥 | 握手、密钥协商 | `lengsuo-link-core`（后续卡） |
-//! | L3 密文帧 | 帧边界格式与编解码 | `lengsuo-link-core`（已交付） |
-//! | L4 通道协商 | 通道、世代号、能力集 | 后续卡 |
+//! | L2 密钥 | 握手、密钥落地、世代号 | `lengsuo-wireguard`（握手 / AEAD 来源）＋ **本 crate** 编排；世代号语义见 `lengsuo-link-core::session` |
+//! | L3 密文帧 | 帧边界格式与编解码 | `lengsuo-link-core::frame` |
+//! | L4 通道协商 | 通道模式、能力集、世代号核对 | `lengsuo-link-core::negotiate`（协议真相）＋ **本 crate** [`negotiate`]（装配接线） |
 //! | L5 ACP 语义 | — | 不动 |
+//!
+//! ⚠️ **`lengsuo-link-core::transport` 目前只有 `Loopback`**（内存环回，自检用）
+//! ——⛔ **未接生产路径**：本 crate 的 L1 走自己的 UDP socket，
+//! 没有接到那个 `Transport` trait 上。
 //!
 //! # 模块
 //!
 //! - [`udp`]：**L1 传输**。socket 封装、收发循环、两级错误、keepalive 驱动。
 //! - [`assembly`]：**L1 装配**。握手编排、密钥落地、endpoint 漫游接线、
 //!   keepalive 接线——把上面三块拼成「一个 peer 的完整链路生命周期」。
+//! - [`negotiate`]：**L4 装配接线**。把 `lengsuo-link-core::negotiate`
+//!   的协议真相挂进 [`assembly`]：控制帧 ⇄ 协商驱动器、世代号核对。
 
 pub mod assembly;
+pub mod negotiate;
 pub mod udp;
 
 pub use crate::assembly::{
     Assembly, AssemblyConfig, AssemblyError, AssemblyEvent, HandshakeCodec, InitiatorHandshake,
     KeepaliveDriver, ResponderHandshake, Role, SessionKeys,
+};
+pub use crate::negotiate::{
+    NegotiateConfig, NegotiateDriver, NegotiateError, NegotiationResult, NegotiationStep,
 };
 pub use crate::udp::{
     Cancel, Datagram, DatagramError, ErrorSeverity, HandshakeKind, KeepaliveConfig,
