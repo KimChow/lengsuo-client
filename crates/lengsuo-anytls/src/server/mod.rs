@@ -8,11 +8,14 @@
 //! - [`sink`]：会话级共享写出句柄（参考 `connLock` 串行化）。
 //! - [`streams`]：单流双向中继与 SYNACK/FIN 生命周期（参考 `outbound_tcp.go` +
 //!   `session/stream.go`）。
+//! - [`udp`]：UDP-over-TCP（v2）承载（参考 `outbound_tcp.go::proxyOutboundUoT` +
+//!   sing `common/uot`）。
 //! - [`session`]：认证 → Settings 协商 → 帧循环装配（参考 `handleTcpConnection`）。
 pub mod session;
 pub mod sink;
 pub mod streams;
 pub mod tls;
+pub mod udp;
 pub mod writer;
 
 pub use session::SessionStats;

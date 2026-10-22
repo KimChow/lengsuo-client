@@ -53,6 +53,11 @@ pub struct Stream {
     pending: Vec<u8>,
     /// 已解析出的目标地址，防止重复拨号。
     endpoint: Option<std::net::SocketAddr>,
+    /// 已解析出的流首目标地址（**保留域名**）。
+    ///
+    /// 域名必须保留：UDP-over-TCP 的魔法域 `sp.v2.udp-over-tcp.arpa` 就是域名，
+    /// 识别它靠主机名而不是可拨号的 `SocketAddr`。
+    destination: Option<ss_core::target::TargetAddr>,
     pub flags: Arc<StreamFlags>,
     /// 出站连接失败的流：后续载荷一律丢弃（参考断连后写失败）。
     pub failed: bool,
@@ -65,6 +70,7 @@ impl Stream {
             sender: None,
             pending: Vec::new(),
             endpoint: None,
+            destination: None,
             flags: Arc::new(StreamFlags::default()),
             failed: false,
         }
@@ -119,13 +125,13 @@ impl Stream {
         self.pending.extend_from_slice(data);
     }
 
-    /// 若缓存里已够一段完整 SOCKS5 地址就解析并消耗；不足则返回 `None` 等下一帧。
+    /// 解析并消耗流首的 SOCKS5 目标地址（**保留域名**）；不足则返回 `None` 等下一帧。
     ///
     /// 参考 `M.SocksaddrSerializer.ReadAddrPort(stream)`：它直接从流里读，
     /// 而帧模式下地址可能跨帧，因此这里显式缓存未消费的字节。
-    pub fn take_endpoint(&mut self) -> Result<Option<std::net::SocketAddr>, Error> {
-        if let Some(endpoint) = self.endpoint {
-            return Ok(Some(endpoint));
+    pub fn take_destination(&mut self) -> Result<Option<ss_core::target::TargetAddr>, Error> {
+        if let Some(destination) = &self.destination {
+            return Ok(Some(destination.clone()));
         }
         let (addr, used) = match ss_core::target::TargetAddr::decode(&self.pending) {
             Ok(pair) => pair,
@@ -133,9 +139,33 @@ impl Stream {
             Err(_) => return Err(Error::Invalid),
         };
         self.pending.drain(..used);
+        self.destination = Some(addr.clone());
+        Ok(Some(addr))
+    }
+
+    /// 记录已解析出的可拨号目标。
+    pub fn set_endpoint(&mut self, endpoint: std::net::SocketAddr) {
+        self.endpoint = Some(endpoint);
+    }
+
+    /// 若缓存里已够一段完整 SOCKS5 地址就解析并消耗；不足则返回 `None` 等下一帧。
+    ///
+    /// 域名目标无法直接拨号 ⇒ 拒绝（参考侧同理：UDP/TCP 拨号都要求可解析地址）。
+    pub fn take_endpoint(&mut self) -> Result<Option<std::net::SocketAddr>, Error> {
+        if let Some(endpoint) = self.endpoint {
+            return Ok(Some(endpoint));
+        }
+        let Some(addr) = self.take_destination()? else {
+            return Ok(None);
+        };
         let endpoint = to_socket_addr(&addr).ok_or(Error::Invalid)?;
         self.endpoint = Some(endpoint);
         Ok(Some(endpoint))
+    }
+
+    /// 取走并清空尚未消费的字节（首地址之后的部分）。
+    pub fn take_pending(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending)
     }
 
     /// 已解析目标地址后，把剩余缓存一次交给出站通道（并计入转发统计）。
@@ -166,6 +196,20 @@ impl Stream {
     pub fn close_local(&mut self) {
         self.sender = None;
         self.flags.client_fin.store(true, Ordering::Relaxed);
+    }
+}
+
+/// 目标地址的主机文本：域名给域名，IP 给点分文本。
+///
+/// UDP-over-TCP 的魔法域判定要靠它（参考 `inbound_tcp.go` 的
+/// `strings.Contains(destination.String(), ...)`）。
+pub fn destination_host(addr: &ss_core::target::TargetAddr) -> String {
+    match addr {
+        ss_core::target::TargetAddr::V4(octets, _) => {
+            format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
+        }
+        ss_core::target::TargetAddr::V6(octets, _) => std::net::Ipv6Addr::from(*octets).to_string(),
+        ss_core::target::TargetAddr::Domain(host, _) => host.clone(),
     }
 }
 
