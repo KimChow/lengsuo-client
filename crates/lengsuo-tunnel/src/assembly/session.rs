@@ -34,51 +34,19 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use lengsuo_link_core::frame::{Frame, FrameType};
+use lengsuo_link_core::session::Generation;
 use lengsuo_wireguard::device::{Device, Output};
 use lengsuo_wireguard::keypair::{Keypair, KeypairSet};
 use lengsuo_wireguard::peers::{PeerConfig, PeerSet};
 
 use crate::assembly::config::{AssemblyConfig, Role};
 use crate::assembly::error::AssemblyError;
+use crate::assembly::event::AssemblyEvent;
 use crate::assembly::handshake::SessionKeys;
 use crate::assembly::keepalive::KeepaliveDriver;
 use crate::assembly::reason::seal_reason;
+use crate::negotiate::NegotiateDriver;
 use crate::udp::UdpEndpoint;
-
-/// 装配层处理一个入站报文后的**可判定结果**。
-///
-/// 这不是错误：它把「这包是什么、对端有没有换地址」讲清楚，
-/// 让上层不必去匹配错误变体。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssemblyEvent {
-    /// 收到并**成功解密**一个数据报文（明文已交还上层）。
-    Delivered {
-        /// 帧类型。
-        frame_type: FrameType,
-        /// 帧序号。
-        seq: u64,
-        /// 明文长度（**不含**明文字节本身）。
-        plaintext_len: usize,
-        /// 对端是否**发生了漫游**（源地址变了 ⇒ endpoint 已更新）。
-        roamed: bool,
-    },
-    /// 收到一个 keepalive 帧（零长载荷）：**不做**认证解密，⛔ 不更新 endpoint。
-    Keepalive,
-    /// 收到一个**未通过认证**的报文（认证失败 / keypair 过期）：
-    /// 已丢弃，⛔ **不更新** endpoint。
-    Dropped {
-        /// 丢弃原因（固定短语）。
-        reason: &'static str,
-    },
-}
-
-impl AssemblyEvent {
-    /// 本次处理是否**发生了漫游**（对端源地址变了）。
-    #[must_use]
-    pub fn roamed(&self) -> bool {
-        matches!(self, Self::Delivered { roamed: true, .. })
-    }
-}
 
 /// 装配层的会话状态机。
 ///
@@ -99,6 +67,12 @@ pub struct Assembly {
     established: bool,
     /// 本端 index（本轮握手使用的）。
     local_index: u32,
+    /// 本轮连接的**世代号**（L2 拥有；首次握手成功仍是初始值，每次重新握手 +1）。
+    pub(super) generation: Generation,
+    /// 已成功建立的握手轮数（用于世代号推进）。
+    established_rounds: u32,
+    /// L4 协商驱动器（`None` ⇒ 本端没配 L4 协商）。
+    pub(super) negotiator: Option<NegotiateDriver>,
 }
 
 impl Assembly {
@@ -120,14 +94,19 @@ impl Assembly {
                 }),
             })
             .map_err(AssemblyError::Peer)?;
-        Ok(Self {
+        let mut assembly = Self {
             config,
             device,
             peers,
             peer_id,
             established: false,
             local_index: 0,
-        })
+            generation: Generation::INITIAL,
+            established_rounds: 0,
+            negotiator: None,
+        };
+        assembly.refresh_negotiator();
+        Ok(assembly)
     }
 
     /// 配置（只读）。
@@ -277,12 +256,18 @@ impl Assembly {
                 .map_err(AssemblyError::Peer)?;
         }
         Ok(match output {
-            Output::Deliver { payload, .. } => AssemblyEvent::Delivered {
-                frame_type: frame.frame_type,
-                seq: frame.seq,
-                plaintext_len: payload.len(),
-                roamed: new_endpoint.is_some(),
-            },
+            Output::Deliver { payload, .. } => {
+                // 控制帧**只**走 L4 协商驱动器：⛔ 绝不作为数据交给上层。
+                if frame.frame_type == FrameType::Control {
+                    return self.route_control(&payload);
+                }
+                AssemblyEvent::Delivered {
+                    frame_type: frame.frame_type,
+                    seq: frame.seq,
+                    plaintext_len: payload.len(),
+                    roamed: new_endpoint.is_some(),
+                }
+            }
             Output::DroppedExpiredKeypair { .. } => AssemblyEvent::Dropped {
                 reason: "keypair 已过期或不存在",
             },
@@ -327,6 +312,14 @@ impl Assembly {
         }
         self.local_index = keys.local_index;
         self.established = true;
+        // 世代号：**首次**握手成功仍是初始值；每次**重新**握手成功 +1
+        // （失败的握手不推进）。见 `docs/link-session-spec.md` §2.3。
+        self.established_rounds += 1;
+        if self.established_rounds > 1 {
+            self.generation = self.generation.next();
+        }
+        // 换了一代连接 ⇒ 换一台协商状态机（`Failed` 是吸收态，不可复用）。
+        self.refresh_negotiator();
         Ok(())
     }
 
@@ -360,6 +353,7 @@ impl core::fmt::Debug for Assembly {
             .field("role", &self.config.role)
             .field("established", &self.established)
             .field("local_index", &self.local_index)
+            .field("generation", &self.generation.value())
             .field("peer_endpoint", &self.peer_endpoint())
             .field("keys", &"[redacted]")
             .finish_non_exhaustive()

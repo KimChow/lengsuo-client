@@ -19,6 +19,7 @@
 //! 供上层按变体做程序化判定）。
 
 use crate::udp::UdpError;
+use lengsuo_link_core::negotiate::NegotiateError;
 use lengsuo_wireguard::peers::PeerError;
 
 /// 装配层错误。
@@ -69,6 +70,16 @@ pub enum AssemblyError {
 
     /// keepalive 任务已在运行（重复启动）。
     KeepaliveAlreadyRunning,
+
+    /// L4 协商失败（**fail-closed**：不回退默认通道、不继续用旧连接）。
+    ///
+    /// 载荷本体保留在变体里，供上层按**稳定错误码**分支
+    /// （⛔ 不要解析错误文本）。
+    Negotiate(NegotiateError),
+
+    /// L4 协商**配置**不自洽（角色与请求模式矛盾 / 请求模式本端不支持 /
+    /// 本端没配协商却收到了控制帧）。
+    NegotiateConfig(&'static str),
 }
 
 impl core::fmt::Display for AssemblyError {
@@ -98,6 +109,15 @@ impl core::fmt::Display for AssemblyError {
             Self::KeepaliveDisabled(reason) => write!(formatter, "keepalive 不可启动：{reason}"),
             Self::KeepaliveAlreadyRunning => {
                 formatter.write_str("keepalive 任务已在运行：拒绝重复启动")
+            }
+            Self::Negotiate(error) => {
+                write!(
+                    formatter,
+                    "L4 协商失败（fail-closed，不回退默认通道）：{error}"
+                )
+            }
+            Self::NegotiateConfig(reason) => {
+                write!(formatter, "L4 协商配置不合法：{reason}")
             }
         }
     }

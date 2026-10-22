@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use lengsuo_wireguard::handshake::PSK_LEN;
 
+use crate::negotiate::NegotiateConfig;
+
 /// 本端在装配层里的角色。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -54,10 +56,12 @@ pub struct AssemblyConfig {
     ///
     /// 默认 `None` ⇒ 装配层按 [`local_index_from`] 的规则自行派生。
     pub local_index: Option<u32>,
+    /// L4 通道协商配置。`None` ⇒ 本端**不跑** L4 协商。
+    pub negotiate: Option<NegotiateConfig>,
 }
 
 impl AssemblyConfig {
-    /// 构造一份配置（`keepalive` 关闭、无预共享密钥）。
+    /// 构造一份配置（`keepalive` 关闭、无预共享密钥、无 L4 协商）。
     #[must_use]
     pub fn new(role: Role, local_static_private: [u8; 32], remote_static_public: [u8; 32]) -> Self {
         Self {
@@ -67,6 +71,7 @@ impl AssemblyConfig {
             preshared_key: None,
             keepalive_interval: None,
             local_index: None,
+            negotiate: None,
         }
     }
 
@@ -91,10 +96,18 @@ impl AssemblyConfig {
         self
     }
 
+    /// 配置 L4 通道协商。
+    #[must_use]
+    pub fn with_negotiate(mut self, negotiate: NegotiateConfig) -> Self {
+        self.negotiate = Some(negotiate);
+        self
+    }
+
     /// 校验密钥材料（fail-closed）。
     ///
     /// # Errors
-    /// 对端公钥或本端私钥为全零 ⇒ [`AssemblyError::HandshakeRejected`]。
+    /// - 对端公钥或本端私钥为全零 ⇒ [`AssemblyError::HandshakeRejected`]；
+    /// - L4 协商配置不自洽 ⇒ [`AssemblyError::NegotiateConfig`]。
     pub fn validate(&self) -> Result<(), crate::assembly::AssemblyError> {
         if self.remote_static_public == [0u8; 32] {
             return Err(crate::assembly::AssemblyError::HandshakeRejected {
@@ -105,6 +118,11 @@ impl AssemblyConfig {
             return Err(crate::assembly::AssemblyError::HandshakeRejected {
                 reason: "本端静态私钥为全零",
             });
+        }
+        if let Some(negotiate) = &self.negotiate {
+            negotiate
+                .validate()
+                .map_err(crate::assembly::AssemblyError::NegotiateConfig)?;
         }
         Ok(())
     }
