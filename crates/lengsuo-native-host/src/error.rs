@@ -67,6 +67,59 @@ pub enum OriginError {
         /// 具体哪里不对。
         reason: IdFormatError,
     },
+
+    /// 扩展 ID **格式合法但值不是本扩展**（严格值校验失败）。
+    ///
+    /// 与 [`Self::InvalidExtensionId`] 区分：那条是「形状/格式坏」，
+    /// 这条是「格式对，但不是我们」—— 例如首字符 `e`→`f` 的同长 ID。
+    #[error("扩展不是本扩展：{got:?}（期望 {expected:?}）")]
+    NotOurExtension {
+        /// 实际拿到的扩展 ID（保持原大小写）。
+        got: String,
+        /// 期望的本扩展 ID。
+        expected: &'static str,
+    },
+}
+
+/// 主循环失败。
+///
+/// ⛔ 错误文本**不含载荷字节**（载荷可能承载凭据数据）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LoopError {
+    /// stdin 读失败。
+    #[error("读 stdin 失败：{0}")]
+    Read(String),
+
+    /// stdout 写失败。
+    #[error("写 stdout 失败：{0}")]
+    Write(String),
+
+    /// 长度头声明的载荷超过上限：**关通道**，⛔ 不截断、不继续读。
+    ///
+    /// 注意这是在**开始读载荷之前**判定的：超限的载荷一个字节都不会被消费。
+    #[error("管道帧声明长度 {declared} 字节超过上限 {limit} 字节：关闭通道，不截断")]
+    TooLong {
+        /// 长度头声明的载荷字节数。
+        declared: u64,
+        /// 允许的上限（[`MAX_FRAME_PAYLOAD_LEN`](crate::frame::MAX_FRAME_PAYLOAD_LEN)）。
+        limit: usize,
+    },
+
+    /// 载荷不是合法 UTF-8（信封是 JSON 文本）。
+    #[error("管道帧载荷不是合法 UTF-8：关闭通道")]
+    NotUtf8,
+
+    /// 载荷不是合法信封（JSON 坏 / 缺 `frame_b64` / base64 坏）。
+    #[error("信封解析失败：{0}")]
+    Envelope(String),
+
+    /// 解出来的业务帧帧头非法（契约 §5.2）。
+    #[error("业务帧非法：{0}")]
+    BadBusinessFrame(String),
+
+    /// 回帧装不进上限（信封或管道帧超限）。
+    #[error("回帧无法编码：{0}")]
+    ReplyTooLong(String),
 }
 
 /// 扩展 ID 格式不合法的具体原因。

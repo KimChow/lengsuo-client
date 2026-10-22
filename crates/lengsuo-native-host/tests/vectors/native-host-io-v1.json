@@ -1,0 +1,149 @@
+{
+  "TEST FIXTURES ONLY": "本文件全部为合成夹具：不含任何真实凭据、私钥、机器标识。",
+  "schema": "lengsuo-native-host-io-vectors",
+  "schema_version": 1,
+  "source_of_truth": "凭据线契约 §5.0 / §5.2 / §5.2.1 / §5.3 + Chromium 155 实现（crx_file/id_util.cc IdIsValid、native_messaging_host_manifest.cc、native_message_process_host.cc kMaximumNativeMessageSize）",
+  "note": "本文件钉三件事：(1) 扩展 ID 严格值校验；(2) host manifest 渲染（allowed_origins 只含本 ID）；(3) stdin/stdout 主循环的管道帧 —— 4B 本机序长度头 + JSON 信封 {\"frame_b64\":\"…\"}。所有 hex / base64 / JSON 都是独立手算的字面量，不是实现输出回灌。长度头按小端记录（参考平台），大端主机由 support 换序。",
+  "extension_id": {
+    "canonical": "ejlmmjamfpkoopjachjhcbdjlddknhok",
+    "length": 32,
+    "alphabet": "a-p",
+    "case_sensitive": false,
+    "derived_bytes_hex": "49bcc90c5faeef9027972139b33ad7ea",
+    "derivation": "SHA256(公钥 DER) 前 16 字节；每字节拆成高/低 4 位，每位映射 'a'+值（0→a … 15→p）。derived_bytes_hex 是独立算出：逐位 'a'..'p' → 0..15 再拼回 16 字节，与 canonical 互为逆运算。",
+    "origin_canonical": "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/"
+  },
+  "legal_ids": [
+    {
+      "name": "V_ID_CANONICAL",
+      "id": "ejlmmjamfpkoopjachjhcbdjlddknhok"
+    },
+    {
+      "name": "V_ID_UPPERCASE",
+      "id": "EJLMMJAMFPKOOPJACHJHCBDJLDDKNHOK"
+    },
+    {
+      "name": "V_ID_MIXED_CASE",
+      "id": "EjLmMjAmFpKoOpJaChJhCbDjLdDkNhOk"
+    }
+  ],
+  "illegal_ids": [
+    {
+      "name": "V_ID_WELL_FORMED_OTHER_VALUE",
+      "id": "fjlmmjamfpkoopjachjhcbdjlddknhok",
+      "expect": "not_our_extension",
+      "note": "首字符 e→f：格式合法（32 位 a-p），值不同 ⇒ 必须是「不是我们的」而非格式错误"
+    },
+    {
+      "name": "V_ID_ALL_A",
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": "not_our_extension"
+    },
+    {
+      "name": "V_ID_TOO_SHORT",
+      "id": "ejlmmjamfpkoopjachjhcbdjlddknho",
+      "expect": "invalid_format"
+    },
+    {
+      "name": "V_ID_TOO_LONG",
+      "id": "ejlmmjamfpkoopjachjhcbdjlddknhokx",
+      "expect": "invalid_format"
+    },
+    {
+      "name": "V_ID_OUT_OF_ALPHABET",
+      "id": "qjlmmjamfpkoopjachjhcbdjlddknhok",
+      "expect": "invalid_format"
+    },
+    {
+      "name": "V_ID_TRAILING_SLASH",
+      "id": "ejlmmjamfpkoopjachjhcbdjlddknhok/",
+      "expect": "invalid_format"
+    }
+  ],
+  "legal_origins": [
+    {
+      "name": "V_ORIGIN_CANONICAL",
+      "origin": "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/"
+    },
+    {
+      "name": "V_ORIGIN_NO_TRAILING_SLASH",
+      "origin": "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok"
+    },
+    {
+      "name": "V_ORIGIN_UPPERCASE",
+      "origin": "chrome-extension://EJLMMJAMFPKOOPJACHJHCBDJLDDKNHOK/"
+    }
+  ],
+  "illegal_origins": [
+    {
+      "name": "V_ORIGIN_OTHER_ID",
+      "origin": "chrome-extension://fjlmmjamfpkoopjachjhcbdjlddknhok/",
+      "expect": "not_our_extension"
+    },
+    {
+      "name": "V_ORIGIN_WILDCARD",
+      "origin": "chrome-extension://*/",
+      "expect": "invalid_format"
+    },
+    {
+      "name": "V_ORIGIN_OTHER_SCHEME",
+      "origin": "https://ejlmmjamfpkoopjachjhcbdjlddknhok/",
+      "expect": "not_extension_origin"
+    },
+    {
+      "name": "V_ORIGIN_WITH_PATH",
+      "origin": "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/x",
+      "expect": "not_extension_origin"
+    },
+    {
+      "name": "V_ORIGIN_EMPTY_HOST",
+      "origin": "chrome-extension://",
+      "expect": "not_extension_origin"
+    },
+    {
+      "name": "V_ORIGIN_WITH_PORT",
+      "origin": "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok:80/",
+      "expect": "invalid_format"
+    }
+  ],
+  "host_manifest": {
+    "name": "lengsuo.credential",
+    "description": "Lengsuo credential vault host",
+    "path": "lengsuo-native-host",
+    "type": "stdio",
+    "allowed_origins": [
+      "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/"
+    ],
+    "rendered": "{\"name\":\"lengsuo.credential\",\"allowed_origins\":[\"chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/\"]}",
+    "rendered_note": "逐字节手写期望值：本卡渲染的完整输出就是这两个字段，name 在前、allowed_origins 在后，无空白、无尾换行"
+  },
+  "frames": {
+    "empty_business_frame_b64": "AAAAAAAAAAA",
+    "list_credentials_envelope": "{\"frame_b64\":\"AAAAAAAAAAA\"}",
+    "save_password_frame_hex": "000000070500000070772d68696e74",
+    "save_password_frame_b64": "AAAABwUAAABwdy1oaW50",
+    "save_password_envelope": "{\"frame_b64\":\"AAAABwUAAABwdy1oaW50\"}",
+    "get_password_frame_hex": "0000000a01000000757365723d616c696365",
+    "get_password_frame_b64": "AAAACgEAAAB1c2VyPWFsaWNl",
+    "get_password_envelope": "{\"frame_b64\":\"AAAACgEAAAB1c2VyPWFsaWNl\"}",
+    "save_password_envelope_hex": "7b226672616d655f623634223a224141414142775541414142776479316f61573530227d",
+    "save_password_envelope_len": 36,
+    "save_password_pipe_frame_hex": "240000007b226672616d655f623634223a224141414142775541414142776479316f61573530227d",
+    "get_password_envelope_len": 40,
+    "get_password_envelope_hex": "7b226672616d655f623634223a22414141414367454141414231633256795057467361574e6c227d",
+    "get_password_pipe_frame_hex": "280000007b226672616d655f623634223a22414141414367454141414231633256795057467361574e6c227d",
+    "list_credentials_envelope_hex": "7b226672616d655f623634223a224141414141414141414141227d",
+    "list_credentials_envelope_len": 27,
+    "list_credentials_pipe_frame_hex": "1b0000007b226672616d655f623634223a224141414141414141414141227d",
+    "list_credentials_frame_hex": "0000000000000000"
+  },
+  "dispatch": {
+    "note": "本卡只搭主循环框架；业务分派目标待 W4/W5 落地。",
+    "expect": "unwired_no_reply"
+  },
+  "limits": {
+    "max_payload_len": 1048576,
+    "over_limit_length_prefix": 1048577,
+    "over_limit_prefix_hex": "01001000"
+  }
+}
