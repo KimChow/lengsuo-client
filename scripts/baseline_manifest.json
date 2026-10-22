@@ -175,9 +175,11 @@
       "forward_e2e",
       "trojan_outbound",
       "vless_reality_loopback",
-      "vless_vision_loopback"
+      "vless_vision_loopback",
+      "forward_relay_protocols",
+      "vless_xel_mux_loopback"
     ],
-    "expected_passed": 45
+    "expected_passed": 70
   },
   {
     "crate": "lengsuo-shadowsocks",
@@ -260,9 +262,10 @@
     "targets": [
       "assembly_roundtrip",
       "udp_failures",
-      "udp_roundtrip"
+      "udp_roundtrip",
+      "bare_handshake"
     ],
-    "expected_passed": 21
+    "expected_passed": 24
   },
   {
     "crate": "lengsuo-vless",
