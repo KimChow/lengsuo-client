@@ -115,6 +115,8 @@ pub async fn handle(
             RelayError::NoRoute(RouteError::Conflict(_)) => RelayOutcome::RouteConflict,
             RelayError::NoRoute(_) => RelayOutcome::NoRoute,
             RelayError::Dial(_) => RelayOutcome::DialFailed,
+            // 结构性不可转发的协议（wireguard）在建会话时显式拒绝。
+            RelayError::Session(SessionError::Unsupported(_)) => RelayOutcome::UnsupportedProtocol,
             RelayError::Session(SessionError::Io(err))
                 if err.kind() == std::io::ErrorKind::Unsupported =>
             {
@@ -186,14 +188,6 @@ async fn forward(
     let observe = idle.min(Duration::from_millis(500));
     let session = match open(node, &target, idle, observe).await {
         Ok(Opened::Relay(session)) => session,
-        Ok(Opened::HandshakeOnly(protocol)) => {
-            // 本卡只对 trojan / shadowsocks 实现转发；其余协议握手成功但**不**转发。
-            let _ = write_reply(&mut local_write, SOCKS5_REP_GENERAL).await;
-            return Err(RelayError::Session(SessionError::Io(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                format!("{protocol} 协议本卡只完成握手，未实现转发"),
-            ))));
-        }
         Err(error) => {
             let _ = write_reply(&mut local_write, SOCKS5_REP_REFUSED).await;
             return Err(RelayError::Session(error));
@@ -312,8 +306,8 @@ async fn relay_both_ways(
     mut session: LiveSession,
     idle: Duration,
 ) -> Result<(), RelayError> {
-    let to_upstream = copy_request(local_read, &mut session.writer, idle);
-    let to_client = copy_response(&mut session.reader, &mut local_write, idle);
+    let to_upstream = copy_request(local_read, session.writer.as_mut(), idle);
+    let to_client = copy_response(session.reader.as_mut(), &mut local_write, idle);
     let (request_result, response_result) = tokio::join!(to_upstream, to_client);
     request_result?;
     response_result?;
@@ -325,7 +319,7 @@ async fn relay_both_ways(
 /// 读不到更多字节 ⇒ 对出站侧**半关闭**（FIN），回程方向继续。
 async fn copy_request(
     mut local_read: tokio::io::ReadHalf<TcpStream>,
-    upstream: &mut OutboundWriter,
+    upstream: &mut dyn OutboundWriter,
     idle: Duration,
 ) -> Result<(), RelayError> {
     let mut buffer = vec![0u8; COPY_BUF];
@@ -347,7 +341,7 @@ async fn copy_request(
 ///
 /// 读不到更多字节 ⇒ 对本地侧**半关闭**（FIN）。
 async fn copy_response(
-    upstream: &mut OutboundReader,
+    upstream: &mut dyn OutboundReader,
     local: &mut tokio::io::WriteHalf<TcpStream>,
     idle: Duration,
 ) -> Result<(), RelayError> {
