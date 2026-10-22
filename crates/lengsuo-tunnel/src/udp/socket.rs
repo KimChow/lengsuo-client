@@ -166,7 +166,41 @@ impl UdpEndpoint {
             })
     }
 
+    /// 收一个**原始数据报**（**不做** L3 帧解码）。
+    ///
+    /// 与 [`UdpEndpoint::send_raw`] 对称：发什么就收什么，**不替调用方**判断
+    /// 「这是不是帧」。裸握手报文（initiation / response / cookie）就在裸
+    /// 数据报里（见 [`crate::udp::datagram`]），由调用方按**首字节**分流。
+    ///
+    /// 返回 `(负载字节数, 来源地址)`：负载在 `buf[..len]` 里。
+    ///
+    /// # Errors
+    /// - 缓冲装不下 ⇒ [`UdpError::BufferTooSmall`]（本地调用级）；
+    /// - socket 级错误 ⇒ [`UdpError::Socket`]（**连接级**，应当上报并结束循环）。
+    pub async fn recv_raw(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr), UdpError> {
+        if buf.len() < MIN_RECV_BUFFER_LEN {
+            // 与 `recv_frame` 同一条本地调用级检查：缓冲太小 ⇒ 数据报会被内核
+            // 截断，截断后的内容必然解不开。裸握手只有 148B，1420 的缓冲足够。
+            return Err(UdpError::BufferTooSmall {
+                needed: MIN_RECV_BUFFER_LEN,
+                available: buf.len(),
+            });
+        }
+        let (len, source) =
+            self.socket
+                .recv_from(buf)
+                .await
+                .map_err(|source| UdpError::Socket {
+                    source: SocketError::new(source),
+                })?;
+        Ok((len, source))
+    }
+
     /// 收一个帧。
+    ///
+    /// ⛔ **只解 L3 帧**：裸握手数据报在这里必然报
+    /// [`UdpError::BadDatagram`]（魔数不符）——握手要走
+    /// [`UdpEndpoint::recv_raw`] + [`crate::udp::datagram::classify`]。
     ///
     /// # Errors
     /// - 缓冲装不下一帧 ⇒ [`UdpError::BufferTooSmall`]（本地调用级）；

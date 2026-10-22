@@ -12,11 +12,22 @@
 //! # 三件事
 //!
 //! 1. **socket 封装**（[`UdpEndpoint`]）：绑定 / 连接一个本地 UDP socket，
-//!    记录对端地址，提供 `send_frame` / `recv_frame`。
+//!    记录对端地址，提供 `send_frame` / `recv_frame` / `send_raw` / `recv_raw`。
 //! 2. **收发循环**（[`spawn_recv_loop`]）：异步收循环，事件走 channel，
 //!    **有明确的结束条件**（取消 / 通道关闭 / socket 级错误）。
 //! 3. **对端地址可更新**（[`UdpEndpoint::set_peer_endpoint`]）：为 endpoint
 //!    漫游留口（协议侧归后续卡）。
+//!
+//! # 裸握手 vs L3 帧（**两种线上格式**）
+//!
+//! | 报文 | 线上格式 | 收路径 |
+//! |---|---|---|
+//! | L2 握手（initiation / response / cookie） | **裸** UDP 数据报（148 / 92 / 64B），⛔ 不套帧头 | [`UdpEndpoint::recv_raw`] + [`classify`] |
+//! | L3 密文帧 | 20B 帧头 + 载荷 | [`UdpEndpoint::recv_frame`] |
+//!
+//! 收循环用 [`UdpEndpoint::recv_raw`] 收**裸数据报**，再按**首字节**分流
+//! （[`datagram::classify`]）⇒ 裸握手以 [`UdpEvent::Handshake`] 交给上层，
+//! L3 帧以 [`UdpEvent::Frame`] 交给上层。
 //!
 //! # 两级错误语义
 //!
@@ -33,13 +44,16 @@
 //! **间隔与开关由上层配**（[`KeepaliveConfig::interval`]）——
 //! 本 crate 里**没有**任何写死的节奏常量。
 
+pub mod datagram;
 pub mod error;
+pub mod keepalive;
 pub mod loop_;
 pub mod socket;
 
+pub use self::datagram::{classify, Datagram, DatagramError, HandshakeKind};
 pub use self::error::{ErrorSeverity, UdpError};
+pub use self::keepalive::{spawn_keepalive, KeepaliveConfig, KeepaliveHandle, KeepaliveOutcome};
 pub use self::loop_::{
-    spawn_keepalive, spawn_recv_loop, Cancel, KeepaliveConfig, KeepaliveHandle, KeepaliveOutcome,
-    LoopHandle, LoopOutcome, UdpEvent, DEFAULT_RECV_QUEUE_CAPACITY,
+    spawn_recv_loop, Cancel, LoopHandle, LoopOutcome, UdpEvent, DEFAULT_RECV_QUEUE_CAPACITY,
 };
 pub use self::socket::{UdpEndpoint, MIN_RECV_BUFFER_LEN};

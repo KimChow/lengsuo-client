@@ -2,9 +2,9 @@
 //!
 //! # 形态
 //!
-//! `async fn` + **channel**：`spawn_recv_loop` 起一个后台任务，把收到的帧
-//! 通过 `mpsc` 交给上层。任务句柄 [`LoopHandle`] 暴露 `stop()`，
-//! 上层可以**确定地**等它退出。
+//! `async fn` + **channel**：`spawn_recv_loop` 起一个后台任务，把收到的
+//! 数据报（裸握手 / L3 帧）通过 `mpsc` 交给上层。任务句柄 [`LoopHandle`]
+//! 暴露 `stop()`，上层可以**确定地**等它退出。
 //!
 //! # 结束条件（**没有一条是「永远挂着」**）
 //!
@@ -26,12 +26,12 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use lengsuo_link_core::frame::{Frame, MAX_FRAME_LEN};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::datagram::{classify, Datagram, HandshakeKind};
 use super::error::{ErrorSeverity, UdpError};
 use super::socket::UdpEndpoint;
 
@@ -45,6 +45,16 @@ pub const DEFAULT_RECV_QUEUE_CAPACITY: usize = 64;
 pub enum UdpEvent {
     /// 收到一个**合法帧**。
     Frame(Frame),
+    /// 收到一个**裸握手报文**（initiation / response / cookie）：
+    /// **未**套 L3 帧头，由首字节判定种类（见 [`super::datagram`]）。
+    Handshake {
+        /// 报文种类。
+        kind: HandshakeKind,
+        /// 裸握手字节（线上原样，148 / 92 / 64 字节）。
+        bytes: Vec<u8>,
+        /// 数据报来源地址。
+        source: SocketAddr,
+    },
     /// 收到一个**解不开的数据报**（**单包级**）：只丢这一包，循环**继续**。
     BadDatagram {
         /// 数据报来源地址。
@@ -57,7 +67,7 @@ pub enum UdpEvent {
 }
 
 impl UdpEvent {
-    /// 事件的严重级别。**合法帧不是错误** ⇒ 返回 `None`。
+    /// 事件的严重级别。**合法帧 / 握手报文不是错误** ⇒ 返回 `None`。
     ///
     /// 让上层**不必匹配变体**就能判两级：
     /// 坏数据报是 [`ErrorSeverity::Packet`]（只丢这一包，循环继续），
@@ -65,8 +75,8 @@ impl UdpEvent {
     #[must_use]
     pub fn severity(&self) -> Option<ErrorSeverity> {
         match self {
-            // 合法帧：不构成错误。
-            Self::Frame(_) => None,
+            // 合法帧 / 裸握手：不构成错误。
+            Self::Frame(_) | Self::Handshake { .. } => None,
             // 单包级：只丢这一包，循环继续。
             Self::BadDatagram { .. } => Some(ErrorSeverity::Packet),
             // 连接级：上报并结束循环。
@@ -252,23 +262,35 @@ async fn run_recv_loop(
             () = tx.closed() => {
                 return LoopOutcome::ChannelClosed;
             }
-            // ③ socket 可读。
-            result = endpoint.recv_frame(&mut buf) => {
+            // ③ socket 可读：收**裸数据报**，再按首字节分流。
+            result = endpoint.recv_raw(&mut buf) => {
                 match result {
-                    Ok(frame) => {
-                        // 帧：交给上层。若上层已走（通道满且已关），结束。
-                        if tx.send(UdpEvent::Frame(frame)).await.is_err() {
-                            return LoopOutcome::ChannelClosed;
-                        }
-                    }
-                    // 单包坏：上报这一包，**循环继续**。
-                    Err(err) if err.severity() == ErrorSeverity::Packet => {
-                        let UdpError::BadDatagram { origin, reason } = err else {
-                            // 不可达：Packet 级只有 BadDatagram 一种。
-                            return LoopOutcome::SocketError(err);
-                        };
-                        if tx.send(UdpEvent::BadDatagram { source: origin, reason }).await.is_err() {
-                            return LoopOutcome::ChannelClosed;
+                    Ok((len, source)) => {
+                        match classify(&buf[..len]) {
+                            // 帧：交给上层。若上层已走（通道满且已关），结束。
+                            Ok(Datagram::Frame(frame)) => {
+                                if tx.send(UdpEvent::Frame(frame)).await.is_err() {
+                                    return LoopOutcome::ChannelClosed;
+                                }
+                            }
+                            // 裸握手：原样交给上层（拷贝出缓冲，缓冲会被复用）。
+                            Ok(Datagram::Handshake { kind }) => {
+                                let event = UdpEvent::Handshake {
+                                    kind,
+                                    bytes: buf[..len].to_vec(),
+                                    source,
+                                };
+                                if tx.send(event).await.is_err() {
+                                    return LoopOutcome::ChannelClosed;
+                                }
+                            }
+                            // 单包坏（未知首字节 / 帧解不开）：上报这一包，**循环继续**。
+                            Err(err) => {
+                                let reason = err.reason();
+                                if tx.send(UdpEvent::BadDatagram { source, reason }).await.is_err() {
+                                    return LoopOutcome::ChannelClosed;
+                                }
+                            }
                         }
                     }
                     // 连接坏：上报并**结束**循环。
@@ -277,102 +299,6 @@ async fn run_recv_loop(
                         let _ = tx.send(UdpEvent::SocketError(err.clone())).await;
                         return LoopOutcome::SocketError(err);
                     }
-                }
-            }
-        }
-    }
-}
-
-/// keepalive 的配置。**间隔由上层给**——本卡不写死任何节奏常量。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KeepaliveConfig {
-    /// 发 keepalive 的间隔。`None` = **关闭** keepalive。
-    pub interval: Option<Duration>,
-}
-
-/// keepalive 任务的结束方式。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KeepaliveOutcome {
-    /// 上层取消。
-    Cancelled,
-    /// 端点出了问题（发送失败）。
-    Failed(UdpError),
-}
-
-/// keepalive 任务句柄。
-#[derive(Debug)]
-pub struct KeepaliveHandle {
-    task: JoinHandle<KeepaliveOutcome>,
-    cancel: Cancel,
-}
-
-impl KeepaliveHandle {
-    /// 主动结束 keepalive 任务并等它退出。
-    ///
-    /// ⚠️ 调用方必须自己加超时（与 [`LoopHandle::stop`] 同理）。
-    pub async fn stop(self) -> KeepaliveOutcome {
-        self.cancel.cancel();
-        match self.task.await {
-            Ok(outcome) => outcome,
-            Err(err) => KeepaliveOutcome::Failed(UdpError::Socket {
-                source: super::error::SocketError::new(std::io::Error::other(format!(
-                    "keepalive 任务异常退出：{err}"
-                ))),
-            }),
-        }
-    }
-}
-
-/// 启动 keepalive 任务：周期性地发**零长载荷**的 keepalive 帧。
-///
-/// ⚠️ **间隔由上层给**（[`KeepaliveConfig::interval`]）——本卡**不写死**任何
-/// 节奏常量（那是隧道装配卡的配置项）。`interval` 为 `None` 时**不启动**，
-/// 返回 `None`。
-///
-/// keepalive 的作用是**穿过 NAT 的空闲回收**：定期让报文流过，
-/// 免得映射表被中间设备悄悄丢掉。
-///
-/// # Errors
-/// 本函数不返回 `Result`：间隔不合法（零）时视为配置错误，直接拒绝启动。
-pub fn spawn_keepalive(
-    endpoint: UdpEndpoint,
-    config: KeepaliveConfig,
-    cancel: Cancel,
-) -> Option<KeepaliveHandle> {
-    let interval = config.interval?;
-    if interval.is_zero() {
-        // 零间隔 = busy loop，绝不允许。
-        return None;
-    }
-    let task = tokio::spawn(run_keepalive(endpoint, interval, cancel.clone()));
-    Some(KeepaliveHandle { task, cancel })
-}
-
-/// keepalive 任务本体。
-async fn run_keepalive(
-    endpoint: UdpEndpoint,
-    interval: Duration,
-    cancel: Cancel,
-) -> KeepaliveOutcome {
-    let mut ticker = tokio::time::interval(interval);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // 第一次 tick 立刻触发；这里**跳过**它，让首个 keepalive 在一个间隔之后发。
-    ticker.tick().await;
-
-    loop {
-        tokio::select! {
-            () = cancel.cancelled() => {
-                return KeepaliveOutcome::Cancelled;
-            }
-            _ = ticker.tick() => {
-                // keepalive = **零长载荷**的帧。
-                let frame = Frame::new(
-                    lengsuo_link_core::frame::FrameType::Keepalive,
-                    0,
-                    Vec::new(),
-                );
-                if let Err(err) = endpoint.send_frame(&frame).await {
-                    return KeepaliveOutcome::Failed(err);
                 }
             }
         }
