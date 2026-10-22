@@ -46,6 +46,75 @@ impl Default for ClientConfig {
     }
 }
 
+/// 客户端的「混淆 + 端口跳跃」参数。
+///
+/// 对照参考：`finalmask.udp[].settings.password`（Salamander 口令）与
+/// `finalmask.quicParams.udpHop`（端口跳跃）。
+///
+/// **为什么不放进 [`ClientConfig`]**：`ClientConfig` 在本仓有 9 处**全字段**
+/// 结构体字面量（含 `crates/lengsuo-node/src/outbound_hysteria.rs`），
+/// 加字段会连带改动本卡边界外的文件。改为独立参数类型 + 独立入口
+/// [`super::HysteriaClient::connect_with_obfs`]，边界内的行为完全一致。
+#[derive(Clone, Default, Debug)]
+pub struct ObfsHopConfig {
+    psk: Option<Vec<u8>>,
+    hop: Option<crate::transport::HopSpec>,
+}
+
+impl ObfsHopConfig {
+    /// 不混淆、不跳跃（与参考「未配置 finalmask」一致）。
+    #[must_use]
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// 只做 Salamander 混淆。
+    ///
+    /// **fail-closed**：口令不足 4 字节（参考 `smPSKMinLen`）时直接报错，
+    /// 不静默忽略、更不退化为明文。
+    pub fn obfs(psk: Vec<u8>) -> Result<Self, crate::obfs::PskTooShort> {
+        Self::new(psk, None)
+    }
+
+    /// 混淆 + 端口跳跃。
+    ///
+    /// **fail-closed**：口令不足 4 字节时直接报错。
+    pub fn new(
+        psk: Vec<u8>,
+        hop: Option<crate::transport::HopSpec>,
+    ) -> Result<Self, crate::obfs::PskTooShort> {
+        if psk.len() < crate::obfs::PSK_MIN_LEN {
+            return Err(crate::obfs::PskTooShort);
+        }
+        Ok(Self {
+            psk: Some(psk),
+            hop,
+        })
+    }
+
+    /// 混淆口令（`None` = 不混淆）。
+    #[must_use]
+    pub fn psk(&self) -> Option<&[u8]> {
+        self.psk.as_deref()
+    }
+
+    /// 追加端口跳跃规格（参考 `finalmask.quicParams.udpHop`）。
+    ///
+    /// 端口区间/间隔非法由 [`crate::transport::HopSpec`] 自己校验
+    /// （间隔 < 5s 拒绝，0/0 取 30s），本方法只做装配。
+    #[must_use]
+    pub fn with_hop(mut self, hop: crate::transport::HopSpec) -> Self {
+        self.hop = Some(hop);
+        self
+    }
+
+    /// 端口跳跃规格（`None` = 不跳跃）。
+    #[must_use]
+    pub fn hop(&self) -> Option<&crate::transport::HopSpec> {
+        self.hop.as_ref()
+    }
+}
+
 /// 建连/会话错误。错误文本不包含认证密码。
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
@@ -63,6 +132,10 @@ pub enum ConnectError {
     EarlyData(#[from] crate::quic::early::EarlyDataError),
     #[error("拥塞控制配置非法: {0}")]
     Congestion(#[from] crate::congestion::CongestionError),
+    #[error("混淆口令非法: {0}")]
+    Obfs(#[from] crate::obfs::PskTooShort),
+    #[error("端口跳跃配置非法: {0}")]
+    Hop(#[from] crate::transport::hop::HopError),
 }
 
 impl ConnectError {

@@ -5,11 +5,16 @@
 //! 的调用，以及 `transport/internet/finalmask/salamander/`、
 //! `transport/internet/hysteria/udphop/` 两个包。
 
+pub mod endpoint;
 pub mod hop;
 pub mod packet;
+pub mod socket;
+pub mod wire;
 
 pub use hop::{HopScheduler, HopSpec, PortList, PortRange};
 pub use packet::HopSocket;
+pub use socket::MaskedUdpSocket;
+pub use wire::WireMask;
 
 /// 传输层的随机源：端口选择与 hop 间隔都从它取（对照参考的
 /// `math/rand.Intn` 与 `crypto.RandBetween`）。

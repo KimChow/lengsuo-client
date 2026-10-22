@@ -24,7 +24,24 @@ pub struct HysteriaServer {
 
 impl HysteriaServer {
     /// 绑定端点（不开始 accept）：`EndpointConfig` + 自签 TLS + ALPN=h3。
+    ///
+    /// 不启用混淆（与参考「未配置 finalmask」一致）。
     pub fn bind(config: ServerConfig) -> Result<Self, ServerError> {
+        Self::bind_inner(config, None)
+    }
+
+    /// 绑定端点并启用 Salamander 混淆（参考 `finalmask.udp[].settings.password`）。
+    ///
+    /// **fail-closed**：口令不足 4 字节 ⇒ 绑定失败，不静默退化为明文；
+    /// 运行期解不开的报文一律丢弃，**绝不**回退明文。
+    pub fn bind_with_obfs(config: ServerConfig, obfs_psk: Vec<u8>) -> Result<Self, ServerError> {
+        if obfs_psk.len() < crate::obfs::PSK_MIN_LEN {
+            return Err(ServerError::Obfs(crate::obfs::PskTooShort));
+        }
+        Self::bind_inner(config, Some(obfs_psk))
+    }
+
+    fn bind_inner(config: ServerConfig, obfs_psk: Option<Vec<u8>>) -> Result<Self, ServerError> {
         // 配置校验先于任何 IO：未识别/非法值 fail-closed，且不受运行时约束。
         // 端点级 `TransportConfig` 保持 quinn 默认 CUBIC：参考在认证后按
         // `min(BrutalUp, clientDown)` 逐连接装配（hub.go 187-205），quinn 0.11
@@ -38,9 +55,40 @@ impl HysteriaServer {
             .map_err(|e| ServerError::Bind(e.to_string()))?;
         let runtime =
             quinn::default_runtime().ok_or_else(|| ServerError::Bind("无可用异步运行时".into()))?;
-        let endpoint =
-            quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime)
-                .map_err(|e| ServerError::Bind(e.to_string()))?;
+        // 混淆（参考 hub.go:379-386：服务端**只**包 udpmask，没有跳跃层）。
+        let endpoint = match obfs_psk {
+            Some(psk) => {
+                // 服务端没有跳跃目标：`remote` 只用于混淆层，不改写回包地址。
+                let mask = std::sync::Arc::new(
+                    crate::transport::wire::WireMask::new(
+                        config.listen_addr,
+                        Some(psk),
+                        None,
+                        std::sync::Arc::new(crate::transport::OsRng),
+                    )
+                    .map_err(|e| match e {
+                        crate::transport::wire::WireError::Psk(e) => ServerError::Obfs(e),
+                        crate::transport::wire::WireError::Hop(e) => {
+                            ServerError::Bind(format!("端口跳跃配置非法: {e}"))
+                        }
+                    })?,
+                );
+                let inner = runtime
+                    .wrap_udp_socket(socket)
+                    .map_err(|e| ServerError::Bind(e.to_string()))?;
+                quinn::Endpoint::new_with_abstract_socket(
+                    quinn::EndpointConfig::default(),
+                    None,
+                    std::sync::Arc::new(crate::transport::socket::MaskedUdpSocket::new(
+                        inner, mask,
+                    )),
+                    runtime,
+                )
+                .map_err(|e| ServerError::Bind(e.to_string()))?
+            }
+            None => quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime)
+                .map_err(|e| ServerError::Bind(e.to_string()))?,
+        };
 
         endpoint.set_server_config(Some(server_config));
         // `tx` = 本端发送速率 = 参考 `BrutalUp`（hub.go:187-205 的协商对象）。
