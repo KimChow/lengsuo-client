@@ -1,46 +1,125 @@
 [
   {
-    "crate": "lengsuo-vless",
+    "crate": "lengsuo-anytls",
     "targets": [
-      "reality_main_link"
+      "server_roundtrip",
+      "client_state",
+      "pool",
+      "primitives",
+      "server_state",
+      "tls_trust",
+      "truncated_frame",
+      "tunnel",
+      "udp_over_tcp"
     ],
-    "expected_passed": 3
+    "expected_passed": 121,
+    "requires_commands": [
+      "openssl"
+    ]
   },
   {
-    "crate": "lengsuo-trojan",
+    "crate": "lengsuo-browser-installer",
     "targets": [
-      "server_roundtrip"
+      "adversarial",
+      "contract"
     ],
-    "expected_passed": 6
+    "expected_passed": 17
   },
   {
-    "crate": "lengsuo-vmess",
+    "crate": "lengsuo-browser-launch",
     "targets": [
-      "server_decode"
+      "environment_isolation",
+      "lifecycle_contract"
     ],
     "expected_passed": 10
   },
   {
-    "crate": "lengsuo-shadowsocks",
+    "crate": "lengsuo-browser-lifecycle",
     "targets": [
-      "relay_e2e"
+      "deadlines",
+      "generation",
+      "lifecycle_guards",
+      "process_identity",
+      "start_ordering"
     ],
-    "expected_passed": 6
+    "expected_passed": 61
   },
   {
-    "crate": "lengsuo-ss2022",
+    "crate": "lengsuo-browser-package",
     "targets": [
-      "eih",
-      "udp_eih"
+      "artifact_integrity",
+      "authenticated_manifest",
+      "extension_digest",
+      "host_compatibility",
+      "manifest_collections",
+      "manifest_diagnostics",
+      "manifest_extension",
+      "manifest_strict",
+      "manifest_validation"
+    ],
+    "expected_passed": 85
+  },
+  {
+    "crate": "lengsuo-browser-profile",
+    "targets": [
+      "canonical",
+      "json_boundary",
+      "pool_catalog",
+      "schema2_golden",
+      "serde_shape",
+      "validate_bounds",
+      "validate_identity"
+    ],
+    "expected_passed": 61
+  },
+  {
+    "crate": "lengsuo-browser-signature",
+    "targets": [
+      "openssl_vector",
+      "signatures"
+    ],
+    "expected_passed": 12
+  },
+  {
+    "crate": "lengsuo-browser-state",
+    "targets": [
+      "adversarial",
+      "contract"
+    ],
+    "expected_passed": 18
+  },
+  {
+    "crate": "lengsuo-congestion",
+    "targets": [
+      "brutal_cc",
+      "brutal_e2e"
     ],
     "expected_passed": 20
   },
   {
-    "crate": "lengsuo-wireguard",
+    "crate": "lengsuo-credential-crypto",
     "targets": [
-      "handshake"
+      "assertion_signature",
+      "byte_layout",
+      "envelope_bytes",
+      "openssl_verify",
+      "recovery_code",
+      "vectors"
     ],
-    "expected_passed": 6
+    "expected_passed": 38,
+    "requires_commands": [
+      "openssl"
+    ]
+  },
+  {
+    "crate": "lengsuo-environment",
+    "targets": [
+      "classify",
+      "dns",
+      "router",
+      "runtime"
+    ],
+    "expected_passed": 26
   },
   {
     "crate": "lengsuo-hysteria",
@@ -48,15 +127,206 @@
       "rust_roundtrip",
       "fragment_reference",
       "udp_reference",
-      "salamander"
+      "salamander",
+      "brutal_wire",
+      "congestion",
+      "connect_udp_request",
+      "connect_udp_response",
+      "fragment_reassembly",
+      "lifecycle",
+      "padding",
+      "tcp_request",
+      "tcp_response",
+      "udp_go_vectors",
+      "varint"
     ],
-    "expected_passed": 34
+    "expected_passed": 158
   },
   {
-    "crate": "lengsuo-anytls",
+    "crate": "lengsuo-ipc",
     "targets": [
-      "server_roundtrip"
+      "contract_surface",
+      "gateway_events",
+      "gateway_handshake",
+      "gateway_roundtrip"
     ],
-    "expected_passed": 8
+    "expected_passed": 27
+  },
+  {
+    "crate": "lengsuo-link-core",
+    "targets": [
+      "frame_roundtrip",
+      "frame_vectors",
+      "negotiate_failclosed",
+      "negotiate_roundtrip",
+      "session_failclosed",
+      "session_roundtrip",
+      "transport_failclosed",
+      "transport_roundtrip",
+      "vectors_main"
+    ],
+    "expected_passed": 114
+  },
+  {
+    "crate": "lengsuo-node",
+    "targets": [
+      "anytls_outbound",
+      "dryrun_loopback",
+      "forward_e2e",
+      "trojan_outbound",
+      "vless_reality_loopback",
+      "vless_vision_loopback"
+    ],
+    "expected_passed": 45
+  },
+  {
+    "crate": "lengsuo-shadowsocks",
+    "targets": [
+      "relay_e2e",
+      "chunk_bounds",
+      "cleanup_matrix",
+      "drain",
+      "replay",
+      "replay_state",
+      "salt_persist_runtime",
+      "tcp",
+      "tcp_errors",
+      "udp"
+    ],
+    "expected_passed": 86
+  },
+  {
+    "crate": "lengsuo-ss2022",
+    "targets": [
+      "eih",
+      "udp_eih",
+      "packet",
+      "receiver",
+      "replay_restart",
+      "timeout_cleanup"
+    ],
+    "expected_passed": 42
+  },
+  {
+    "crate": "lengsuo-tls",
+    "targets": [
+      "tls"
+    ],
+    "expected_passed": 5
+  },
+  {
+    "crate": "lengsuo-trojan",
+    "targets": [
+      "server_roundtrip",
+      "close_drain",
+      "codec",
+      "exception_matrix",
+      "stream",
+      "stream_datagram",
+      "transport_frames",
+      "transport_matrix",
+      "udp_pool",
+      "udp_relay_framing",
+      "udp_relay_roundtrip"
+    ],
+    "expected_passed": 87
+  },
+  {
+    "crate": "lengsuo-tun",
+    "targets": [
+      "checksum",
+      "device_windows",
+      "dns_binding",
+      "dns_environment_isolation",
+      "dns_name_regression",
+      "dns_stress",
+      "dns_upstream",
+      "egress_wiring",
+      "ingress",
+      "mtu_probe",
+      "packet",
+      "route",
+      "runtime_entry",
+      "session",
+      "tcp_active_counterexample",
+      "tcp_active_e2e",
+      "tcp_stack_e2e",
+      "tun_device_probe"
+    ],
+    "expected_passed": 159
+  },
+  {
+    "crate": "lengsuo-tunnel",
+    "targets": [
+      "assembly_roundtrip",
+      "udp_failures",
+      "udp_roundtrip"
+    ],
+    "expected_passed": 21
+  },
+  {
+    "crate": "lengsuo-vless",
+    "targets": [
+      "reality_main_link",
+      "exception_matrix",
+      "mux_wire",
+      "reality_server_hello_key_share",
+      "stream",
+      "tls_stream",
+      "vision_server_roundtrip",
+      "vision_wire",
+      "vless_transport",
+      "xel_golden",
+      "xel_interop",
+      "xel_wire",
+      "xudp"
+    ],
+    "expected_passed": 138
+  },
+  {
+    "crate": "lengsuo-vmess",
+    "targets": [
+      "server_decode",
+      "chacha_vectors",
+      "roundtrip",
+      "security_matrix",
+      "security_matrix_extra",
+      "udp_multi_header",
+      "vectors"
+    ],
+    "expected_passed": 111
+  },
+  {
+    "crate": "lengsuo-wireguard",
+    "targets": [
+      "handshake",
+      "allowedips",
+      "allowedips_edge",
+      "endpoint_roam",
+      "half_close_matrix",
+      "half_close_no_pending",
+      "index_table",
+      "kdf_reference",
+      "keypair",
+      "packet_pad",
+      "padding_reference",
+      "peers",
+      "responder_vectors",
+      "timers",
+      "transport",
+      "wire"
+    ],
+    "expected_passed": 186
+  },
+  {
+    "crate": "ss-core",
+    "targets": [
+      "address_validation",
+      "golden",
+      "replay",
+      "replay_invariants",
+      "replay_model"
+    ],
+    "expected_passed": 31
   }
 ]

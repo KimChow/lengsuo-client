@@ -74,7 +74,10 @@ jobs:
   # 实际 passed 必须等于清单登记值，否则 fail-closed 非 0 退出。
   baseline:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 基线轮从 8 个 crate / 93 项扩到 25 个 crate / 1679 项，
+    # CI 上要从零编译 25 个 crate 的 test target（CARGO_BUILD_JOBS=2，无 sccache），
+    # 30 分钟不够用；给足余量避免因超时而误报门禁失败。
+    timeout-minutes: 90
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'

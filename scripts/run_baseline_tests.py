@@ -5,6 +5,8 @@
 Rust↔Rust 互通用例是普通 `#[test]`，此前从未被任何门禁验证。本脚本按
 `scripts/baseline_manifest.json` 的登记逐 crate 实跑默认套件（不带
 `--ignored`），实际 passed 必须等于 `expected_passed`，否则非 0 退出。
+清单条目可用 `requires_commands` 声明外部命令前置（如 openssl）：缺命令时
+显式报错而非让相关用例软跳过充数。
 
 与 reference 轮的关系：独立清单、独立计数、独立退出码；两脚本串跑即
 「参考方向 + 回环方向」全闸。产物（报告/日志/target）一律写在仓外。
@@ -14,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -24,6 +27,13 @@ ROOT = Path(__file__).resolve().parents[1]
 def check_prerequisites(manifest):
     problems = []
     for case in manifest:
+        # 外部命令前置检查：没有该命令时相关用例会「软跳过」并照样计 passed
+        # （例：lengsuo-anytls 的 tls_trust 在无 openssl 时直接 return），
+        # 等于把「一条都没真跑」固化进门禁。缺命令即显式报错，绝不静默放过。
+        for command in case.get("requires_commands", []):
+            if shutil.which(command) is None:
+                problems.append(
+                    "缺少命令 {}（{} 需要）".format(command, case["crate"]))
         crate_dir = ROOT / "crates" / case["crate"]
         for target in case["targets"]:
             if not (crate_dir / "tests" / (target + ".rs")).is_file():
