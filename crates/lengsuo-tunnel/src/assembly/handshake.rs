@@ -9,6 +9,16 @@
 //! 响应方：consume_initiation ──▶ create_response ──▶ send_raw ──▶ [对端]
 //! ```
 //!
+//! # 线上格式：**裸**握手报文
+//!
+//! 握手报文**就是** UDP 数据报的负载：**不套 L3 帧头**
+//! （见 `docs/spec/01-session-flow.md` §4）。initiation **148B**、
+//! response **92B**、cookie reply **64B**，首字节分别是 `0x01` / `0x02` / `0x03`。
+//!
+//! ⚠️ 这不是「风格问题」而是**跨端契约**：移动端（`lengsuo-link-core`，
+//! 无 IO）只能产出裸报文；PC 端若套了 20B 帧头（168B / 112B），
+//! 两端长度校验就对不上，握手永远建立不起来。
+//!
 //! # COOKIE 路径（**不得**丢包了事）
 //!
 //! 对照 wireguard-go `device/receive.go` 的 `RoutineHandshake`（commit
@@ -29,21 +39,16 @@
 //! 握手成功后由调用方把 [`SessionKeys`] 装进 [`Assembly`]
 //! （见 [`Assembly::install_keys`]）——本模块**只派生**，不落地。
 
-use lengsuo_link_core::frame::{Frame, FrameType};
-use lengsuo_wireguard::handshake::{Handshake, Responder, ResponderKeys, TransportKeys};
+use lengsuo_wireguard::handshake::{
+    Handshake, Responder, ResponderKeys, TransportKeys, COOKIE_REPLY_LEN, INITIATION_LEN,
+    RESPONSE_LEN,
+};
 
 use crate::assembly::config::Role;
 use crate::assembly::error::AssemblyError;
 use crate::assembly::reason::{initiator_reason, responder_reason};
 use crate::assembly::session::{local_index_from, Assembly};
-
-/// 握手报文在 **L3 帧**里的类型。
-///
-/// ⚠️ 握手报文**不**走 `FrameType::Data`：它们不是运输数据消息，
-/// [`lengsuo_wireguard::device::Device::receive`] 只认运输报文
-/// （`wire::parse` 的 type 4）。⇒ 握手走 [`FrameType::Control`]，
-/// 数据走 [`FrameType::Data`]。
-pub const HANDSHAKE_FRAME_TYPE: FrameType = FrameType::Control;
+use crate::udp::HandshakeKind;
 
 /// 派生出的会话密钥（收发两把 + 两侧 index）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,34 +325,58 @@ impl core::fmt::Debug for ResponderHandshake {
     }
 }
 
-/// 握手编解码：把 WireGuard 握手报文装进 / 取出 L3 帧。
+/// 握手编解码：**裸字节**语义。
+///
+/// ⛔ 握手报文**不套** L3 帧头（见 `docs/spec/01-session-flow.md` §4）：
+/// 线上就是 **148B**（initiation）/ **92B**（response）/ **64B**（cookie reply）
+/// 的**裸** UDP 数据报。
+///
+/// ⇒ 发送走 [`crate::udp::UdpEndpoint::send_raw`]（⛔ **不是** `send_frame`），
+/// 接收走 `recv_raw` + [`crate::udp::datagram::classify`]。
+///
+/// ⚠️ 握手报文**没有帧序号**（裸报文里没有），⛔ 不要为了复用
+/// [`lengsuo_link_core::frame::Frame`] 而编一个假 seq。
 pub struct HandshakeCodec;
 
 impl HandshakeCodec {
-    /// 把一段握手报文装进 L3 帧。
-    ///
-    /// `seq` 由调用方给（握手报文没有帧序号语义，用它区分**本轮**）。
+    /// 校验并原样返回待发的裸握手字节。
     ///
     /// # Errors
-    /// 帧编码失败（载荷超上限）⇒ [`AssemblyError::HandshakeRejected`]。
-    pub fn encode(seq: u64, bytes: &[u8]) -> Result<Frame, AssemblyError> {
-        let frame = Frame::new(HANDSHAKE_FRAME_TYPE, seq, bytes.to_vec());
-        frame
-            .encode()
-            .map_err(|_| AssemblyError::HandshakeRejected {
-                reason: "握手报文装帧失败（载荷超上限）",
-            })?;
-        Ok(frame)
+    /// - 长度不是 148 / 92 / 64 ⇒ [`AssemblyError::HandshakeRejected`]；
+    /// - 类型字节与长度不符 ⇒ [`AssemblyError::HandshakeRejected`]。
+    pub fn encode(bytes: &[u8]) -> Result<&[u8], AssemblyError> {
+        Self::check(bytes)?;
+        Ok(bytes)
     }
 
-    /// 从 L3 帧里取出握手报文（**借用**载荷，不复制）。
+    /// 校验并原样返回收到的裸握手字节（**借用**，不复制）。
     ///
     /// # Errors
-    /// 帧类型不是控制帧 ⇒ [`AssemblyError::UnexpectedMessage`]。
-    pub fn decode(frame: &Frame) -> Result<&[u8], AssemblyError> {
-        if frame.frame_type != HANDSHAKE_FRAME_TYPE {
-            return Err(AssemblyError::UnexpectedMessage("握手报文必须装在控制帧里"));
+    /// - 长度不是 148 / 92 / 64 ⇒ [`AssemblyError::HandshakeRejected`]；
+    /// - 类型字节与长度不符 ⇒ [`AssemblyError::HandshakeRejected`]。
+    pub fn decode(bytes: &[u8]) -> Result<&[u8], AssemblyError> {
+        Self::check(bytes)?;
+        Ok(bytes)
+    }
+
+    /// 长度 + 类型字节双校验（fail-closed）。
+    fn check(bytes: &[u8]) -> Result<(), AssemblyError> {
+        let kind = match bytes.len() {
+            INITIATION_LEN => HandshakeKind::Initiation,
+            RESPONSE_LEN => HandshakeKind::Response,
+            COOKIE_REPLY_LEN => HandshakeKind::Cookie,
+            _ => {
+                return Err(AssemblyError::HandshakeRejected {
+                    reason: "握手报文长度非法",
+                });
+            }
+        };
+        // 类型字节（u32 LE 的低字节）必须与长度对得上：148↔1、92↔2、64↔3。
+        if bytes.first() != Some(&kind.first_byte()) {
+            return Err(AssemblyError::HandshakeRejected {
+                reason: "握手报文类型字段与长度不符",
+            });
         }
-        Ok(&frame.payload)
+        Ok(())
     }
 }

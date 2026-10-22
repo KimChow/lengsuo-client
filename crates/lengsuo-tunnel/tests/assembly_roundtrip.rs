@@ -98,7 +98,10 @@ fn buffer() -> Vec<u8> {
 /// 跑完一整轮握手，把两端的会话密钥都落地。
 ///
 /// 这是本文件的核心夹具：**真的走 UDP**（不是自环），所以它同时验证
-/// 「握手报文装帧 → 发 → 收 → 剥壳 → 落地密钥」整条链路。
+/// 「裸握手报文 → 发 → 收 → 剥壳 → 落地密钥」整条链路。
+///
+/// ⚠️ 握手报文**不套 L3 帧头**（契约：initiation 148B / response 92B），
+/// 所以收发都走 `send_raw` / `recv_raw`（见 `docs/spec/01-session-flow.md` §4）。
 ///
 /// 返回两端装配层 + 两端的会话密钥（供断言 index 与密钥的镜像关系）。
 async fn handshake_over_udp() -> (Assembly, Assembly, SessionKeys, SessionKeys) {
@@ -106,24 +109,24 @@ async fn handshake_over_udp() -> (Assembly, Assembly, SessionKeys, SessionKeys) 
     let mut initiator = Assembly::new(initiator_config()).expect("发起方装配层可建");
     let mut responder = Assembly::new(responder_config()).expect("响应方装配层可建");
 
-    // ① 发起方构造 initiation，装进 L3 帧，发出。
+    // ① 发起方构造 initiation，**裸报文**发出。
     let mut initiator_hs = InitiatorHandshake::new(&initiator, SEED).expect("发起方握手上下文可建");
     let initiation = initiator_hs
         .create_initiation(SEED)
         .expect("initiation 可构造");
-    let frame = HandshakeCodec::encode(1, &initiation).expect("initiation 可装帧");
+    let payload = HandshakeCodec::encode(&initiation).expect("initiation 是合法的裸握手");
     a_socket
-        .send_frame(&frame)
+        .send_raw(payload)
         .await
         .expect("initiation 应当发出");
 
-    // ② 响应方收帧 → 剥壳 → 造 response → 落地密钥 → 发出。
+    // ② 响应方收**裸数据报** → 剥壳 → 造 response → 落地密钥 → 发出。
     let mut buf = buffer();
-    let got = tokio::time::timeout(TIMEOUT, b_socket.recv_frame(&mut buf))
+    let (len, _source) = tokio::time::timeout(TIMEOUT, b_socket.recv_raw(&mut buf))
         .await
         .expect("响应方必须在超时内收到 initiation")
-        .expect("initiation 必须是一个合法帧");
-    let payload = HandshakeCodec::decode(&got).expect("initiation 装在控制帧里");
+        .expect("initiation 必须是一个裸数据报");
+    let payload = HandshakeCodec::decode(&buf[..len]).expect("initiation 是合法的裸握手");
     let mut responder_hs = ResponderHandshake::new(&responder).expect("响应方握手上下文可建");
     responder_hs
         .consume_initiation(payload)
@@ -134,19 +137,16 @@ async fn handshake_over_udp() -> (Assembly, Assembly, SessionKeys, SessionKeys) 
     responder
         .install_keys(&responder_keys)
         .expect("响应方密钥应当能落地");
-    let frame = HandshakeCodec::encode(2, &response).expect("response 可装帧");
-    b_socket
-        .send_frame(&frame)
-        .await
-        .expect("response 应当发出");
+    let payload = HandshakeCodec::encode(&response).expect("response 是合法的裸握手");
+    b_socket.send_raw(payload).await.expect("response 应当发出");
 
     // ③ 发起方收 response → 认证 → 落地密钥。
     let mut buf = buffer();
-    let got = tokio::time::timeout(TIMEOUT, a_socket.recv_frame(&mut buf))
+    let (len, _source) = tokio::time::timeout(TIMEOUT, a_socket.recv_raw(&mut buf))
         .await
         .expect("发起方必须在超时内收到 response")
-        .expect("response 必须是一个合法帧");
-    let payload = HandshakeCodec::decode(&got).expect("response 装在控制帧里");
+        .expect("response 必须是一个裸数据报");
+    let payload = HandshakeCodec::decode(&buf[..len]).expect("response 是合法的裸握手");
     let initiator_keys = initiator_hs
         .consume_response(payload)
         .expect("response 必须通过认证");

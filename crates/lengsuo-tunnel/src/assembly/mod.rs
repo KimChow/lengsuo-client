@@ -21,7 +21,13 @@
 //! # 线上格式
 //!
 //! **一个 UDP 数据报 = 一个 L3 帧**；帧的**载荷**是 WireGuard 报文
-//! （握手 initiation/response/cookie，或运输数据消息）。
+//! （运输数据消息）。
+//!
+//! ⚠️ **例外**：**L2 握手报文是裸 UDP 数据报**（initiation **148B** /
+//! response **92B** / cookie reply **64B**），⛔ **不套帧头** ——
+//! 见 `docs/spec/01-session-flow.md` §4「报文长度总表」与 §3.2 的 G1 告警框。
+//! ⇒ 收侧按**首字节**分流（`0x01`/`0x02`/`0x03` ⇒ 握手，`0x4C` ⇒ L3 帧），
+//! 见 [`crate::udp::datagram`]。
 //!
 //! # 四件事
 //!
@@ -50,8 +56,6 @@ pub mod session;
 
 pub use self::config::{AssemblyConfig, Role};
 pub use self::error::AssemblyError;
-pub use self::handshake::{
-    HandshakeCodec, InitiatorHandshake, ResponderHandshake, SessionKeys, HANDSHAKE_FRAME_TYPE,
-};
+pub use self::handshake::{HandshakeCodec, InitiatorHandshake, ResponderHandshake, SessionKeys};
 pub use self::keepalive::{keepalive_frame, KeepaliveDriver};
 pub use self::session::{Assembly, AssemblyEvent};

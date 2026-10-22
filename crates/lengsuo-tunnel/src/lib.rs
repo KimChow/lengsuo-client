@@ -47,6 +47,6 @@ pub use crate::assembly::{
     KeepaliveDriver, ResponderHandshake, Role, SessionKeys,
 };
 pub use crate::udp::{
-    Cancel, ErrorSeverity, KeepaliveConfig, KeepaliveOutcome, LoopOutcome, UdpEndpoint, UdpError,
-    UdpEvent,
+    Cancel, Datagram, DatagramError, ErrorSeverity, HandshakeKind, KeepaliveConfig,
+    KeepaliveOutcome, LoopOutcome, UdpEndpoint, UdpError, UdpEvent,
 };

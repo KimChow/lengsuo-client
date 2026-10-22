@@ -224,6 +224,12 @@ impl Assembly {
     /// 步骤：解帧（fail-closed）→ [`Device::receive`]（AEAD 认证解密）→
     /// 漫游判定 → 更新 endpoint。
     ///
+    /// ⛔ **数据面只收 L3 帧**：裸握手报文（148/92/64B）在这里必然报
+    /// [`AssemblyError::BadDatagram`]——握手由
+    /// [`crate::assembly::handshake::InitiatorHandshake`] /
+    /// [`crate::assembly::handshake::ResponderHandshake`] 消费，⛔ 不要让数据面
+    /// 接受裸握手（那会把未认证的字节送进数据通路）。
+    ///
     /// `src` 是该数据报的**源地址**（漫游判定的输入）。
     ///
     /// # Errors
