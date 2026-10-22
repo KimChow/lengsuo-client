@@ -59,11 +59,7 @@ pub struct AssemblyConfig {
 impl AssemblyConfig {
     /// 构造一份配置（`keepalive` 关闭、无预共享密钥）。
     #[must_use]
-    pub fn new(
-        role: Role,
-        local_static_private: [u8; 32],
-        remote_static_public: [u8; 32],
-    ) -> Self {
+    pub fn new(role: Role, local_static_private: [u8; 32], remote_static_public: [u8; 32]) -> Self {
         Self {
             role,
             local_static_private,

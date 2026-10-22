@@ -75,7 +75,10 @@ impl core::fmt::Display for AssemblyError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::WrongRole { expected, actual } => {
-                write!(formatter, "角色不符：本端是 {actual}，该操作要求 {expected}")
+                write!(
+                    formatter,
+                    "角色不符：本端是 {actual}，该操作要求 {expected}"
+                )
             }
             Self::HandshakeRejected { reason } => {
                 write!(formatter, "握手被拒绝（fail-closed，不回退明文）：{reason}")
@@ -85,9 +88,8 @@ impl core::fmt::Display for AssemblyError {
             Self::SessionNotEstablished => {
                 formatter.write_str("会话尚未建立：拒绝该操作（先完成握手）")
             }
-            Self::NoSendKeypair => formatter.write_str(
-                "没有可用于发送的 keypair（未安装 / 已过期 / 计数器用尽 / 封装失败）",
-            ),
+            Self::NoSendKeypair => formatter
+                .write_str("没有可用于发送的 keypair（未安装 / 已过期 / 计数器用尽 / 封装失败）"),
             Self::BadDatagram(reason) => {
                 write!(formatter, "数据报不是合法的帧（单包级）：{reason}")
             }

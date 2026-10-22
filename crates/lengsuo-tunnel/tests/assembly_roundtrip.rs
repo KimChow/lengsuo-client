@@ -270,10 +270,7 @@ async fn data_round_trip_through_assembly() {
         .seal_frame(FrameType::Data, seq, plain)
         .expect("应当能封装数据帧");
     let bytes = frame.encode().expect("帧应当能编码");
-    a_socket
-        .send_raw(&bytes)
-        .await
-        .expect("数据帧应当发出");
+    a_socket.send_raw(&bytes).await.expect("数据帧应当发出");
 
     // 响应方收字节 → 装配层处理 → 拿到明文。
     let mut buf = buffer();
@@ -311,10 +308,7 @@ async fn data_round_trip_through_assembly() {
         .seal_frame(FrameType::Data, seq + 1, b"reply-payload")
         .expect("响应方应当能封装");
     let bytes = frame.encode().expect("帧应当能编码");
-    b_socket
-        .send_raw(&bytes)
-        .await
-        .expect("回帧应当发出");
+    b_socket.send_raw(&bytes).await.expect("回帧应当发出");
     let mut buf = buffer();
     let got = tokio::time::timeout(TIMEOUT, a_socket.recv_frame(&mut buf))
         .await
@@ -414,10 +408,7 @@ async fn failed_auth_does_not_update_endpoint() {
         matches!(event, AssemblyEvent::Dropped { .. }),
         "篡改后的报文必须被丢弃，实际 {event:?}"
     );
-    assert!(
-        !event.roamed(),
-        "认证失败的报文不得判定为漫游"
-    );
+    assert!(!event.roamed(), "认证失败的报文不得判定为漫游");
     assert_eq!(
         responder.peer_endpoint(),
         Some(known),
@@ -443,10 +434,7 @@ async fn keepalive_starts_only_after_session_ready() {
     // 未 `activate` ⇒ 对端收不到任何东西。
     let mut buf = buffer();
     let quiet = tokio::time::timeout(QUIET, b_socket.recv_frame(&mut buf)).await;
-    assert!(
-        quiet.is_err(),
-        "会话未就绪时不得发出任何 keepalive"
-    );
+    assert!(quiet.is_err(), "会话未就绪时不得发出任何 keepalive");
 
     // 会话**未就绪**时，装配层**拒绝**启动 keepalive。
     let mut assembly = Assembly::new(initiator_config()).expect("发起方装配层可建");
@@ -513,7 +501,11 @@ async fn mac_failure_is_reported_so_caller_can_issue_cookie_reply() {
         .create_cookie_reply(&broken, b"203.0.113.1:51820", [0x44; 32], [0x55; 24])
         .expect("cookie reply 必须能签发");
     assert_eq!(reply.len(), 64, "cookie reply 必须是 64 字节");
-    assert_eq!(&reply[..4], &3u32.to_le_bytes(), "cookie reply 的类型字段必须是 3");
+    assert_eq!(
+        &reply[..4],
+        &3u32.to_le_bytes(),
+        "cookie reply 的类型字段必须是 3"
+    );
 }
 
 // ------------------------------------------------- 附加：角色错配被拒

@@ -259,19 +259,20 @@ impl ResponderHandshake {
         let Some(mut responder) = self.responder.take() else {
             return Err(AssemblyError::HandshakeState("没有在途 initiation"));
         };
-        let mut response = responder
-            .create_response(seed, local_index)
-            .map_err(|_| AssemblyError::HandshakeRejected {
+        let mut response = responder.create_response(seed, local_index).map_err(|_| {
+            AssemblyError::HandshakeRejected {
                 reason: "response 构造失败（状态机失步）",
-            })?;
+            }
+        })?;
         // MAC 由 cookie generator 加在 response 上（对照参考 `AddMacs`）。
         responder.add_macs(&mut response);
         // `begin_symmetric_session` 消费 responder ⇒ 密钥只能在此刻落地。
-        let keys = responder
-            .begin_symmetric_session()
-            .map_err(|_| AssemblyError::HandshakeRejected {
-                reason: "对称会话派生失败（状态机失步）",
-            })?;
+        let keys =
+            responder
+                .begin_symmetric_session()
+                .map_err(|_| AssemblyError::HandshakeRejected {
+                    reason: "对称会话派生失败（状态机失步）",
+                })?;
         Ok((response, SessionKeys::from_responder(&keys)))
     }
 
@@ -345,9 +346,7 @@ impl HandshakeCodec {
     /// 帧类型不是控制帧 ⇒ [`AssemblyError::UnexpectedMessage`]。
     pub fn decode(frame: &Frame) -> Result<&[u8], AssemblyError> {
         if frame.frame_type != HANDSHAKE_FRAME_TYPE {
-            return Err(AssemblyError::UnexpectedMessage(
-                "握手报文必须装在控制帧里",
-            ));
+            return Err(AssemblyError::UnexpectedMessage("握手报文必须装在控制帧里"));
         }
         Ok(&frame.payload)
     }

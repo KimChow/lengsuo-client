@@ -115,11 +115,9 @@ impl Assembly {
             .add(PeerConfig {
                 public_key: config.remote_static_public,
                 preshared_key: config.preshared_key,
-                keepalive: config
-                    .keepalive_interval
-                    .map_or(0, |interval| {
-                        interval.as_secs().min(u64::from(u16::MAX)) as u16
-                    }),
+                keepalive: config.keepalive_interval.map_or(0, |interval| {
+                    interval.as_secs().min(u64::from(u16::MAX)) as u16
+                }),
             })
             .map_err(AssemblyError::Peer)?;
         Ok(Self {
@@ -183,10 +181,7 @@ impl Assembly {
     ///
     /// # Errors
     /// peer 不存在 ⇒ [`AssemblyError::Peer`]（fail-closed，不静默忽略）。
-    pub fn set_peer_endpoint(
-        &mut self,
-        endpoint: Option<SocketAddr>,
-    ) -> Result<(), AssemblyError> {
+    pub fn set_peer_endpoint(&mut self, endpoint: Option<SocketAddr>) -> Result<(), AssemblyError> {
         self.peers
             .set_peer_endpoint(self.peer_id, endpoint)
             .map_err(AssemblyError::Peer)
@@ -216,11 +211,11 @@ impl Assembly {
         let Some(keypair) = keypairs.for_send_mut(now) else {
             return Err(AssemblyError::NoSendKeypair);
         };
-        let payload = keypair.seal(plain).map_err(|error| {
-            AssemblyError::HandshakeRejected {
+        let payload = keypair
+            .seal(plain)
+            .map_err(|error| AssemblyError::HandshakeRejected {
                 reason: seal_reason(error),
-            }
-        })?;
+            })?;
         Ok(Frame::new(frame_type, seq, payload))
     }
 
@@ -269,8 +264,7 @@ impl Assembly {
         }
         let output = self.device.receive(Instant::now(), &frame.payload);
         let current = self.peers.endpoint(self.peer_id);
-        let new_endpoint =
-            lengsuo_wireguard::device::endpoint_after_receive(&output, current, src);
+        let new_endpoint = lengsuo_wireguard::device::endpoint_after_receive(&output, current, src);
         if let Some(endpoint) = new_endpoint {
             self.peers
                 .set_peer_endpoint(self.peer_id, Some(endpoint))
