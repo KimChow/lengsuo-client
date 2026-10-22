@@ -30,10 +30,16 @@ use super::probe::{
     drain_events, next_event, port_has_listener, read_raw_until_end, spawn_target, Flavor,
     TargetEvent,
 };
+use super::proc::{
+    assert_reclaimed, baseline, roundtrip_with_password, runtime_password, serial_guard,
+    start_relay_with_password,
+};
 
 /// C6：一条连接异常结束（客户端 RST）后，另一条**并行**连接仍能正常往返。
 #[test]
 fn abnormal_close_of_one_connection_does_not_affect_others() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -82,6 +88,8 @@ fn abnormal_close_of_one_connection_does_not_affect_others() {
 /// C7：relay 关闭后，在途连接按**实现的真实语义**收尾，且 listener 端口不残留占用。
 #[test]
 fn relay_shutdown_interrupts_inflight_connections_and_frees_the_port() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -130,6 +138,8 @@ fn relay_shutdown_interrupts_inflight_connections_and_frees_the_port() {
 /// 关了 listener，而不是「还在 accept 但不做事」。
 #[test]
 fn relay_shutdown_refuses_new_connections() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -164,6 +174,8 @@ fn relay_shutdown_refuses_new_connections() {
 /// salt** 仍会被判重放（清理不误伤：不是「一刀切清空」）。
 #[test]
 fn abnormal_close_does_not_clear_shared_salt_pool_state() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -211,6 +223,8 @@ fn abnormal_close_does_not_clear_shared_salt_pool_state() {
 /// （会话资源按连接维度一一对应，不多不少）。
 #[test]
 fn all_connections_are_reclaimed_after_concurrent_roundtrips() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -240,6 +254,44 @@ fn all_connections_are_reclaimed_after_concurrent_roundtrips() {
             eofs, 3,
             "三条连接都应被回收（上游各看到一次 EOF），实际事件：{events:?}"
         );
+
+        handle.shutdown().await.expect("中继应干净停止");
+    });
+}
+
+/// C11（**进程级资源回收**）：**多条连接**全部收尾后，fd 数与线程数回落到基线。
+///
+/// 为什么单列一条：A7 / B11 只覆盖**单条**连接的回收。这条证明**资源按连接
+/// 维度**回收——N 条连接收尾后，残留的 fd 数**不随连接条数增长**（不是「每条
+/// 连接漏一个 fd」：那样 4 条连接就会比基线多 4 个 fd，直接被断言抓住）。
+///
+/// 判据：基线（中继已启动、尚无本用例的连接）→ 4 条连接依次完整往返（每条都
+/// 读到干净 EOF ⇒ 会话被回收）→ 再取读数 ⇒ fd 数 ≤ 基线 + 0、线程数 ≤ 基线 + 0。
+#[test]
+fn repeated_connections_reclaim_process_level_file_descriptors_and_threads() {
+    let _guard = serial_guard();
+
+    let runtime = local_set();
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        // 运行时生成的**假口令**（与任何生产凭据无关）。
+        let password = runtime_password();
+        let upstream = spawn_target(Flavor::Echo).await;
+        let target = TargetAddr::V4([127, 0, 0, 1], upstream.addr.port());
+        let (relay, handle) = start_relay_with_password(&password).await;
+
+        // ① 基线：中继已在跑、本用例还没建连接。
+        let base = baseline().await;
+
+        // ② 四条连接依次完整往返（每条都读到干净 EOF ⇒ 会话被回收）。
+        for index in 0..4u8 {
+            let payload = format!("resource-{index}").into_bytes();
+            let reply = roundtrip_with_password(relay, &target, &payload, &password).await;
+            assert_eq!(reply, payload, "第 {index} 条连接的回程应一致");
+        }
+
+        // ③ 全部收尾 ⇒ 资源必须回落到基线（残留不随连接条数增长）。
+        assert_reclaimed(base, "C11 多条连接收尾后").await;
 
         handle.shutdown().await.expect("中继应干净停止");
     });

@@ -8,6 +8,11 @@
 //! - **端口侧**：listener 是否真的关了（`/proc/net/tcp` 的 LISTEN 状态 + 同端口
 //!   重新 bind）。
 //! - **记忆池侧**：salt 记录是否按实现的真实语义留在窗口里。
+//! - **进程级**：打开的 fd 数与线程数是否真的回落（`/proc/self/fd` +
+//!   `/proc/self/task`）——「会话被回收」的**资源侧**证据，而不只是逻辑层的
+//!   「连接结束了」。范式照抄 `crates/lengsuo-wireguard/tests/half_close_matrix/
+//!   fixture.rs:239,252`（只读引用，未改动）；读数窗口（独占锁 + 同构基线 +
+//!   断言）在同目录的 `proc.rs`。
 //!
 //! 全部只读回环与临时路径，不碰生产资源。
 
@@ -318,6 +323,39 @@ pub fn salt_pool_entries(path: &Path) -> Option<usize> {
             return None;
         }
         cursor += salt_len + 8;
+        count += 1;
+    }
+    Some(count)
+}
+
+/// 进程当前打开的文件描述符数量（Linux `/proc/self/fd`）。
+///
+/// 返回 `None` 表示该平台没有可观测点——调用方必须如实报告「无法断言」，
+/// 绝不编造一个假数字。
+///
+/// 范式照抄 `crates/lengsuo-wireguard/tests/half_close_matrix/fixture.rs:239`
+/// （只读引用，未改动）。
+pub fn open_fd_count() -> Option<usize> {
+    let entries = std::fs::read_dir("/proc/self/fd").ok()?;
+    let mut count = 0usize;
+    for entry in entries.flatten() {
+        let _ = entry;
+        count += 1;
+    }
+    Some(count)
+}
+
+/// 进程当前的线程数量（Linux `/proc/self/task`）。
+///
+/// 返回 `None` 表示该平台没有可观测点。
+///
+/// 范式照抄 `crates/lengsuo-wireguard/tests/half_close_matrix/fixture.rs:252`
+/// （只读引用，未改动）。
+pub fn thread_count() -> Option<usize> {
+    let entries = std::fs::read_dir("/proc/self/task").ok()?;
+    let mut count = 0usize;
+    for entry in entries.flatten() {
+        let _ = entry;
         count += 1;
     }
     Some(count)

@@ -37,6 +37,10 @@ use super::common::{
 use super::probe::{
     drain_events, received_bytes, spawn_target, wait_received_delta, Flavor, TargetEvent,
 };
+use super::proc::{
+    assert_reclaimed, baseline, multichunk_roundtrip_with_password, runtime_password, serial_guard,
+    start_relay_with_password,
+};
 
 /// B8：同一个连接里**连发多个 chunk**，随后客户端 RST ⇒ 中继必须把**每一个**
 /// chunk 都转发给上游（不能只转发第一个），且异常结束后会话被回收。
@@ -49,6 +53,8 @@ use super::probe::{
 /// 3. 异常结束后上游**不再**收到任何新字节（会话确实被收掉）。
 #[test]
 fn multi_chunk_request_is_fully_forwarded_before_abnormal_end() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -125,6 +131,8 @@ fn multi_chunk_request_is_fully_forwarded_before_abnormal_end() {
 /// ——这是最危险的形态。size 段被截断时中继连长度都不知道，本来就无从转交。
 #[test]
 fn truncated_second_chunk_never_reaches_upstream() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -209,6 +217,8 @@ fn truncated_second_chunk_never_reaches_upstream() {
 /// responseWriter, ...)` 把上游的字节**逐段**转交。
 #[test]
 fn multi_chunk_roundtrip_delivers_every_response_chunk_then_clean_eof() {
+    let _guard = serial_guard();
+
     let runtime = local_set();
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async {
@@ -255,6 +265,70 @@ fn multi_chunk_roundtrip_delivers_every_response_chunk_then_clean_eof() {
             events.contains(&TargetEvent::PeerEof),
             "请求方向干净结束后中继应对上游写半关闭（上游看到 EOF），实际事件：{events:?}"
         );
+
+        handle.shutdown().await.expect("中继应干净停止");
+    });
+}
+
+/// B12（**进程级资源回收**，多 chunk 路径）：一条连接上**连发多个 chunk** 并
+/// 正常收尾后，进程级的 fd 数与线程数必须**回落到基线**。
+///
+/// 为什么必须单独测多 chunk 路径：`copy_request` 的「**后续 chunk** 转发」分支
+/// 与单 chunk 路径**不是同一条代码路径**（见本文件模块头的说明）。A7 只覆盖了
+/// 单 chunk 的回收；若「后续 chunk」分支在收尾时**漏关**了某一条连接（每条连接
+/// 漏一个 fd），A7 抓不到（它只有一条连接，且走的是另一条分支），B12 能抓到
+/// ——而且是**按 chunk 数**放大：N 个 chunk 的残留会超过基线 + 0。
+///
+/// 判据：
+///
+/// 1. **基线**在「中继已启动、尚无本用例的连接」时取（`/proc/self/fd` 与
+///    `/proc/self/task`）。
+/// 2. 一条连接上**连发 3 个 chunk**（salt 只在第一个 chunk 前上线，nonce 序列
+///    连续）→ 半关闭写端 → 客户端读到**干净 EOF** ⇒ 中继两个方向都结束 ⇒
+///    连接任务被 drop ⇒ socket 随之关闭。
+/// 3. fd 数 ≤ 基线 + 0、线程数 ≤ 基线 + 0（容忍度取 0 的论证见 `proc.rs` 的
+///    [`FD_SLACK`] / [`THREAD_SLACK`]）。
+///
+/// ⚠️ 读数窗口由**独占锁**串行化（见本文件各用例开头的 `serial_guard()`），
+/// 否则并行用例的 fd / 线程会污染读数 ⇒ 假红。
+#[test]
+fn multi_chunk_reclaims_process_level_file_descriptors_and_threads() {
+    let _guard = serial_guard();
+
+    let runtime = local_set();
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&runtime, async {
+        // 运行时生成的**假口令**（与任何生产凭据无关）。
+        let password = runtime_password();
+        let upstream = spawn_target(Flavor::Segmented).await;
+        let target = TargetAddr::V4([127, 0, 0, 1], upstream.addr.port());
+        let (relay, handle) = start_relay_with_password(&password).await;
+
+        // ① 基线：中继已在跑、本用例还没建连接。
+        let base = baseline().await;
+
+        // ② 一条连接上连发 3 个 chunk（长度互不相同 ⇒ 漏一段就能看出来）。
+        let first = b"chunk-a";
+        let second = b"chunk-bb";
+        let third = b"chunk-ccc";
+        let reply = multichunk_roundtrip_with_password(
+            relay,
+            &target,
+            &[first.as_slice(), second.as_slice(), third.as_slice()],
+            &password,
+        )
+        .await;
+        let mut want = Vec::new();
+        want.extend_from_slice(first);
+        want.extend_from_slice(second);
+        want.extend_from_slice(third);
+        assert_eq!(
+            reply, want,
+            "回程必须包含**每一个** chunk 的载荷（多 chunk 路径确实走通了）"
+        );
+
+        // ③ 连接已结束（读到干净 EOF）⇒ 资源必须回落。
+        assert_reclaimed(base, "B12 多 chunk 收尾后").await;
 
         handle.shutdown().await.expect("中继应干净停止");
     });
