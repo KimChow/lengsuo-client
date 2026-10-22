@@ -9,6 +9,7 @@ authors.workspace = true
 tokio = { workspace = true }
 thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
+lengsuo-node = { path = "../lengsuo-node" }
 
 [target."cfg(windows)".dependencies]
 wintun = "0.5.1"
