@@ -1,0 +1,67 @@
+{
+  "note": "TEST FIXTURES ONLY — 合成夹具，不含任何真实凭据、私钥或机器标识。字段名与字节定义见凭据线契约 §5.2.1 与 RFC 4648 §4。",
+  "format": "base64（标准字母表，无 padding 编码、宽容解码）+ 信封 {\"frame_b64\":\"<base64(整条业务帧)>\"}",
+  "base64_legal": [
+    {"name": "B64_RFC_EMPTY", "input": "", "expected": ""},
+    {"name": "B64_RFC_F", "input": "f", "expected": "Zg", "padded": "Zg=="},
+    {"name": "B64_RFC_FO", "input": "fo", "expected": "Zm8", "padded": "Zm8="},
+    {"name": "B64_RFC_FOO", "input": "foo", "expected": "Zm9v", "padded": "Zm9v"},
+    {"name": "B64_RFC_FOOB", "input": "foob", "expected": "Zm9vYg", "padded": "Zm9vYg=="},
+    {"name": "B64_RFC_FOOBA", "input": "fooba", "expected": "Zm9vYmE", "padded": "Zm9vYmE="},
+    {"name": "B64_RFC_FOOBAR", "input": "foobar", "expected": "Zm9vYmFy", "padded": "Zm9vYmFy"},
+    {"name": "B64_ANCHOR_A", "input": "A", "expected": "QQ", "padded": "QQ=="},
+    {"name": "B64_ANCHOR_LEN4_FRAME", "input_hex": "000000040000000000000000", "expected": "AAAABAAAAAAAAAAA"},
+    {"name": "B64_ANCHOR_EMPTY_FRAME", "input_hex": "0000000000000000", "expected": "AAAAAAAAAAA"},
+    {"name": "B64_ANCHOR_CJK_FRAME", "input_hex": "0000000c01000000e587ade68daee6b58be8af95", "expected": "AAAADAEAAADlh63mja7mtYvor5U"},
+    {"name": "B64_ALPHABET_PLUS_SLASH", "input_hex": "deadbeef", "expected": "3q2+7w"},
+    {"name": "B64_ALL_256_BYTES", "input_fill": {"first": 0, "last": 255}, "expected": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w"}
+  ],
+  "base64_illegal": [
+    {"name": "B64_LEN_1_MOD_4", "input": "Z", "error": "invalid_length"},
+    {"name": "B64_LEN_5_MOD_4", "input": "Zm9vY", "error": "invalid_length"},
+    {"name": "B64_INVALID_CHAR_BANG", "input": "Zg!", "error": "invalid_char"},
+    {"name": "B64_INVALID_CHAR_URLSAFE", "input": "3q2-7w", "error": "invalid_char"},
+    {"name": "B64_INVALID_CHAR_NON_ASCII", "input": "Zgé", "error": "invalid_char"},
+    {"name": "B64_PADDING_MIDDLE", "input": "Z=g", "error": "misplaced_padding"},
+    {"name": "B64_PADDING_THREE", "input": "Z===", "error": "misplaced_padding"}
+  ],
+  "envelope_legal": [
+    {"name": "ENV_ANCHOR_A", "json": "{\"frame_b64\":\"QQ\"}", "frame_hex": "41"},
+    {"name": "ENV_ANCHOR_LEN4_FRAME", "json": "{\"frame_b64\":\"AAAABAAAAAAAAAAA\"}", "frame_hex": "000000040000000000000000"},
+    {"name": "ENV_EMPTY_FRAME", "json": "{\"frame_b64\":\"AAAAAAAAAAA\"}", "frame_hex": "0000000000000000"},
+    {"name": "ENV_CJK_PAYLOAD_FRAME", "json": "{\"frame_b64\":\"AAAADAEAAADlh63mja7mtYvor5U\"}", "frame_hex": "0000000c01000000e587ade68daee6b58be8af95"},
+    {"name": "ENV_TYPE_10_FALLBACK_FRAME", "json": "{\"frame_b64\":\"AAAAAAoAAAA\"}", "frame_hex": "000000000a000000"},
+    {"name": "ENV_WHITESPACE_AROUND", "json": " \t{ \"frame_b64\" : \"QQ\" }\n", "frame_hex": "41", "canonical": false},
+    {"name": "ENV_PADDED_VALUE", "json": "{\"frame_b64\":\"Zg==\"}", "frame_hex": "66", "canonical": false},
+    {"name": "ENV_FILL_4096_ZERO_PAYLOAD", "frame_hex_prefix": "0000100000000000", "payload_fill": {"byte": 0, "len": 4096}, "frame_b64_prefix": "AAAQ", "frame_b64_repeat": "A", "frame_b64_len": 5472, "json_len": 5488}
+  ],
+  "envelope_illegal": [
+    {"name": "ENV_MISSING_FIELD", "json": "{}", "error": "missing_field"},
+    {"name": "ENV_UNEXPECTED_FIELD", "json": "{\"frame_b64\":\"QQ\",\"type\":3}", "error": "unexpected_field"},
+    {"name": "ENV_UNEXPECTED_FIELD_FIRST", "json": "{\"type\":3,\"frame_b64\":\"QQ\"}", "error": "unexpected_field"},
+    {"name": "ENV_WRONG_KEY_CASE", "json": "{\"FRAME_B64\":\"QQ\"}", "error": "unexpected_field"},
+    {"name": "ENV_WRONG_KEY_CAMEL", "json": "{\"frameB64\":\"QQ\"}", "error": "unexpected_field"},
+    {"name": "ENV_WRONG_KEY_PAYLOAD", "json": "{\"payload_b64\":\"QQ\"}", "error": "unexpected_field"},
+    {"name": "ENV_KEY_TRAILING_SPACE", "json": "{\"frame_b64 \":\"QQ\"}", "error": "unexpected_field"},
+    {"name": "ENV_VALUE_NOT_STRING", "json": "{\"frame_b64\":5}", "error": "value_not_string"},
+    {"name": "ENV_VALUE_NULL", "json": "{\"frame_b64\":null}", "error": "value_not_string"},
+    {"name": "ENV_ARRAY", "json": "[]", "error": "invalid_json"},
+    {"name": "ENV_ARRAY_WITH_VALUE", "json": "[\"QQ\"]", "error": "invalid_json"},
+    {"name": "ENV_ESCAPE_U0000", "json": "{\"frame_b64\":\"Q\\u0000Q\"}", "error": "invalid_json"},
+    {"name": "ENV_ESCAPE_BACKSLASH", "json": "{\"frame_b64\":\"Q\\\\Q\"}", "error": "invalid_json"},
+    {"name": "ENV_TRAILING_GARBAGE", "json": "{\"frame_b64\":\"QQ\"}x", "error": "invalid_json"},
+    {"name": "ENV_EMPTY_TEXT", "json": "", "error": "invalid_json"},
+    {"name": "ENV_NOT_JSON", "json": "not json", "error": "invalid_json"},
+    {"name": "ENV_UNCLOSED", "json": "{\"frame_b64\":\"QQ", "error": "invalid_json"},
+    {"name": "ENV_DUPLICATE_KEY", "json": "{\"frame_b64\":\"QQ\",\"frame_b64\":\"Qg\"}", "error": "duplicate_key"},
+    {"name": "ENV_INVALID_BASE64_LENGTH", "json": "{\"frame_b64\":\"Z\"}", "error": "invalid_base64"},
+    {"name": "ENV_INVALID_BASE64_CHAR", "json": "{\"frame_b64\":\"Zg!\"}", "error": "invalid_base64"}
+  ],
+  "envelope_limits": {
+    "max_envelope_len": 1048576,
+    "fits_frame_len": 786420,
+    "fits_envelope_len": 1048576,
+    "too_long_frame_len": 786421,
+    "too_long_envelope_len": 1048578
+  }
+}
