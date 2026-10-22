@@ -45,6 +45,7 @@ pub mod server;
 pub mod session;
 pub mod shortid;
 pub mod tls13;
+pub mod udp;
 pub mod x25519;
 
 use thiserror::Error;
