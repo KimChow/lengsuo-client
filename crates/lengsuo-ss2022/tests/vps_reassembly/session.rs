@@ -93,7 +93,12 @@ struct Session {
     now: u64,
     /// 响应方向开场已收到的首批载荷（参考服务端把首批载荷并入响应固定头）。
     first_payload: Vec<u8>,
+    /// 走法标签：失败信息要指明是哪条走法。
+    label: &'static str,
 }
+
+/// 路径 B 改拨提示只打一次（阶梯会连开 6 条会话）。
+static VPS_DIAL_NOTICE: std::sync::Once = std::sync::Once::new();
 
 /// 按指定走法建立 SS2022 会话（只写请求头，**不**读响应）。
 ///
@@ -103,12 +108,24 @@ struct Session {
 async fn open_session(transport: Transport, target: &ss_core::target::TargetAddr) -> Session {
     let key = Key::new(Method::Aes128, &psk_bytes()).expect("口令长度必须匹配套件");
     let stream = match transport {
-        Transport::LocalXray => TcpStream::connect(LOCAL_SS2022_INBOUND)
+        Transport::LocalXray => TcpStream::connect(local_ss2022_inbound())
             .await
             .expect("连接本机 Xray SS2022 入站"),
         Transport::VpsReference => {
             let relay = vps_relay().expect("需要 SS2022_VPS_RELAY 指向 VPS 参考 Xray SS2022 入站");
-            let (host, port) = relay.rsplit_once(':').expect("中继地址必须是 host:port");
+            let dial = vps_relay_dial_target().expect("SS2022_VPS_RELAY 必须是 host:port");
+            if dial != relay {
+                // 公网地址在本 VPS 上不可拨号（云安全组丢弃 25001 的外部连接）。
+                // 改拨不是静默的：把推导结果打出来。
+                VPS_DIAL_NOTICE.call_once(|| {
+                    println!(
+                        "路径 B 传输跳：SS2022_VPS_RELAY={relay} 是公网地址；\
+                         VPS 云安全组丢弃 25001 的外部连接（含 VPS 经公网 IP 回连），\
+                         故改拨 VPS 回环 {dial}"
+                    )
+                });
+            }
+            let (host, port) = dial.rsplit_once(':').expect("拨号目标必须是 host:port");
             let port: u16 = port.parse().expect("中继端口必须是 u16");
             socks5_connect(LOCAL_SOCKS5, host, port)
                 .await
@@ -141,6 +158,7 @@ async fn open_session(transport: Transport, target: &ss_core::target::TargetAddr
         request_salt,
         now,
         first_payload: Vec::new(),
+        label: transport.label(),
     }
 }
 
@@ -177,7 +195,13 @@ impl Session {
                 Some(self.request_salt.as_slice()),
             )
             .await
-            .expect("公网响应头应通过认证");
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{}：响应固定头读取失败：{error:?}\
+                     （Error::Length = 对端在响应固定头就绪前断开，或声明长度不符）",
+                    self.label
+                )
+            });
         self.first_payload = opened.payload;
     }
 }
