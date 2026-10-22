@@ -1,0 +1,17 @@
+[package]
+name = "lengsuo-native-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+# 凭据体系的 Native Messaging **宿主进程传输层**（帧编解码 + 来源解析）。
+# 字节布局的唯一真相是 Chromium 155 自身的实现
+# （`chrome/browser/extensions/api/messaging/`），不是本仓的契约文档。
+#
+# 依赖说明（**零新外部依赖**，全部已在 Cargo.lock 里）：
+#   thiserror —— 帧编解码失败的类型化错误。
+[dependencies]
+thiserror.workspace = true
+[dev-dependencies]
+serde_json.workspace = true
+hex.workspace = true

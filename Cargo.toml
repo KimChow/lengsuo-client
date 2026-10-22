@@ -28,6 +28,7 @@ members = [
 "crates/lengsuo-ipc",
     "crates/lengsuo-credential-crypto",
     "crates/lengsuo-browser-extension",
+    "crates/lengsuo-native-host",
 ]
 
 [workspace.package]

@@ -797,6 +797,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lengsuo-native-host"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "lengsuo-node"
 version = "0.1.0"
 dependencies = [
