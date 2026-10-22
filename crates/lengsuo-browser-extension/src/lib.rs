@@ -5,6 +5,8 @@
 //!
 //! | 模块 | 契约节 | 内容 |
 //! |---|---|---|
+//! | [`base64`] | RFC 4648 | 标准 base64（无 padding 编码、宽容解码） |
+//! | [`envelope`] | §5.2.1 | JSON 信封 `{"frame_b64":"…"}` ⇄ 业务帧字节 |
 //! | [`frame`] | §5.2 | 消息帧编解码（`len` / `type` / `reserved` / `payload`） |
 //! | [`message`] | §5.3 | 消息类型表（11 种）+ `type = 10` 回退语义 |
 //! | [`error`] | §5.2 | 类型化错误（每类失败一个具名变体） |
@@ -30,10 +32,14 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod base64;
+pub mod envelope;
 pub mod error;
 pub mod frame;
 pub mod message;
 
+pub use base64::{decode as base64_decode, encode as base64_encode, Base64Error};
+pub use envelope::{decode_frame_b64, encode_frame_b64, EnvelopeError, MAX_ENVELOPE_LEN};
 pub use error::FrameError;
 pub use frame::{decode, decode_exact, Frame, FRAME_HEADER_LEN, MAX_PAYLOAD_LEN, RESERVED_LEN};
 pub use message::{MessageType, HOST_NAME, NATIVE_RESPONSE_FALLBACK_TYPE};
