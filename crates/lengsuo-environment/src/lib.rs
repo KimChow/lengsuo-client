@@ -16,12 +16,17 @@
 #![forbid(unsafe_code)]
 
 pub mod classify;
+pub mod credential;
 pub mod flow;
 mod router;
 pub mod runtime;
 pub mod session;
 
 pub use classify::{Classifier, Decision, DenyReason};
+pub use credential::{
+    inject_credentials, CredRefId, CredentialSink, InjectError, InjectReport, InvalidRefReason,
+    Plaintext, SecretUnlock, SinkError, UnlockError, MAX_REFS, MAX_REF_ID_LEN,
+};
 pub use flow::{
     traffic_kind, Attribution, Direction, FlowKey, FlowProtocol, Timestamp, TrafficKind, DNS_PORT,
 };
