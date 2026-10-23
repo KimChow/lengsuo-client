@@ -12,3 +12,6 @@ lengsuo-shadowsocks = { path = "../lengsuo-shadowsocks" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+lengsuo-browser-launch = { path = "../lengsuo-browser-launch" }
