@@ -7,7 +7,7 @@ use crate::packet::PacketInfo;
 use crate::session::{Clock, SessionKey, SessionTable};
 use crate::tcp::connector::RouteTable;
 
-use super::authority::{Attribution, AuthorityError, BindingAuthority, BindingId, Lease};
+use super::authority::{Attribution, AuthorityError, BindingAuthority, BindingId, DeviceId, Lease};
 use super::runtime::{OutboundProtocol, OutboundRuntime, OutboundSession, RuntimeError};
 
 /// 已选中的出口句柄：协议出口 + 出接口 + 命中的绑定。
@@ -132,10 +132,14 @@ pub struct EgressError {
 }
 
 /// 会话表里保存的出口条目：句柄 + 建连时的租约（供后续复用时校验）。
+///
+/// `device` 单独记录而不再从 `handle.binding` 反推：设备失效时要在**不解析
+/// 绑定**的前提下扫表，字段直接可比。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SessionEntry {
     handle: EgressHandle,
     lease: Lease,
+    device: DeviceId,
 }
 
 /// 出口选择层：把「已归因的包」映射到「一条具体的协议出口」。
@@ -275,7 +279,11 @@ where
             source,
             session,
         };
-        let entry = SessionEntry { handle, lease };
+        let entry = SessionEntry {
+            handle,
+            lease,
+            device: lease.device,
+        };
         match self.sessions.open(key, entry, now) {
             Ok(_) => EgressDecision::Selected {
                 handle,
@@ -299,6 +307,22 @@ where
         let entry = self.sessions.close(key)?;
         self.runtime.release(entry.handle.session);
         Some(entry.handle)
+    }
+
+    /// 设备断开：立即移出该设备的全部会话并逐条释放出口，返回释放数量。
+    ///
+    /// 语义与 [`DenyReason::DeviceOffline`] 一致，全部 fail-closed：
+    /// - **不等 TTL**：在途会话此刻就失效，不靠过期兜底；
+    /// - **不静默换出口**：不重拨、不改协议；
+    /// - **不直连**：新包由 `select` 依权威状态拒绝，由上层自行重连。
+    ///
+    /// 设备名下没有会话时返回 0，不 panic。
+    pub fn invalidate_device(&mut self, device: DeviceId) -> usize {
+        let drained = self.sessions.drain_where(|_, entry| entry.device == device);
+        for (_, entry) in &drained {
+            self.runtime.release(entry.handle.session);
+        }
+        drained.len()
     }
 
     /// 回收已过期会话并释放其出口，返回释放数量。
