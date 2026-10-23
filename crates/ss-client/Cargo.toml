@@ -8,6 +8,7 @@ description = "Shadowsocks client side: local SOCKS5 inbound, encrypted tunnel t
 
 [dependencies]
 ss-core = { path = "../ss-core" }
+lengsuo-shadowsocks = { path = "../lengsuo-shadowsocks" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
