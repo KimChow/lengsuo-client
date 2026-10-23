@@ -11,3 +11,6 @@ thiserror = { workspace = true }
 ss-core = { path = "../ss-core" }
 lengsuo-tun = { path = "../lengsuo-tun" }
 getrandom = "0.2"
+# 凭据灌注管线：明文必须「即用即弃」⇒ 只存在于 Drop 时清零的容器里。
+# 版本与 lengsuo-credential-crypto 一致（同在 Cargo.lock，零新增包）。
+zeroize = "1.9.1"
