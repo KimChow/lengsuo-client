@@ -137,7 +137,7 @@ async fn connect(node: &NodeConfig, wait: Duration) -> Result<HysteriaClient, Di
     };
     if tls.insecure {
         return Err(DialError::InvalidTls(
-            "tls.insecure 尚未实现；自签场景请用 tls.ca_pem 固定信任锚".to_owned(),
+            "tls.insecure 对 hysteria 尚未接通：lengsuo-hysteria 的 ClientConfig 无跳过校验开关（需跨 crate 改动，见本卡报告）；自签场景请用 tls.ca_pem 固定信任锚".to_owned(),
         ));
     }
     let pem = tls.ca_pem.as_deref().unwrap_or_default();

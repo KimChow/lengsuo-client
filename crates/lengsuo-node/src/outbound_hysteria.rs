@@ -13,7 +13,9 @@
 //!    说明服务端**已为本次请求建立目标连接**（认证与路由都已通过）。
 //!
 //! 证书校验收口：`ClientConfig.roots_der` 由配置的 `tls.ca_pem` 提供，
-//! 始终启用完整校验链（参考实现同样默认校验，`insecure` 本卡不接受）。
+//! 始终启用完整校验链。`tls.insecure` 需要协议 crate 暴露「自定义验证器」，
+//! 而本仓 `lengsuo-hysteria` 的 `ClientConfig` 当前没有该开关（跨 crate 改动，
+//! 见本卡报告）⇒ 此处继续 **fail-closed**，不静默直连、不回落明文。
 //!
 //! 偏离：拥塞控制用 quinn 默认（不移植 Brutal/BBR），`Hysteria-CC-RX` 仍按
 //! 参考发送——与 `lengsuo-hysteria` 的互通结论一致（见其 docs 偏离清单）。
@@ -49,7 +51,7 @@ pub async fn dial_hysteria(
     };
     if tls.insecure {
         return Err(DialError::InvalidTls(
-            "tls.insecure 尚未实现；自签场景请用 tls.ca_pem 固定信任锚".to_owned(),
+            "tls.insecure 对 hysteria 尚未接通：lengsuo-hysteria 的 ClientConfig 无跳过校验开关（需跨 crate 改动，见本卡报告）；自签场景请用 tls.ca_pem 固定信任锚".to_owned(),
         ));
     }
     let pem = tls.ca_pem.as_deref().unwrap_or_default();
