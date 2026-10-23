@@ -27,6 +27,7 @@ pub mod device;
 pub mod dns;
 pub mod egress;
 pub mod ingress;
+pub mod lifecycle;
 pub mod mtu;
 pub mod packet;
 pub mod route;
