@@ -266,6 +266,27 @@ impl<V> SessionTable<V> {
         self.entries.remove(&key).map(|entry| entry.value)
     }
 
+    /// 按谓词移出会话并返回「键 + 值」（顺序不保证），与是否过期无关。
+    ///
+    /// 谓词只看到键与值，看不到过期刻度：本模块不做任何外部状态判定，
+    /// 「设备断开」等失效原因由调用方用自己的谓词表达。空表或没有命中时返回空
+    /// `Vec`，不 panic。
+    pub fn drain_where(&mut self, pred: impl Fn(&SessionKey, &V) -> bool) -> Vec<(SessionKey, V)> {
+        let keys: Vec<SessionKey> = self
+            .entries
+            .iter()
+            .filter(|(key, entry)| pred(key, &entry.value))
+            .map(|(key, _)| *key)
+            .collect();
+        let mut drained = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(entry) = self.entries.remove(&key) {
+                drained.push((key, entry.value));
+            }
+        }
+        drained
+    }
+
     /// 回收所有过期条目，返回被回收的值（顺序不保证）。
     pub fn gc(&mut self, now: Clock) -> Vec<V> {
         let expired: Vec<SessionKey> = self
