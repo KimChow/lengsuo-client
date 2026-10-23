@@ -223,3 +223,36 @@ async fn ss2022_is_not_silently_treated_as_shadowsocks() {
         "got {err:?}"
     );
 }
+
+/// 6. `OutboundConfig` 的 Debug 脱敏对八协议 scheme 都成立：凭据（口令 /
+///    UUID / PSK / WireGuard 密钥对）不进输出，主机端口保留。
+#[test]
+fn debug_redacts_credentials_for_every_scheme() {
+    for protocol in Protocol::ALL {
+        let url = url_for(protocol, "203.0.113.7:8388");
+        let dump = format!("{:?}", config_for(&url));
+        // 每个协议各自的那份凭据取值绝不能出现在 Debug 输出里。
+        let secret = match protocol {
+            Protocol::Shadowsocks | Protocol::Trojan | Protocol::Hysteria | Protocol::AnyTls => {
+                PASSWORD
+            }
+            Protocol::Ss2022 => PSK,
+            Protocol::Vless | Protocol::Vmess => UUID,
+            Protocol::WireGuard => WG_PRIVATE,
+        };
+        assert!(
+            !dump.contains(secret),
+            "{}: Debug 泄漏了凭据: {dump}",
+            protocol.as_str()
+        );
+        // wireguard 的公钥同样在 userinfo 里，一并打码。
+        if protocol == Protocol::WireGuard {
+            assert!(!dump.contains(WG_PUBLIC), "Debug 泄漏了公钥: {dump}");
+        }
+        assert!(
+            dump.contains("203.0.113.7:8388"),
+            "{}: Debug 应保留主机端口（非凭据）: {dump}",
+            protocol.as_str()
+        );
+    }
+}
