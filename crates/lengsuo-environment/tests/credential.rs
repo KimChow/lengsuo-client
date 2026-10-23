@@ -15,8 +15,8 @@
 //! ——本卡不允许，且**不得用 `#[allow]` 掩盖**。
 
 use lengsuo_environment::credential::{
-    inject_credentials, CredRefId, CredentialSink, InjectError, InjectReport, InvalidRefReason,
-    Plaintext, SecretUnlock, SinkError, UnlockError, MAX_REFS, MAX_REF_ID_LEN,
+    inject_credentials, CredRefId, CredentialSink, InjectError, InvalidRefReason, Plaintext,
+    SecretUnlock, SinkError, UnlockError, MAX_REFS, MAX_REF_ID_LEN,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -240,9 +240,13 @@ async fn control_byte_ref_id_is_rejected_before_any_unlock() {
 
 #[tokio::test]
 async fn whitespace_ref_id_is_rejected_before_any_unlock() {
+    // 只含空白、非控制的字符 ⇒ Whitespace
     expect_invalid_ref("ref 0", InvalidRefReason::Whitespace).await;
-    expect_invalid_ref("ref\t0", InvalidRefReason::Whitespace).await;
     expect_invalid_ref("ref\u{a0}0", InvalidRefReason::Whitespace).await;
+    // `\t`/`\n`/`\r` 同时是 ASCII 控制字符与空白；控制字符判定优先（更早拒绝）
+    expect_invalid_ref("ref\t0", InvalidRefReason::ControlByte).await;
+    expect_invalid_ref("ref\n0", InvalidRefReason::ControlByte).await;
+    expect_invalid_ref("ref\r0", InvalidRefReason::ControlByte).await;
 }
 
 // ── 用例 3：重复引用 ────────────────────────────────────────────────────────
@@ -424,7 +428,7 @@ async fn empty_input_succeeds_without_any_unlock() {
 
     assert!(report.is_empty());
     assert_eq!(report.len(), 0);
-    assert_eq!(report.refs(), <[CredRefId]>::default());
+    assert!(report.refs().is_empty(), "空入参的报告不得含任何引用");
     assert_eq!(unlock.call_count(), 0);
     assert_eq!(sink.accepted.len(), 0);
 }
