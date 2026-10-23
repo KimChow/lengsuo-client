@@ -3,13 +3,19 @@
 //! 本模块只做**协议面**：完成 SOCKS5 握手并解析出目标地址，把已握手的
 //! 客户端连接交给上层拼接数据面。**不在此处拨号**（拨号见 [`crate::outbound`]）。
 //!
-//! 实现范围是 RFC 1928 的 CONNECT 子集 + RFC 1929 用户名/口令子协商：
+//! 实现范围是 RFC 1928 的 CONNECT 子集 + UDP ASSOCIATE 本地中继面，
+//! 以及 RFC 1929 用户名/口令子协商：
 //! - greeting：方法协商（VER/NMETHODS/METHODS）
 //! - auth：用户名/口令子协商
-//! - request：CONNECT 请求与应答
+//! - request：CONNECT / UDP ASSOCIATE 请求与应答
 //!
-//! UDP ASSOCIATE / BIND 一律回 `05 07` 后断开，绝不静默接受。
+//! UDP ASSOCIATE 只做客户端 ↔ 本进程的回环数据报封装/解封装，
+//! 不做「UDP 过隧道」（见 [`UdpAssociation`]）。BIND 一律回 `05 07` 后断开。
 //! ⛔ 仅允许绑定回环地址：非回环绑定必须 fail-closed 拒绝。
+
+mod udp;
+
+pub use udp::UdpAssociation;
 
 use std::net::SocketAddr;
 
@@ -129,6 +135,23 @@ impl Socks5Listener {
             Err(_elapsed) => Err(InboundError::HandshakeTimeout),
         }
     }
+
+    /// 接受一个 UDP ASSOCIATE 连接：完成握手后绑定回环 UDP socket，
+    /// 把其实际地址作为 BND 回给客户端。
+    ///
+    /// 按 RFC 1928，返回的关联持有 TCP 控制连接；控制连接关闭即关联结束。
+    pub async fn accept_udp(&self) -> Result<UdpAssociation, InboundError> {
+        let (stream, _peer) = self.listener.accept().await?;
+        match timeout(
+            HANDSHAKE_TIMEOUT,
+            udp::handshake_udp(stream, self.auth.as_ref()),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_elapsed) => Err(InboundError::HandshakeTimeout),
+        }
+    }
 }
 
 /// 带缓冲的连接读取器：允许一次读入多于当前阶段所需的字节，
@@ -175,9 +198,42 @@ async fn send_reply(stream: &mut TcpStream, code: u8) -> Result<(), InboundError
     Ok(())
 }
 
+/// 发一个成功应答，BND 用实际绑定的 UDP 地址（UDP ASSOCIATE 用）。
+async fn send_reply_bnd(stream: &mut TcpStream, bnd: SocketAddr) -> Result<(), InboundError> {
+    let mut reply = vec![SOCKS_VERSION, 0x00, 0x00];
+    match bnd {
+        SocketAddr::V4(a) => TargetAddr::V4(a.ip().octets(), a.port()).encode_into(&mut reply),
+        SocketAddr::V6(a) => TargetAddr::V6(a.ip().octets(), a.port()).encode_into(&mut reply),
+    }
+    stream.write_all(&reply).await?;
+    Ok(())
+}
+
 async fn handshake(stream: TcpStream, auth: Option<&Auth>) -> Result<Accepted, InboundError> {
     let mut conn = Buffered::new(stream);
 
+    handshake_greeting(&mut conn, auth).await?;
+
+    let (cmd, atyp) = read_request_header(&mut conn).await?;
+    if cmd != CMD_CONNECT {
+        send_reply(&mut conn.stream, 0x07).await?;
+        return Err(InboundError::UnsupportedCommand(cmd));
+    }
+    let target = read_target(&mut conn, atyp).await?;
+
+    // BND.ADDR/BND.PORT 用 0.0.0.0:0 表示「绑定位由上层决定」。
+    send_reply(&mut conn.stream, 0x00).await?;
+
+    let Buffered { stream, buf } = conn;
+    Ok(Accepted {
+        target,
+        client: stream,
+        residual: buf,
+    })
+}
+
+/// greeting + 可选用户名/口令子协商（CONNECT 与 UDP ASSOCIATE 共用）。
+async fn handshake_greeting(conn: &mut Buffered, auth: Option<&Auth>) -> Result<(), InboundError> {
     // greeting: VER | NMETHODS | METHODS
     conn.fill(2).await?;
     let head = conn.take(2);
@@ -209,10 +265,13 @@ async fn handshake(stream: TcpStream, auth: Option<&Auth>) -> Result<Accepted, I
     conn.stream.write_all(&[SOCKS_VERSION, required]).await?;
 
     if let Some(auth) = auth {
-        authenticate(&mut conn, auth).await?;
+        authenticate(conn, auth).await?;
     }
+    Ok(())
+}
 
-    // request: VER | RSV | CMD | ATYP | ADDR | PORT
+/// 读取 request 头部（VER/RSV/CMD/ATYP），校验 VER/RSV，返回 `(cmd, atyp)`。
+async fn read_request_header(conn: &mut Buffered) -> Result<(u8, u8), InboundError> {
     conn.fill(4).await?;
     let req = conn.take(4);
     let (ver, rsv, cmd, atyp) = (req[0], req[1], req[2], req[3]);
@@ -220,11 +279,11 @@ async fn handshake(stream: TcpStream, auth: Option<&Auth>) -> Result<Accepted, I
         send_reply(&mut conn.stream, 0x01).await?;
         return Err(InboundError::Protocol("malformed request header"));
     }
-    if cmd != CMD_CONNECT {
-        send_reply(&mut conn.stream, 0x07).await?;
-        return Err(InboundError::UnsupportedCommand(cmd));
-    }
+    Ok((cmd, atyp))
+}
 
+/// 按 ATYP 读取目标地址。
+async fn read_target(conn: &mut Buffered, atyp: u8) -> Result<TargetAddr, InboundError> {
     let target = match atyp {
         ATYP_IPV4 => {
             conn.fill(4 + 2).await?;
@@ -265,16 +324,7 @@ async fn handshake(stream: TcpStream, auth: Option<&Auth>) -> Result<Accepted, I
             return Err(InboundError::UnsupportedAddressType(other));
         }
     };
-
-    // BND.ADDR/BND.PORT 用 0.0.0.0:0 表示「绑定位由上层决定」。
-    send_reply(&mut conn.stream, 0x00).await?;
-
-    let Buffered { stream, buf } = conn;
-    Ok(Accepted {
-        target,
-        client: stream,
-        residual: buf,
-    })
+    Ok(target)
 }
 
 async fn authenticate(conn: &mut Buffered, auth: &Auth) -> Result<(), InboundError> {
