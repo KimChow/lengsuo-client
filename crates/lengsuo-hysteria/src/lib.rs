@@ -23,9 +23,9 @@
 //! `quic.Config` 未设 `Allow0RTT`，其下发票据的早数据上限为 0，rustls 因此
 //! 无法产生早数据（详见 `docs/hysteria-status.md`）。
 //!
-//! 尚未实现（不宣称）：**拥塞器内核替换**（Brutal/BBR 算法本身未移植，
-//! 实际仍为 quinn 默认 CUBIC；`congestion` 模块只做参数/协商面）、
-//! 服务端接受 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
+//! 拥塞器：Brutal 内核已在 `lengsuo-congestion` 实现并经 quinn `ControllerFactory`
+//! 注入（`congestion/wire.rs:149`）；BBR 未移植；未配置 up/down 时仍用 quinn 默认 CUBIC。
+//! 尚未实现（不宣称）：服务端接受 0-RTT、连接迁移、masquerade 自定义（file/proxy/string）。
 //! 状态、验收命令与偏离清单见 `docs/hysteria-status.md`。
 
 pub mod congestion;

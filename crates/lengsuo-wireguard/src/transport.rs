@@ -234,7 +234,11 @@ impl Sender {
         self.seal(&[])
     }
 
-    /// 主动进入失败态（密钥轮换策略尚未实现，这里只提供显式的 fail-closed 入口）。
+    /// 主动进入失败态（立即放弃当前发送 keypair，供上层错误处理使用）。
+    ///
+    /// 定时/计数轮换判据不在这里：见 `keypair::Keypair::status`
+    /// （`RekeyAdvised` / `Expired`）与
+    /// `timers::Timers::keypair_send_needs_rekey`。
     pub fn poison(&mut self) {
         if self.state == SenderState::Active {
             self.state = SenderState::Failed;
