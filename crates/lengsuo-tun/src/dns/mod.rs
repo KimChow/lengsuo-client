@@ -23,9 +23,11 @@ mod header;
 mod name;
 mod parse;
 
+pub mod dispatch;
 pub mod rewrite;
 pub mod upstream;
 
+pub use dispatch::{DispatchError, DnsDispatcher};
 pub use header::{Header, Labels, Question, QuestionName};
 pub use parse::{parse, parse_query, parse_response, Error, Message};
 
