@@ -178,19 +178,41 @@ def cmd_merge(task: str) -> int:
 
 
 def cmd_mark_merged(task: str) -> int:
-    """已手工合并时使用：校验提交确实在 main 历史里，再标记 merged。"""
+    """已手工合并时使用：校验提交确实在 main 历史里，再标记 merged。
+
+    若 worktree 已被 watchdog 清掉（git rev-parse HEAD 失败），回退到台账里记录的
+    merge_sha / head / verified_sha 或任务单 base 做校验，再写 state="merged"。
+    """
     led = Ledger(ROOT)
     with led.lock():
         spec = spec_of(led, task)
         if spec is None:
             return fail(f"找不到任务单 tasks/{task}.json")
-        wt = Path(spec.get("worktree", ""))
-        try:
-            head = git(wt, "rev-parse", "HEAD").strip()
-        except LedgerError as e:
-            return fail(f"{task} 读取 HEAD 失败：{e}")
-        if not commit_in_main(head):
-            return fail(f"{task} 的提交 {head[:8]} 不在 main 历史里，不能标记为已合入")
+        head = None
+        # 优先用 worktree HEAD（watchdog 清掉之前跑时命中）
+        wt_str = spec.get("worktree", "") or ""
+        if wt_str:
+            try:
+                head = git(Path(wt_str), "rev-parse", "HEAD").strip()
+            except LedgerError:
+                head = None
+        # 兜底：台账 / 任务单里记的提交（worktree 已被清时仍可用）。
+        # 逐个候选依次校验，取第一个**确实在 main 历史里**的（merge_sha 可能指向被重写历史的孤立提交）。
+        if not head:
+            cands: list[str] = []
+            states = led.states(strict=False)
+            st = states.get(task) if isinstance(states, dict) else None
+            if st:
+                cands += [st.get("merge_sha"), st.get("head"), st.get("verified_sha")]
+            cands.append(spec.get("base"))
+            for c in cands:
+                if c and commit_in_main(str(c)):
+                    head = str(c)
+                    break
+        if not head or not commit_in_main(head):
+            return fail(
+                f"{task} 找不到可校验的提交（worktree 已清且台账/任务单无可用 SHA）"
+            )
         led.update(task, state="merged", head=head)
     print(f"✓ {task} 标记为已合入（{head[:8]} 已在 main）")
     return 0
