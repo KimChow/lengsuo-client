@@ -8,7 +8,7 @@ use super::{
     AuthConfig, Endpoint, NodeEncryptionSettings, NodeMuxSettings, NodeRealitySettings,
     NodeVisionSettings, NodeXelSettings, Protocol, TlsConfig,
 };
-use crate::forward::ForwardConfig;
+use crate::forward_config::ForwardConfig;
 
 /// 单个出口节点配置。
 #[derive(Clone, Serialize, Deserialize)]
@@ -73,7 +73,7 @@ pub struct NodeConfig {
     ///
     /// **缺省即无转发服务**：dry-run 行为与旧版完全一致（既有测试不退化）。
     /// 多个节点给出**不一致**的转发段 ⇒ 配置加载阶段显式报错（转发段全局唯一）。
-    /// 形态详见 `crate::forward::config` 的模块注释。
+    /// 形态详见 `crate::forward_config` 的模块注释。
     #[serde(default)]
     pub forward: Option<ForwardConfig>,
 }

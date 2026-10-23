@@ -49,18 +49,17 @@ use crate::outbound::{connect_tls, probe_target, resolve_public, DialError, Node
 
 /// VLESS Vision 的出站接线（流量层 / 记录层 → 承载）。
 ///
-/// 目录模块：`outbound_vless/outbound_vless_vision.rs` 为模块根，
-/// 子模块按「配置翻译 / 流类型 / 装配」三分。模块声明留在本文件，
-/// `lib.rs` 不需要新增 `pub mod`。
+/// 目录模块：`outbound_vless/` 下挂 `outbound_vless_vision.rs`（模块根，
+/// 子模块按「配置翻译 / 流类型 / 装配」三分）与 `outbound_vless_{xel,mux}.rs`。
+/// 三个都是本文件的子模块，走 Rust 默认的 `<文件名>/` 目录解析，
+/// 不需要 `#[path]`；模块声明留在本文件，`lib.rs` 不需要新增 `pub mod`。
 pub mod outbound_vless_vision;
 use outbound_vless_vision::VlessVisionStream;
 
 /// VLESS **XEL 记录层**的出站接线（记录层 → 承载）。
-#[path = "outbound_vless_xel.rs"]
 pub mod outbound_vless_xel;
 
 /// VLESS **Mux 承载**的出站接线（一条承载承载多条逻辑会话）。
-#[path = "outbound_vless_mux.rs"]
 pub mod outbound_vless_mux;
 use outbound_vless_mux::MuxSessionIo;
 
@@ -351,7 +350,7 @@ async fn connect_reality(config: &NodeConfig, wait: Duration) -> Result<RealityS
 
 /// UUID 文本 → 16 字节凭据。形态已在 `config::validate` 校验过；
 /// 这里再做一次 fail-closed 解析（配置对象可能被上层直接构造）。
-pub(crate) fn uuid_bytes(text: &str) -> Result<[u8; 16], DialError> {
+pub fn uuid_bytes(text: &str) -> Result<[u8; 16], DialError> {
     let compact: String = text.chars().filter(|c| *c != '-').collect();
     if compact.len() != 32 {
         return Err(DialError::Rejected("凭据不是 16 字节 UUID".to_owned()));

@@ -90,7 +90,7 @@ pub async fn dial_ss2022(config: &NodeConfig, wait: Duration) -> Result<Ss2022Ou
 }
 
 /// SIP022 方法名 → 方法枚举（`2022-blake3-aes-128-gcm` 等）。
-pub(crate) fn method_from_name(name: Option<&str>) -> Result<Method, DialError> {
+pub fn method_from_name(name: Option<&str>) -> Result<Method, DialError> {
     let Some(name) = name else {
         return Err(DialError::Rejected("ss2022 缺少 method".to_owned()));
     };
@@ -175,7 +175,7 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 }
 
 /// 当前 Unix 秒（SIP022 固定头时间戳）。
-pub(crate) fn now_secs() -> u64 {
+pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

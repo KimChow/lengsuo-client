@@ -8,15 +8,25 @@
 //! 本 crate 的目标是让 **lengsuo-node（服务端）** 与 **ss-client（客户端）**
 //! 复用同一份出口实现，而不是各维护一套（项目铁律：不复制两套协议实现）。
 //!
-//! # 现状与迁移计划（2026-10-24 建立骨架）
+//! # 现状（2026-10-24：ec1 已搬入）
 //!
-//! 本 crate 目前**只有骨架**：协议枚举、统一错误、以及迁移所需的依赖已配齐。
-//! 八协议的具体拨号实现仍留在 `lengsuo-node/src/outbound_*.rs`，由后续卡迁移：
+//! `lengsuo-node` 的**节点配置**、**路由表**、**转发配置形态**与**八协议出口
+//! 实现**已整体搬入本 crate（纯搬迁：协议语义、校验语义、公开 API 形状逐字不变）。
+//! `lengsuo-node` 改为 `pub use` 转出，既有引用路径
+//! （`lengsuo_node::config::*` / `::outbound*` / `::route::*` /
+//! `::forward::{ForwardConfig, load_config, LoadedConfig}`）全部保持可用。
 //!
 //! | 卡 | 做什么 |
 //! |---|---|
-//! | `ec1-egress-port-protocols` | 把 `outbound_{ss,ss2022,vless,vmess,trojan,hysteria,anytls,wireguard}.rs` 与 `outbound.rs` 的**跨协议共用设施**整体搬入本 crate；`lengsuo-node` 改为 `pub use` 转出，保持既有引用路径可用 |
+//! | `ec1-egress-port-protocols` | ✅ 已完成：`config/` + `config_{mux,vision,xel}.rs` + `route.rs` + `forward_config.rs`（原 `node/src/forward/config.rs`）+ `outbound.rs` + 八协议 `outbound_*.rs` 搬入本 crate；node 侧转出一行 |
 //! | `ec2-client-dialer-all-protocols` | `ss-client` 的 `Dialer` 改为按协议分发到本 crate（八协议），并在 `docs/client-e2e-status.md` §4 翻绿 |
+//!
+//! 搬入的 [`route`] 与 [`forward_config`] 都是**纯数据 + 纯校验**（无 IO、无
+//! async、无监听器）：路由表构造与转发段解析属于「配置 → 校验」，与
+//! `lengsuo-node` 的转发**服务**（`forward::{relay, session}`，仍在 node 侧）
+//! 是两层。它们必须与 [`config`] 同 crate，因为 `ConfigError::Route` 承载
+//! `RouteError`、`NodeConfig::forward` 承载 `ForwardConfig`——类型跨 crate
+//! 拆分只会造出两套同名类型。
 //!
 //! ⛔ **迁移卡不要重新设计接口**：以 `lengsuo-node::outbound` 现有 API 形状为准
 //! （每协议一个 `*Outbound` 类型 + 一个 `dial_*` 入口），只做搬迁与 re-export。
@@ -24,16 +34,32 @@
 //!
 //! # 分层
 //!
-//! - [`Protocol`]：八协议枚举（与 `lengsuo-node::config::Protocol` 同形，两处一致性由测试守住）
+//! - [`Protocol`]：八协议枚举（与 [`config::Protocol`] 同形，两处一致性由测试守住）
 //! - [`EgressError`]：统一出口错误。**fail-closed** —— 认证/解码失败一律报错，
 //!   绝不静默回退明文或直连；错误文本只描述形状，**不含口令/密钥/明文**。
 
 #![forbid(unsafe_code)]
 
+// 搬迁进来的模块（ec1）。`config_mux` / `config_vision` / `config_xel` 由
+// `config/mod.rs` 的 `#[path = "../config_*.rs"]` 挂成 `config` 的子模块，
+// 因此这三个文件必须与本目录下的 `config/` 同级，且**不在这里**顶层声明。
+pub mod config;
+pub mod forward_config;
+pub mod outbound;
+pub mod outbound_anytls;
+pub mod outbound_hysteria;
+pub mod outbound_ss;
+pub mod outbound_ss2022;
+pub mod outbound_trojan;
+pub mod outbound_vless;
+pub mod outbound_vmess;
+pub mod outbound_wireguard;
+pub mod route;
+
 /// 出口协议（八协议）。
 ///
-/// ⚠️ 与 `lengsuo-node::config::Protocol` **同形**（同样的八个变体、同样的语义）。
-/// 迁移完成后 `lengsuo-node` 应改为引用本类型，避免两处枚举漂移。
+/// ⚠️ 与 [`config::Protocol`] **同形**（同样的八个变体、同样的语义）。
+/// 两者收敛成一个类型属后续议题；收敛前一致性由测试守住。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Protocol {
     /// Shadowsocks（AEAD）。

@@ -82,7 +82,7 @@ pub async fn dial_shadowsocks(
 }
 
 /// 由配置的 `method` 取套件。四类 AEAD 套件由 `ss-core` 决定，未知一律拒绝。
-pub(crate) fn suite_from_method(method: Option<&str>) -> Result<CipherSuite, DialError> {
+pub fn suite_from_method(method: Option<&str>) -> Result<CipherSuite, DialError> {
     let Some(name) = method else {
         return Err(DialError::Rejected("shadowsocks 缺少 method".to_owned()));
     };
