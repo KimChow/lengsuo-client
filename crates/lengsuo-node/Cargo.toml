@@ -25,6 +25,8 @@ lengsuo-ss2022 = { path = "../lengsuo-ss2022" }
 lengsuo-hysteria = { path = "../lengsuo-hysteria" }
 lengsuo-wireguard = { path = "../lengsuo-wireguard" }
 
+lengsuo-egress = { path = "../lengsuo-egress" }
+
 [dev-dependencies]
 rcgen = "0.13.2"
 
