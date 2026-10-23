@@ -25,14 +25,19 @@
 //!   （对齐 anytls-go `session.go` 的客户端分支），断连或 Alert 即拒绝。
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use lengsuo_tls::{CertificateDer, TlsClient};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::pem::PemObject as _;
+use rustls::pki_types::{ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, SignatureScheme};
 use ss_core::target::TargetAddr;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
+use tokio_rustls::TlsConnector;
 
 use crate::config::{Endpoint, NodeConfig, Protocol};
 /// anytls 拨号入口转出到 `outbound_anytls`（协议专属实现），保持
@@ -149,22 +154,143 @@ pub(crate) async fn resolve_public(
     resolve(host, port, wait).await
 }
 
+/// `tls.insecure: true` 时使用的证书验证器：**无条件接受**服务端证书与
+/// TLS 握手签名。
+///
+/// **仅用于自签/测试场景**，且只在配置显式给出 `insecure: true` 时生效
+/// （`config/validate.rs` 已拒绝它与 `ca_pem` 同时出现）。TLS **握手仍完整
+/// 执行**——SNI、密钥交换、握手签名与记录层加密都不跳过，只跳过「证书链 +
+/// 主机名」这一项校验；因此对端不是 TLS 服务端时握手照旧失败，绝不会回落到
+/// 明文直连。
+///
+/// 安全提示：它使中间人攻击不可检测，任何非测试配置都不应启用。
+#[derive(Debug)]
+pub struct NoCertificateVerification;
+
+impl ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// TLS 客户端：`insecure = false` 走完整证书校验（委托 [`TlsClient`]），
+/// `insecure = true` 走 [`NoCertificateVerification`]。
+pub struct NodeTlsClient {
+    inner: Kind,
+}
+
+enum Kind {
+    /// 既有路径：证书链 + 主机名校验全程开启。
+    Verified(TlsClient),
+    /// 仅 `insecure: true`：跳过证书/主机名校验，握手仍完整执行。
+    Insecure {
+        name: ServerName<'static>,
+        connector: TlsConnector,
+        deadline: Duration,
+    },
+}
+
+impl NodeTlsClient {
+    /// 解析并连接节点端点；错误语义与 [`TlsClient::connect`] 一致。
+    pub async fn connect(&self, endpoint: SocketAddr) -> Result<NodeTlsStream, lengsuo_tls::Error> {
+        match &self.inner {
+            Kind::Verified(client) => client.connect(endpoint).await,
+            Kind::Insecure {
+                name,
+                connector,
+                deadline,
+            } => {
+                let stream = timeout(*deadline, async {
+                    let socket = TcpStream::connect(endpoint).await?;
+                    connector.connect(name.clone(), socket).await
+                })
+                .await
+                .map_err(|_| lengsuo_tls::Error::Timeout)??;
+                Ok(stream)
+            }
+        }
+    }
+}
+
+/// 构造跳过证书校验的 rustls 连接器（唯一一份 verifier，供 insecure 复用）。
+fn insecure_connector() -> Result<TlsConnector, lengsuo_tls::Error> {
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(lengsuo_tls::Error::Configuration)?
+    .dangerous()
+    .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+    .with_no_client_auth();
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
 /// 由配置构造 TLS 客户端：名称缺省用 endpoint.host，信任锚来自 `ca_pem`。
-pub(crate) fn tls_client(config: &NodeConfig, wait: Duration) -> Result<TlsClient, DialError> {
+///
+/// `insecure = true` 时跳过证书与主机名校验（见 [`NoCertificateVerification`]）；
+/// `insecure = false` 的路径逐字节保持原有语义（`ca_pem` 为空仍拒绝）。
+pub fn tls_client(config: &NodeConfig, wait: Duration) -> Result<NodeTlsClient, DialError> {
     let Some(tls) = config.tls.as_ref() else {
         return Err(DialError::InvalidTls(
             "本卡两协议都要求 tls 配置（参考默认均经 TLS）".to_owned(),
         ));
     };
-    if tls.insecure {
-        return Err(DialError::InvalidTls(
-            "tls.insecure 尚未实现；自签场景请用 tls.ca_pem 固定信任锚".to_owned(),
-        ));
-    }
     let name = tls
         .server_name
         .clone()
         .unwrap_or_else(|| config.endpoint.host.clone());
+    if tls.insecure {
+        // TlsClient::new 对零 deadline 的拒绝语义在 insecure 路径同样保留。
+        if wait.is_zero() {
+            return Err(DialError::Tls(lengsuo_tls::Error::InvalidDeadline));
+        }
+        let server_name = ServerName::try_from(name.clone())
+            .map_err(|_| DialError::InvalidTls(format!("serverName 非法：{name}")))?;
+        let connector = insecure_connector().map_err(DialError::Tls)?;
+        // 每次构造配置一次告警（不逐连接刷屏）。
+        eprintln!(
+            "[lengsuo-node] tls.insecure 已启用：证书与主机名校验被跳过（endpoint={}）",
+            config.endpoint.host
+        );
+        return Ok(NodeTlsClient {
+            inner: Kind::Insecure {
+                name: server_name,
+                connector,
+                deadline: wait,
+            },
+        });
+    }
     let pem = tls.ca_pem.as_deref().unwrap_or_default();
     let roots: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(pem.as_bytes())
         .collect::<Result<_, _>>()
@@ -174,11 +300,14 @@ pub(crate) fn tls_client(config: &NodeConfig, wait: Duration) -> Result<TlsClien
             "tls.ca_pem 未包含任何证书（本卡不加载系统根）".to_owned(),
         ));
     }
-    TlsClient::new(&name, roots, wait).map_err(|err| match err {
+    let client = TlsClient::new(&name, roots, wait).map_err(|err| match err {
         lengsuo_tls::Error::InvalidServerName => {
             DialError::InvalidTls(format!("serverName 非法：{name}"))
         }
         other => DialError::Tls(other),
+    })?;
+    Ok(NodeTlsClient {
+        inner: Kind::Verified(client),
     })
 }
 
