@@ -146,7 +146,7 @@ pub(crate) async fn resolve(
 
 /// [`resolve`] 的公开别名：QUIC/UDP 承载（hysteria、wireguard）需要
 /// `SocketAddr` 而不是 `TargetAddr`。
-pub(crate) async fn resolve_public(
+pub async fn resolve_public(
     host: &str,
     port: u16,
     wait: Duration,
@@ -365,20 +365,14 @@ pub(crate) fn probe_target(config: &NodeConfig) -> TargetAddr {
 }
 
 /// 解析并连接节点端点，返回已完成的 TLS 连接。
-pub(crate) async fn connect_tls(
-    config: &NodeConfig,
-    wait: Duration,
-) -> Result<NodeTlsStream, DialError> {
+pub async fn connect_tls(config: &NodeConfig, wait: Duration) -> Result<NodeTlsStream, DialError> {
     let client = tls_client(config, wait)?;
     let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
     Ok(client.connect(addr).await?)
 }
 
 /// 解析并连接节点端点，返回裸 TCP 连接（shadowsocks / ss2022 用）。
-pub(crate) async fn connect_tcp(
-    config: &NodeConfig,
-    wait: Duration,
-) -> Result<TcpStream, DialError> {
+pub async fn connect_tcp(config: &NodeConfig, wait: Duration) -> Result<TcpStream, DialError> {
     let addr = resolve(&config.endpoint.host, config.endpoint.port, wait).await?;
     let connect = TcpStream::connect(addr);
     timeout(wait, connect)
