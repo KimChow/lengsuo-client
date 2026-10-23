@@ -44,12 +44,13 @@ impl Action {
     }
 }
 
-/// 出口（`ss://` 出站）配置。
+/// 出口（出站代理）配置。
 ///
 /// `ss_url` 内含凭据，因此 [`Debug`] 走**手写实现**脱敏（见 [`RedactedUrl`]）。
 #[derive(Clone, PartialEq, Eq)]
 pub struct OutboundConfig {
-    /// `ss://` URL（**凭据在此**，Debug 已脱敏）。
+    /// 出口 URL（**凭据在此**，Debug 已脱敏）。历史字段名 `ss_url`；ec2 起
+    /// 接受八协议 scheme——`ss://` 之外的七个见 `crate::outbound::endpoint`。
     pub ss_url: String,
     /// 是否启用 UDP 转发。
     pub udp: bool,
@@ -70,24 +71,30 @@ impl fmt::Debug for OutboundConfig {
     }
 }
 
-/// `ss://` URL 的脱敏视图：只保留加密名与主机，**口令一律替换成 `***`**。
+/// 出口 URL 的脱敏视图：只保留 scheme / 加密名与主机，**凭据一律替换成 `***`**。
 ///
 /// 对齐 `crates/lengsuo-node/src/config.rs` 的凭据脱敏约定（Debug 不得带凭据原文）。
 struct RedactedUrl<'a>(&'a str);
 
 impl fmt::Debug for RedactedUrl<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(rest) = self.0.strip_prefix("ss://") else {
-            return f.write_str("ss://***");
+        let Some((scheme, rest)) = self.0.split_once("://") else {
+            return f.write_str("***");
         };
-        let Some((method, tail)) = rest.split_once(':') else {
-            return f.write_str("ss://***");
-        };
+        // 备注（`#` 之后）不含凭据也不含主机，直接丢弃。
+        let rest = rest.split('#').next().unwrap_or("");
         // 用**最后一个** `@` 切分：口令里出现裸 `@` 时也不会把主机切错。
-        let Some((_secret, host)) = tail.rsplit_once('@') else {
+        let Some((_secret, host_part)) = rest.rsplit_once('@') else {
+            return write!(f, "{scheme}://***");
+        };
+        if scheme != "ss" {
+            // 其余 scheme：userinfo 整段打码（UUID / 口令 / 密钥对都在这里）。
+            return write!(f, "{scheme}://***@{host_part}");
+        }
+        let Some((method, _)) = rest.split_once(':') else {
             return f.write_str("ss://***");
         };
-        write!(f, "ss://{method}:***@{host}")
+        write!(f, "ss://{method}:***@{host_part}")
     }
 }
 

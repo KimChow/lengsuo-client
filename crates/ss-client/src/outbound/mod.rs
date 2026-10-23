@@ -7,13 +7,21 @@
 //! fail-closed：认证失败即断开，绝不回退明文。
 //!
 //! 分文件：
-//! - [`dialer`]：`ss://` 解析、套件选择、建连与首个认证 chunk 判定；
+//! - [`dialer`]：八协议**一处分发**；`ss://` 的解析、套件选择、建连与首个
+//!   认证 chunk 判定；其余七协议如实报 [`DialError::NotWiredYet`]；
+//! - [`endpoint`]：其余七协议（vless / vmess / trojan / hysteria2 / anytls /
+//!   wireguard / ss2022）的端点形状解析，映射到 `lengsuo-egress` 的
+//!   `NodeConfig` 并复用其 `validate()`；
 //! - [`tunnel`]：已建连的双向隧道，`AsyncRead` / `AsyncWrite`。
 //!
 //! **凭据纪律**：[`Dialer`] / [`Tunnel`] 故意不实现 `Debug`，口令与主密钥
 //! 不进入日志；错误消息也不回显口令。
+//!
+//! [`endpoint`] 声明为 `pub(crate)`：`config::load` 在**加载期**用同一份解析
+//! 规则校验非 `ss://` 的出口 URL（fail-closed 越早越好）。
 
 mod dialer;
+pub(crate) mod endpoint;
 mod tunnel;
 
 pub use dialer::{DialError, Dialer};

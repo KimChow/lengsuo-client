@@ -286,9 +286,24 @@ fn opt_path(value: Option<&Value>, field: &'static str) -> Result<Option<PathBuf
     }
 }
 
+/// 出口 URL 的形状校验（八协议）。
+///
+/// `ss://` 仍是本仓既有的校验器（逐字不变）；其余七协议交给
+/// `outbound::endpoint::classify` —— 与拨号期**同一份**解析规则，
+/// 免得「加载能过、拨号才报」。两条路径都 fail-closed 且不回显取值。
+fn validate_outbound_url(raw: &str) -> Result<()> {
+    if raw.trim().starts_with("ss://") {
+        return validate_ss_url(raw);
+    }
+    // `InvalidUrl` 只带 `&'static str` 形状说明，回显不了取值。
+    crate::outbound::endpoint::classify(raw)
+        .map(|_| ())
+        .map_err(|err| invalid("outbound.ss_url", &err.to_string()))
+}
+
 /// 整体校验：跨字段的一致性。
 fn validate(config: &ClientConfig) -> Result<()> {
-    validate_ss_url(&config.outbound.ss_url)?;
+    validate_outbound_url(&config.outbound.ss_url)?;
     let mut names = HashSet::new();
     for rule in &config.rules {
         if !names.insert(rule.name.clone()) {
