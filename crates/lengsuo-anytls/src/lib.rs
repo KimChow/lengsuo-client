@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 //! AnyTLS v2 认证、帧原语、产品 TLS 信任链及服务端入站会话状态机；
-//! 客户端空闲会话复用池已接入（见 [`client_pool`]），参考互通仍未完成，
+//! 客户端空闲会话复用池**组件已就绪、尚未接入会话生命周期**（见 [`client_pool`]），参考互通仍未完成，
 //! 不可作为可用代理。
 pub mod auth;
 pub mod client_pool;
