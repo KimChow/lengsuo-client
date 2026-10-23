@@ -1460,6 +1460,7 @@ name = "ss-client"
 version = "0.1.0"
 dependencies = [
  "lengsuo-browser-launch",
+ "lengsuo-egress",
  "lengsuo-shadowsocks",
  "ss-core",
  "thiserror 2.0.21",
