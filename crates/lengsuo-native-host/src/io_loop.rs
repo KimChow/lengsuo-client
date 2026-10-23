@@ -7,7 +7,7 @@
 //!    │  frame::FrameDecoder（本 crate，W3b-1）—— 半帧攒齐才交付
 //!    ▼
 //! JSON 信封 {"frame_b64":"<base64(整条业务帧)>"}
-//!    │  W3b-2a 的 decode_frame_b64 ⟶ 本卡开箱时**未接线**（见下）
+//!    │  W3b-2a 的 decode_frame_b64（经 WiredEnvelope，见 [`crate::wired_envelope`]）
 //!    ▼
 //! 业务帧 8B 头 + 载荷（契约 §5.2）
 //!    │  trait MessageDispatch —— 业务处理器
@@ -15,14 +15,18 @@
 //! stdout: [u32 本机序 len][JSON 信封]
 //! ```
 //!
-//! # ⚠️ 信封层未接线（本卡开箱状态）
+//! # 信封层：生产入口已接 W3b-2a
 //!
-//! W3b-2a 的 `decode_frame_b64` / `encode_frame_b64` 在 `lengsuo-browser-extension`，
-//! 本 crate 目前**没有**对它的依赖，而加依赖要改 `Cargo.toml` / `Cargo.lock`
-//! （共享区，本卡禁改）⇒ 信封层以 [`EnvelopeCodec`] 接口留口：
-//! 生产用的编解码器 **尚未实现**，[`run`] 遇到任何信封都返回
-//! [`LoopError::Envelope`]（⛔ 不复制 base64 / JSON 解析，⛔ 不吞消息继续跑）。
-//! 接线做法见报告（三行改动）。
+//! 信封文本的编解码属于 W3b-2a（`lengsuo-browser-extension` 的
+//! `decode_frame_b64` / `encode_frame_b64`），⛔ 本 crate 不复制 base64 / JSON 解析。
+//!
+//! - [`run`] 使用生产编解码器 [`WiredEnvelope`]（转发 W3b-2a）⇒
+//!   管道帧 → 信封 → 业务帧 → 分派 → 回帧 → 信封 → 管道帧**端到端打通**；
+//!   合法信封不再返回 [`LoopError::Envelope`]。
+//! - [`run_with`] 由调用方注入 [`EnvelopeCodec`]，供测试与回退使用；
+//!   [`UnwiredEnvelope`] 仍然保留，且仍然显式返回 [`ENVELOPE_PENDING`]。
+//!
+//! 编解码器返回的错误映射为 [`LoopError::Envelope`]；⛔ 错误文本不含载荷字节。
 //!
 //! # 分派目标待 W4/W5
 //!
@@ -46,6 +50,7 @@ use std::io::{Read, Write};
 
 use crate::error::LoopError;
 use crate::frame::{encode_frame, FrameDecoder};
+use crate::wired_envelope::WiredEnvelope;
 
 /// 业务分派接口：主循环把解出来的业务帧交给它。
 ///
@@ -58,11 +63,14 @@ pub trait EnvelopeCodec {
     fn encode(&self, frame: &[u8]) -> Result<String, String>;
 }
 
-/// 信封编解码器的显式拒绝：信封层尚未接线到 W3b-2a。
+/// 显式拒绝的信封编解码器：供 [`run_with`] 的回退与测试使用。
+///
+/// 生产入口 [`run`] **不再**使用它；保留它是为了向后兼容，
+/// 并让调用方能显式表达「本路径不解析信封」。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UnwiredEnvelope;
 
-/// 未接线时的错误文本。
+/// [`UnwiredEnvelope`] 的错误文本（显式拒绝，不解析任何信封）。
 pub const ENVELOPE_PENDING: &str =
     "信封层未接线：需给 crates/lengsuo-native-host 增加 lengsuo-browser-extension 依赖";
 
@@ -114,22 +122,27 @@ pub enum LoopOutcome {
     Closed,
 }
 
-/// 跑主循环直到 stdin 在帧边界上 EOF。
+/// 跑主循环直到 stdin 在帧边界上 EOF。生产入口使用 [`WiredEnvelope`]。
 ///
 /// # Errors
 /// - 读失败（含半帧 EOF）⇒ [`LoopError::Read`]。
 /// - 长度头超限 ⇒ [`LoopError::TooLong`]（**关通道，不截断**）。
-/// - 载荷非 UTF-8 / 信封坏 / 业务帧帧头坏 ⇒ 对应错误。
+/// - 载荷非 UTF-8 ⇒ [`LoopError::NotUtf8`]。
+/// - 信封坏（JSON / base64 / 字段形状）⇒ [`LoopError::Envelope`]。
+/// - 业务帧帧头坏（类型 / 保留位 / 截断 / 多余字节）⇒ [`LoopError::BadBusinessFrame`]。
 /// - 写失败或回帧超限 ⇒ [`LoopError::Write`] / [`LoopError::ReplyTooLong`]。
 pub fn run<R: Read, W: Write, D: MessageDispatch>(
     input: &mut R,
     output: &mut W,
     dispatch: &mut D,
 ) -> Result<LoopOutcome, LoopError> {
-    run_with(input, output, dispatch, &UnwiredEnvelope)
+    run_with(input, output, dispatch, &WiredEnvelope)
 }
 
-/// 同 [`run`]，但由调用方提供信封编解码器（测试用；生产接线后 [`run`] 内替换）。
+/// 同 [`run`]，但由调用方提供信封编解码器（测试与回退用）。
+///
+/// `run()` 传入的是生产编解码器 [`WiredEnvelope`]；调用方可以注入自己的实现
+/// （例如测试夹具，或显式拒绝的 [`UnwiredEnvelope`]）。
 ///
 /// # Errors
 /// 同 [`run`]。
@@ -197,11 +210,10 @@ fn handle_bytes<W: Write, D: MessageDispatch, E: EnvelopeCodec>(
 ///
 /// 只拷贝一次载荷；超限 / 保留位非零 / type 未知 / 截断一律失败。
 fn split_business_frame(frame: &[u8]) -> Result<(u8, Vec<u8>), LoopError> {
-    // ponytail: 契约 §5.2 的 8 / 1 MiB 与 §5.3 的最大类型编号；
-    // 接线后用 lengsuo_browser_extension 的常量（本 crate 另有管道帧的 4 / 1 MiB，勿混）。
-    const HEADER: usize = 8;
-    const MAX_PAYLOAD: usize = 1024 * 1024;
-    const MAX_MESSAGE_TYPE: u8 = 10;
+    // 业务帧头来自 W3a（契约 §5.2 / §5.3）：8 字节头 + 载荷上限 1 MiB。
+    // ⚠️ 本 crate 的**管道帧**另有自己的 4 字节头 / 1 MiB（见 frame 模块），两者勿混。
+    const HEADER: usize = lengsuo_browser_extension::FRAME_HEADER_LEN;
+    const MAX_PAYLOAD: usize = lengsuo_browser_extension::MAX_PAYLOAD_LEN;
     if frame.len() < HEADER {
         return Err(LoopError::BadBusinessFrame("帧头不足 8 字节".into()));
     }
@@ -219,7 +231,7 @@ fn split_business_frame(frame: &[u8]) -> Result<(u8, Vec<u8>), LoopError> {
         return Err(LoopError::BadBusinessFrame("帧后有多余字节".into()));
     }
     // 未知消息类型：⛔ 绝不当已知类型交给业务层（契约 §5.3 共 11 种，0..=10）。
-    if frame[4] > MAX_MESSAGE_TYPE {
+    if lengsuo_browser_extension::MessageType::from_u8(frame[4]).is_none() {
         return Err(LoopError::BadBusinessFrame("未知消息类型".into()));
     }
     Ok((frame[4], frame[HEADER..].to_vec()))

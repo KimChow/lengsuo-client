@@ -801,6 +801,7 @@ name = "lengsuo-native-host"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "lengsuo-browser-extension",
  "serde_json",
  "thiserror 2.0.21",
 ]

@@ -17,7 +17,8 @@
 //! | [`origin`] | 来源解析（从 `argv[1]` 取出扩展 ID + 格式校验） |
 //! | [`extension`] | 扩展 ID **严格值校验** + 本扩展 ID / origin 常量（契约 §5.0） |
 //! | [`manifest`] | host manifest 渲染（`allowed_origins` 只含本扩展，纯函数） |
-//! | [`io_loop`] | stdin/stdout 主循环框架（管道帧 → 信封 → 业务帧 → 分派接口） |
+//! | [`io_loop`] | stdin/stdout 主循环（管道帧 → 信封 → 业务帧 → 分派接口） |
+//! | [`wired_envelope`] | 生产用信封编解码器（转发 W3b-2a 的 `decode_frame_b64` / `encode_frame_b64`） |
 //! | [`error`] | 类型化错误（每类失败一个具名变体） |
 //!
 //! # 字节真相
@@ -26,15 +27,17 @@
 //! - 写侧 `native_message_process_host.cc` `OnMessage`（`memcpy` 本机字节序 `uint32_t`）；
 //! - 读侧同文件 `ProcessIncomingData`（裸解 `uint32_t`，攒够一整帧才交付）。
 //!
-//! # 信封层未接线（⚠️ 本卡开箱状态）
+//! # 信封层已接线（生产入口默认使用 W3b-2a）
 //!
 //! [`io_loop`] 负责「管道帧 → 信封文本 → 业务帧 → 分派」的搬运与边界校验；
 //! 信封文本的编解码属于 W3b-2a（`lengsuo-browser-extension` 的
 //! `decode_frame_b64` / `encode_frame_b64`），⛔ 本 crate 不复制 base64 / JSON 解析。
-//! 本卡路径边界不含 `Cargo.toml` ⇒ 生产用编解码器以一个接口
-//! [`io_loop::EnvelopeCodec`] 留口，目前是 [`io_loop::UnwiredEnvelope`]（显式拒绝）；
-//! 接线见报告「待基建卡」。主循环因此**尚不能端到端跑通**，单测用测试夹具编解码器
-//! 走通除信封层外的全部路径。
+//!
+//! - 生产入口 [`io_loop::run`] 默认使用 [`wired_envelope::WiredEnvelope`]
+//!   （转发 W3b-2a），合法信封可以端到端跑通；
+//! - [`io_loop::run_with`] 保留给测试与回退：调用方可以注入任意
+//!   [`io_loop::EnvelopeCodec`]，包括显式拒绝的 [`io_loop::UnwiredEnvelope`]
+//!   （它仍返回 [`io_loop::ENVELOPE_PENDING`]）。
 //!
 //! # 业务分派目标待 W4/W5
 //!
@@ -62,6 +65,7 @@ pub mod frame;
 pub mod io_loop;
 pub mod manifest;
 pub mod origin;
+pub mod wired_envelope;
 
 pub use error::{FrameError, IdFormatError, LoopError, OriginError};
 pub use extension::{
@@ -76,3 +80,4 @@ pub use io_loop::{
 };
 pub use manifest::{render_host_manifest, HOST_NAME};
 pub use origin::{parse_extension_id, EXTENSION_ID_LEN, EXTENSION_SCHEME_PREFIX};
+pub use wired_envelope::WiredEnvelope;

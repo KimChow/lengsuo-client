@@ -5,7 +5,7 @@
 use std::io::{Cursor, Read};
 
 use lengsuo_native_host::io_loop::{
-    run, run_with, Dispatch, EnvelopeCodec, LoopOutcome, MessageDispatch, UnwiredDispatch,
+    run_with, Dispatch, EnvelopeCodec, LoopOutcome, MessageDispatch, UnwiredDispatch,
     UnwiredEnvelope, ENVELOPE_PENDING,
 };
 use lengsuo_native_host::LoopError;
@@ -368,18 +368,19 @@ fn oversized_reply_is_refused() {
 }
 
 #[test]
-fn production_entry_is_not_wired_to_the_envelope_layer() {
-    // ⚠️ 开箱状态：生产入口 run() 的信封层未接线，必须显式拒绝而不是吞消息/伪造回包。
+fn unwired_envelope_is_still_rejected_via_run_with() {
+    // run_with 注入 UnwiredEnvelope：任何信封都返回 ENVELOPE_PENDING，分派不进，stdout 无输出。
     let mut out = Vec::new();
     let mut dispatch = RecordingDispatch::replying(empty_business_frame());
-    let err = run(
+    let err = run_with(
         &mut Cursor::new(pipe_hex("save_password_pipe_frame_hex")),
         &mut out,
         &mut dispatch,
+        &UnwiredEnvelope,
     )
     .unwrap_err();
     assert_eq!(err, LoopError::Envelope(ENVELOPE_PENDING.to_owned()));
-    assert!(dispatch.calls.is_empty(), "未接线的信封不得进分派");
+    assert!(dispatch.calls.is_empty(), "显式拒绝的信封不得进分派");
     assert!(out.is_empty());
     // 未接线编解码器对编码侧同样显式拒绝。
     assert!(UnwiredEnvelope.encode(&[]).is_err());
