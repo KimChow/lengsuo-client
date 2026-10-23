@@ -23,8 +23,13 @@ use std::net::IpAddr;
 use crate::checksum;
 use crate::packet;
 
+mod plpmtud;
 mod probe;
 
+pub use plpmtud::{
+    probe_packet_v4, probe_packet_v6, PlpmtudSearch, PlpmtudState, BASE_PLPMTU, MAX_PROBES,
+    PMTU_RAISE_TIMER,
+};
 pub use probe::{
     MssClamp, MtuError, PmtudState, IPV4_HEADER_BYTES, IPV6_HEADER_BYTES, MAX_MSS_V4, MAX_MSS_V6,
     MAX_MTU, MIN_MSS_V4, MIN_MSS_V6, MIN_MTU, RFC1191_PLATEAUS, TCP_HEADER_BYTES,
