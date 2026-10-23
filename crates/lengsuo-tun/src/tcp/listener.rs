@@ -194,32 +194,64 @@ impl TcpListener {
 
     /// 在一条已建立的连接上发送应用载荷，返回要写回设备的 IP 报文。
     ///
-    /// 仅供上层读/写流（[`super::stream`]）调用：把 `payload` 直接编成一个 PSH|ACK
-    /// 段发出，不做分段（分段由上层按 MTU 决定），也不做拥塞控制。
-    /// `key` 为入站五元组键；会话不存在（或已终结）则返回空，不构造半成品回包。
+    /// 仅供上层读/写流（[`super::stream`]）调用：按 clamp 后的有效 MSS 分段——有效
+    /// MSS 由 [`Config::interface_mtu`] 经 [`mtu::MssClamp`] 按 `key` 目的地址的协议族
+    /// 换算（IPv4 用 `mss_for_v4`，IPv6 用 `mss_for_v6`）。每段都带 ACK，**仅末段**追加
+    /// PSH；段序号按前面各段长度递增。
+    ///
+    /// fail-closed：MSS 换算失败、会话不存在（或已终结）或任一段构造失败时**整次返回
+    /// 空**，不产出半成品，也不推进 `snd_nxt`。不做拥塞控制、不做重传、不改窗口语义。
     pub fn send(&mut self, key: SessionKey, payload: &[u8], clock: Clock) -> Vec<Vec<u8>> {
         if payload.is_empty() {
             return Vec::new();
         }
+        let interface_mtu = self.config.interface_mtu;
         let Some(session) = self.sessions.get(key, clock) else {
             return Vec::new();
         };
-        let s = super::state::SendSegment {
-            seq: session.connection.snd_nxt(),
-            ack: session.connection.rcv_nxt(),
-            flags: Flags::ACK | Flags::PSH,
-            // 通告的是**本端**接收窗口（与状态机 ack 段同一口径），不是对端窗口。
-            window: session.connection.advertised_window(),
-            payload: payload.to_vec(),
+        // MSS 换算失败（接口 MTU 低于协议族下限）时 fail-closed：不发送、不推进序号。
+        let Ok(clamp) = mtu::MssClamp::new(interface_mtu) else {
+            return Vec::new();
         };
-        match reply(session, &s) {
-            Ok(packet) => {
-                // 发送端序号推进：载荷字节数全部消耗。
-                session.connection.advance_snd(payload.len() as u32);
-                vec![packet]
+        let mss = if key.destination().is_ipv4() {
+            clamp.mss_for_v4()
+        } else {
+            clamp.mss_for_v6()
+        };
+        let Ok(mss) = mss else {
+            return Vec::new();
+        };
+        let mss = usize::from(mss);
+        // 先构造全部段，再统一提交：任一段 `reply` 失败则整次返回空，`snd_nxt` 不变。
+        let ack = session.connection.rcv_nxt();
+        // 通告的是**本端**接收窗口（与状态机 ack 段同一口径），不是对端窗口。
+        let window = session.connection.advertised_window();
+        let mut seq = session.connection.snd_nxt();
+        let mut chunks = payload.chunks(mss).peekable();
+        let mut packets = Vec::with_capacity(payload.len().div_ceil(mss));
+        while let Some(chunk) = chunks.next() {
+            // 只有最后一段置 PSH；其余段仅确认。
+            let flags = if chunks.peek().is_some() {
+                Flags::ACK
+            } else {
+                Flags::ACK | Flags::PSH
+            };
+            let s = super::state::SendSegment {
+                seq,
+                ack,
+                flags,
+                window,
+                payload: chunk.to_vec(),
+            };
+            match reply(session, &s) {
+                Ok(packet) => packets.push(packet),
+                Err(_) => return Vec::new(),
             }
-            Err(_) => Vec::new(),
+            seq = seq.wrapping_add(chunk.len() as u32);
         }
+        // 发送端序号推进：载荷字节数全部消耗（仅在全部段构造成功后）。
+        session.connection.advance_snd(payload.len() as u32);
+        packets
     }
 
     /// 吃一个**完整 IP 报文**（真实设备喂进来的原字节），返回要写回设备的报文与载荷。
