@@ -5,11 +5,18 @@
 //!
 //! | 模块 | 契约节 | 内容 |
 //! |---|---|---|
-//! | [`base64`] | RFC 4648 | 标准 base64（无 padding 编码、宽容解码） |
+//! | [`base64`] | RFC 4648 | 标准 base64（无 padding 编码、宽容解码）—— **信封层** |
+//! | [`base64url`] | RFC 4648 §5 | base64url（无 padding）—— **载荷层**（§5.3.1） |
 //! | [`envelope`] | §5.2.1 | JSON 信封 `{"frame_b64":"…"}` ⇄ 业务帧字节 |
 //! | [`frame`] | §5.2 | 消息帧编解码（`len` / `type` / `reserved` / `payload`） |
+//! | [`json`] | §5.3.1 | 最小 JSON（保序、整数-only、代理对、fail-closed） |
 //! | [`message`] | §5.3 | 消息类型表（11 种）+ `type = 10` 回退语义 |
+//! | [`payload`] | §5.3.1 | 请求 / 响应载荷字段表 + `clientDataJSON` 模板 |
 //! | [`error`] | §5.2 | 类型化错误（每类失败一个具名变体） |
+//!
+//! ⚠️ **两层 base64 不要混用**：§5.2.1 信封层是**标准 base64**（`+`/`/`），
+//! §5.3.1 载荷层是 **base64url**（`-`/`_`，无 padding），两者模块与错误类型
+//! 都不同（[`base64`] / [`base64url`]）。
 //!
 //! # 纯函数层
 //!
@@ -33,13 +40,22 @@
 #![deny(missing_docs)]
 
 pub mod base64;
+pub mod base64url;
 pub mod envelope;
 pub mod error;
 pub mod frame;
+pub mod json;
 pub mod message;
+pub mod payload;
 
 pub use base64::{decode as base64_decode, encode as base64_encode, Base64Error};
+pub use base64url::{decode as base64url_decode, encode as base64url_encode, Base64UrlError};
 pub use envelope::{decode_frame_b64, encode_frame_b64, EnvelopeError, MAX_ENVELOPE_LEN};
 pub use error::FrameError;
 pub use frame::{decode, decode_exact, Frame, FRAME_HEADER_LEN, MAX_PAYLOAD_LEN, RESERVED_LEN};
+pub use json::{parse as json_parse, JsonError, MAX_JSON_BYTES, MAX_JSON_DEPTH};
 pub use message::{MessageType, HOST_NAME, NATIVE_RESPONSE_FALLBACK_TYPE};
+pub use payload::{
+    client_data_json, decode_request, encode_response, verify_nonce_echo, ClientDataKind,
+    CredentialItem, CredentialKind, Decision, PayloadError, Request, Response, UserInfo,
+};
