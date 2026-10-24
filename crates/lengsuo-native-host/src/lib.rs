@@ -13,6 +13,7 @@
 //!
 //! | 模块 | 内容 |
 //! |---|---|
+//! | [`entry`] | 进程入口接线：argv 解析（origin = `argv[1]`，忽略 `argv[2..]`）+ 来源校验 + 主循环（bin 目标 `lengsuo-native-host` 的实现体） |
 //! | [`frame`] | 管道帧编解码（4 字节本机字节序长度前缀 + JSON 载荷） |
 //! | [`origin`] | 来源解析（从 `argv[1]` 取出扩展 ID + 格式校验） |
 //! | [`extension`] | 扩展 ID **严格值校验** + 本扩展 ID / origin 常量（契约 §5.0） |
@@ -50,6 +51,7 @@
 //!
 //! ⛔ 管道与信封层不碰进程真实 stdin/stdout、不起进程、不开线程：
 //! stdin/stdout 主循环对 `Read` / `Write` 泛型，单测走内存 `Cursor`；不读环境变量。
+//! 进程真实 stdio 只在 bin 入口 `src/main.rs` 触碰（argv 也以迭代器注入 [`entry`]）。
 //! [`register`] 的 POSIX 分支真写文件（只写 `<user_data_dir>/NativeMessagingHosts/` 下
 //! 我们自己那一份）；Windows 分支只产出命令行、经注入执行器执行 ——
 //! ⛔ 本 crate 自身不 exec 任何进程。
@@ -62,6 +64,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod entry;
 pub mod error;
 pub mod extension;
 pub mod frame;
@@ -71,6 +74,7 @@ pub mod origin;
 pub mod register;
 pub mod wired_envelope;
 
+pub use entry::{parse_launch_args, run_host, HostError};
 pub use error::{FrameError, IdFormatError, LoopError, OriginError};
 pub use extension::{
     require_our_extension, require_our_id, strict_eq, EXTENSION_ID, EXTENSION_ORIGIN,
