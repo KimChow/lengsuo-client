@@ -109,13 +109,13 @@
   "host_manifest": {
     "name": "lengsuo.credential",
     "description": "Lengsuo credential vault host",
-    "path": "lengsuo-native-host",
+    "path": "/opt/lengsuo/lengsuo-native-host",
     "type": "stdio",
     "allowed_origins": [
       "chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/"
     ],
-    "rendered": "{\"name\":\"lengsuo.credential\",\"allowed_origins\":[\"chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/\"]}",
-    "rendered_note": "逐字节手写期望值：本卡渲染的完整输出就是这两个字段，name 在前、allowed_origins 在后，无空白、无尾换行"
+    "rendered": "{\"name\":\"lengsuo.credential\",\"description\":\"Lengsuo credential vault host\",\"type\":\"stdio\",\"path\":\"/opt/lengsuo/lengsuo-native-host\",\"allowed_origins\":[\"chrome-extension://ejlmmjamfpkoopjachjhcbdjlddknhok/\"]}",
+    "rendered_note": "逐字节手写期望值（不是实现输出回灌）：五个字段，顺序 name → description → type → path → allowed_origins，无空白、无尾换行。字段集以 Chromium 的解析器为准（native_messaging_host_manifest.cc：name :78、description :85、type==\"stdio\" :92-94、path :100、allowed_origins）—— 旧版只渲染 name + allowed_origins，必被解析器拒 ⇒ 本卡修复。`path` 是**合成值**（POSIX 绝对路径，代表宿主可执行文件；本 crate 暂无 [[bin]]），`description` 为自设工程决定。"
   },
   "frames": {
     "empty_business_frame_b64": "AAAAAAAAAAA",

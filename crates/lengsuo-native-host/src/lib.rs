@@ -1,5 +1,5 @@
 //! 凭据体系的 Native Messaging **宿主进程接线层**（管道帧、来源校验、扩展 ID 严格校验、
-//! manifest 渲染、stdin/stdout 主循环框架）。
+//! host manifest 渲染 + **注册计划 / 注册器（平台分派）**、stdin/stdout 主循环框架）。
 //!
 //! 本 crate 实现的是 **宿主进程与 Chromium 之间的管道帧**，
 //! 与凭据线契约 §5.2 的「扩展 ⇄ 宿主消息帧」是**两层不同的东西**。
@@ -16,7 +16,8 @@
 //! | [`frame`] | 管道帧编解码（4 字节本机字节序长度前缀 + JSON 载荷） |
 //! | [`origin`] | 来源解析（从 `argv[1]` 取出扩展 ID + 格式校验） |
 //! | [`extension`] | 扩展 ID **严格值校验** + 本扩展 ID / origin 常量（契约 §5.0） |
-//! | [`manifest`] | host manifest 渲染（`allowed_origins` 只含本扩展，纯函数） |
+//! | [`manifest`] | host manifest 渲染 + 平台绝对路径判定（`allowed_origins` 只含本扩展，纯函数） |
+//! | [`register`] | 注册计划 + 注册器（Windows 只产出 `reg` 命令行交注入执行器；POSIX `std::fs` 落盘） |
 //! | [`io_loop`] | stdin/stdout 主循环（管道帧 → 信封 → 业务帧 → 分派接口） |
 //! | [`wired_envelope`] | 生产用信封编解码器（转发 W3b-2a 的 `decode_frame_b64` / `encode_frame_b64`） |
 //! | [`error`] | 类型化错误（每类失败一个具名变体） |
@@ -47,9 +48,11 @@
 //!
 //! # IO 纪律
 //!
-//! ⛔ 本 crate 不碰进程真实 stdin/stdout、不起进程、不开线程、不写文件：
-//! stdin/stdout 主循环对 `Read` / `Write` 泛型，单测走内存 `Cursor`。
-//! 不读环境变量；进程启动与 manifest 落盘属于后续的接线层。
+//! ⛔ 管道与信封层不碰进程真实 stdin/stdout、不起进程、不开线程：
+//! stdin/stdout 主循环对 `Read` / `Write` 泛型，单测走内存 `Cursor`；不读环境变量。
+//! [`register`] 的 POSIX 分支真写文件（只写 `<user_data_dir>/NativeMessagingHosts/` 下
+//! 我们自己那一份）；Windows 分支只产出命令行、经注入执行器执行 ——
+//! ⛔ 本 crate 自身不 exec 任何进程。
 //!
 //! # 许可
 //!
@@ -65,6 +68,7 @@ pub mod frame;
 pub mod io_loop;
 pub mod manifest;
 pub mod origin;
+pub mod register;
 pub mod wired_envelope;
 
 pub use error::{FrameError, IdFormatError, LoopError, OriginError};
@@ -78,6 +82,12 @@ pub use io_loop::{
     run, run_with, Dispatch, EnvelopeCodec, LoopOutcome, MessageDispatch, UnwiredDispatch,
     UnwiredEnvelope,
 };
-pub use manifest::{render_host_manifest, HOST_NAME};
+pub use manifest::{
+    is_absolute_path, render_host_manifest, ManifestError, Platform, HOST_NAME, HOST_TYPE_STDIO,
+};
 pub use origin::{parse_extension_id, EXTENSION_ID_LEN, EXTENSION_SCHEME_PREFIX};
+pub use register::{
+    deregister, plan_posix, plan_windows, register, CommandRunner, PosixPlan, RegisterError,
+    RegistrationPlan, WindowsPlan, POSIX_USER_SUBDIR, REGISTRY_ROOT, REGISTRY_SUBKEY, REG_PROGRAM,
+};
 pub use wired_envelope::WiredEnvelope;
