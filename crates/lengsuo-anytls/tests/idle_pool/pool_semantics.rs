@@ -237,6 +237,29 @@ fn the_check_due_flag_follows_the_configured_interval() {
 }
 
 #[test]
+fn multiple_pooled_sessions_are_handed_out_lifo_like_the_reference() {
+    let mut pool = ClientPool::new(config(0, 4)).expect("合法配置");
+    let clock = Clock(0);
+
+    // 取三条互不相同的会话（取用会命中空闲池，须先取完再归还），
+    // 再按编号顺序 1、2、3 依次归还。
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        ids.push(pool.acquire(clock.now()).expect("取用").session_id);
+    }
+    for session_id in &ids {
+        pool.release(*session_id, clock.now()).expect("归还");
+    }
+    assert_eq!(pool.idle_len(), 3);
+
+    // 参考 getIdleSession 取 SkipList 首元素（键 = MaxUint64 - seq）
+    // ⇒ 最近归还者先被取用（LIFO），持有层 ClientPool 与池语义一致。
+    assert_eq!(pool.acquire(clock.now()).expect("取用").session_id, ids[2]);
+    assert_eq!(pool.acquire(clock.now()).expect("取用").session_id, ids[1]);
+    assert_eq!(pool.acquire(clock.now()).expect("取用").session_id, ids[0]);
+}
+
+#[test]
 fn an_invalid_configuration_is_refused() {
     assert!(
         ClientPool::new(config(4, 2)).is_err(),
