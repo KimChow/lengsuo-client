@@ -34,12 +34,14 @@ use std::time::Duration;
 use quinn::udp::{RecvMeta, Transmit};
 use quinn::{AsyncUdpSocket, UdpPoller};
 
-use lengsuo_hysteria::obfs::Obfuscator;
+use lengsuo_hysteria::obfs::{B2sumDeriver, Blake2b256, Obfuscator, SALT_LEN};
 use lengsuo_hysteria::proxy;
 use lengsuo_hysteria::quic::{
     ClientConfig, HysteriaClient, HysteriaServer, ObfsHopConfig, ServerConfig,
 };
-use lengsuo_hysteria::transport::{HopSpec, MaskedUdpSocket, OsRng, WireMask};
+use lengsuo_hysteria::transport::{
+    hop, HopSpec, MaskedUdpSocket, OsRng, PortList, TransportRng, WireMask,
+};
 
 mod support;
 
@@ -47,3 +49,4 @@ include!("obfs_hop_wire/harness.rs");
 include!("obfs_hop_wire/client.rs");
 include!("obfs_hop_wire/interop.rs");
 include!("obfs_hop_wire/hop.rs");
+include!("obfs_hop_wire/regress.rs");
