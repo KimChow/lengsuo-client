@@ -1,6 +1,14 @@
 //! Archive validation prerequisite only. No extraction/install/authentication.
+//!
+//! 安装层：见 [`crate::host_manifest`]（[`crate::host_manifest::install_host_manifest`] 等）。
+//! 安装时把 host manifest 渲染并按平台落地（Windows 注册表默认值 / POSIX
+//! `NativeMessagingHosts`），全部复用 `lengsuo-native-host` 的
+//! `render_host_manifest` 与 `plan_*` / `register`，**不复制字节**；本 crate 仍
+//! 不做归档解压。
 #![forbid(unsafe_code)]
 use std::collections::BTreeMap;
+
+pub mod host_manifest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -161,3 +169,8 @@ impl ArchivePlan {
         Ok(body.to_string())
     }
 }
+
+pub use host_manifest::{
+    install_host_manifest, HostInstallError, HostInstallOutcome, HostInstallPlan,
+    HostInstallRequest,
+};
