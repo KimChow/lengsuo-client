@@ -7,8 +7,7 @@
 //!
 //! [`decode_request`]（`type` 0–10 请求字节 ⇒ [`Request`]）+ [`encode_response`]
 //! （[`Response`] ⇒ `type` 0–9 响应字节）+ [`client_data_json`] + [`verify_nonce_echo`]。
-//! 反方向的 `encode_request` / `decode_response`（扩展侧那半）本卡不做 ——
-//! 单文件 700 行硬上限下的取舍，见仓外报告的「越界与取舍」。
+//! 反方向 `encode_request` / `decode_response` 本卡不做（取舍见仓外报告）。
 //!
 //! # 规则（契约 §5.3.1）
 //!
@@ -16,10 +15,8 @@
 //! - **未知字段一律忽略**（前向兼容）：多给字段**不**算错。
 //! - 缺必填 / 类型不符 / 取值非法 ⇒ **具名错误**，⛔ 不给默认值、⛔ 不 panic。
 //! - 载荷内二进制字段一律 **base64url（无 padding）**，解码时逐字段校验。
-//! - 自设：`nonce` 收 `u64`（扩展侧 `newNonce()` 实际只出 u32，
-//!   `fido2_page_script.js:81-83`）；`expires_in` 按契约收 `u32`；`origin` 加
-//!   fail-closed 形状校验（只收 `http(s)://` + 授权段）；`null` 视为字段缺席；
-//!   夹具一律合成值。逐条依据见仓外报告。
+//! - 自设：`nonce` 收 `u64`（扩展侧 `newNonce()` 只出 u32）；`expires_in` 收 `u32`；
+//!   `origin` 加 fail-closed 形状校验；`null` 视为缺席；夹具一律合成值（见报告）。
 //!
 //! # type 10 的方向张力（本卡不裁定）
 //!
@@ -112,6 +109,22 @@ impl CredentialKind {
             Self::Passkey => "passkey",
         }
     }
+
+    /// 解析线上 `kind` 字面量（宿主侧读条目种类时的入口）。
+    ///
+    /// # Errors
+    /// 取值不在三值之列 ⇒ [`PayloadError::InvalidValue`]（`field = "kind"`）。
+    pub fn parse(text: &str) -> Result<Self, PayloadError> {
+        match text {
+            "password" => Ok(Self::Password),
+            "totp" => Ok(Self::Totp),
+            "passkey" => Ok(Self::Passkey),
+            _ => Err(PayloadError::InvalidValue {
+                field: "kind",
+                reason: "只允许 password | totp | passkey",
+            }),
+        }
+    }
 }
 
 /// 风控预检结论（契约 §5.3.1 的 `decision`；缺省由调用方定为 deny）。
@@ -155,7 +168,6 @@ pub struct UserInfo {
     pub display_name: String,
 }
 
-// ---------------------------------------------------------------- 请求载荷
 /// type 0 请求：`{nonce, store_id?}`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListCredentialsRequest {
@@ -266,7 +278,6 @@ pub struct AuthQueryRequest {
     pub store_id: String,
 }
 
-// ---------------------------------------------------------------- 响应载荷
 /// type 0 响应：`{nonce, items:[{id, rp_id, kind, username?}]}`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListCredentialsResponse {
@@ -296,8 +307,7 @@ pub struct GetTotpResponse {
     pub expires_in: u32,
 }
 
-/// type 3 响应：`{nonce, credential_id, cose_key_b64, auth_data_b64,
-/// client_data_json_b64, signature_b64}`。
+/// type 3 响应：`{nonce, credential_id, cose_key_b64, auth_data_b64, client_data_json_b64, signature_b64}`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PasskeyCreateResponse {
     /// 回显请求的 `nonce`。
@@ -314,8 +324,7 @@ pub struct PasskeyCreateResponse {
     pub signature_b64: String,
 }
 
-/// type 4 响应：`{nonce, credential_id, auth_data_b64, client_data_json_b64,
-/// signature_b64, user_handle?}`。
+/// type 4 响应：`{nonce, credential_id, auth_data_b64, client_data_json_b64, signature_b64, user_handle?}`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PasskeyGetResponse {
     /// 回显请求的 `nonce`。
@@ -377,13 +386,10 @@ pub struct AuthQueryResponse {
     pub granted: bool,
 }
 
-// ---------------------------------------------------------------- 载荷枚举
-
 /// 扩展 → host 的请求载荷（type 0–10）。
 ///
-/// `type = 10`（[`Self::UseNativeResponse`]）的载荷是**空对象** `{}`：契约
-/// §5.3.1 的表把它列成 `{}`（无载荷）⇒ 本模块只把载荷定义成空，
-/// ⛔ 不裁定方向（见模块文档的「方向张力」）。
+/// `type = 10`（[`Self::UseNativeResponse`]）载荷为空对象 `{}`：⛔ 不裁定方向
+/// （契约三处表述不一致，见模块文档的「方向张力」）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// type 0。
@@ -412,8 +418,7 @@ pub enum Request {
 
 /// host → 扩展 的响应载荷（type 0–9）。
 ///
-/// ⛔ 没有 type 10 变体：契约 §5.3.1 里 type 10 的响应无载荷（且它写的是
-/// 「仅宿主 → 扩展」）⇒ 方向张力原样保留（见模块文档）。
+/// ⛔ 没有 type 10 变体（契约 §5.3.1 写它无载荷；方向张力见模块文档）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
     /// type 0。
@@ -477,8 +482,7 @@ impl Response {
     }
 }
 
-/// 校验响应回显的 `nonce` 与请求的**逐字节相同**（契约 §5.3.1：响应必回显
-/// 同一条 `nonce`，供扩展匹配请求与响应）。
+/// 校验响应回显的 `nonce` 与请求的**逐字节相同**（响应必回显，供扩展配对）。
 ///
 /// # Errors
 /// - 请求是 `type = 10`（无 `nonce`）⇒ [`JsonError::MissingField`]。
@@ -490,16 +494,13 @@ pub fn verify_nonce_echo(request: &Request, response: &Response) -> Result<(), P
             request: nonce,
             response: response.nonce(),
         }),
-        None => Err(PayloadError::Json(JsonError::MissingField {
-            field: "nonce",
-        })),
+        None => Err(PayloadError::Json(JsonError::MissingField("nonce"))),
     }
 }
 
 /// 生成 `clientDataJSON`（宿主生成，**单一可信来源**；页面不得重新编码）。
 ///
-/// 逐字节等于契约 §5.3.1 的固定模板：无空格、键顺序固定
-/// （`type` → `challenge` → `origin` → `crossOrigin`）、`crossOrigin` 为 `false`。
+/// 逐字节等于契约模板：无空格、键序固定、`crossOrigin` 为 `false`。
 #[must_use]
 pub fn client_data_json(kind: ClientDataKind, challenge_b64url: &str, origin: &str) -> String {
     json::encode(
@@ -588,8 +589,7 @@ fn credential_item_value(item: &CredentialItem) -> Value {
 ///
 /// # Errors
 /// - 载荷不是合法 JSON / 不是对象 ⇒ [`PayloadError::Json`]。
-/// - 缺必填字段 ⇒ [`JsonError::MissingField`]；类型不符 ⇒
-///   [`JsonError::FieldTypeMismatch`]。
+/// - 缺必填 ⇒ [`JsonError::MissingField`]；类型不符 ⇒ [`JsonError::FieldTypeMismatch`]。
 /// - 二进制字段不是合法 base64url ⇒ [`PayloadError::InvalidBinary`]。
 /// - `origin` 形状非法 ⇒ [`PayloadError::InvalidValue`]。
 /// - `type = 10` 的载荷必须是 `{}`（空对象或只含未知字段）。
@@ -657,8 +657,6 @@ pub fn decode_request(message_type: MessageType, bytes: &[u8]) -> Result<Request
     };
     Ok(request)
 }
-
-// ------------------------------------------------------------ 字段层自设校验
 
 /// `origin` 形状校验（自设 fail-closed 规则，见模块文档）。
 fn origin_field(fields: &Fields<'_>) -> Result<String, PayloadError> {

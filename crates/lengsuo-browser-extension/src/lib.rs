@@ -53,7 +53,7 @@ pub use base64url::{decode as base64url_decode, encode as base64url_encode, Base
 pub use envelope::{decode_frame_b64, encode_frame_b64, EnvelopeError, MAX_ENVELOPE_LEN};
 pub use error::FrameError;
 pub use frame::{decode, decode_exact, Frame, FRAME_HEADER_LEN, MAX_PAYLOAD_LEN, RESERVED_LEN};
-pub use json::{parse as json_parse, MAX_JSON_BYTES, MAX_JSON_DEPTH};
+pub use json::{parse as json_parse, JsonError, MAX_JSON_BYTES, MAX_JSON_DEPTH};
 pub use message::{MessageType, HOST_NAME, NATIVE_RESPONSE_FALLBACK_TYPE};
 pub use payload::{
     client_data_json, decode_request, encode_response, verify_nonce_echo, ClientDataKind,

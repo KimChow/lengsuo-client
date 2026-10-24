@@ -135,76 +135,70 @@ impl From<&str> for Value {
 /// JSON 解析 / 编码失败。
 ///
 /// 全部 fail-closed：任何分支都不返回部分结果、不猜测、不「尽力解析」；
-/// 变体之间语义可区分，多数带**字节偏移**便于定位跨端不一致。
+/// 变体之间语义可区分，多数带**字节偏移**便于定位跨端不一致
+/// （元组各位置的语义写在变体文档里）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum JsonError {
-    /// 输入超过 [`MAX_JSON_BYTES`]。
-    #[error("JSON 输入 {actual} 字节超过上限 {limit} 字节：拒绝，不截断")]
-    InputTooLong { limit: usize, actual: usize },
-    /// 输入不是合法 UTF-8。
-    #[error("JSON 输入不是合法 UTF-8（首个非法字节偏移 {at}）")]
-    NotUtf8 { at: usize },
-    /// 嵌套超过 [`MAX_JSON_DEPTH`] 层。
-    #[error("JSON 嵌套超过 {limit} 层（偏移 {at}）")]
-    DepthExceeded { limit: usize, at: usize },
-    /// 值还没读完，输入就结束了。
-    #[error("JSON 输入意外结束（偏移 {at}）")]
-    UnexpectedEnd { at: usize },
-    /// 遇到了不该出现的字节。
-    #[error("JSON 偏移 {at} 处期望{expected}，实际字节 {found:#04x}")]
-    UnexpectedByte {
-        at: usize,
-        expected: &'static str,
-        found: u8,
-    },
-    /// 顶层值之后还有多余字节。
-    #[error("JSON 顶层值之后有多余字节（偏移 {at}）")]
-    TrailingBytes { at: usize },
-    /// 字符串没有闭合引号。
-    #[error("JSON 字符串未闭合（偏移 {at}）")]
-    UnterminatedString { at: usize },
-    /// 字符串里有未转义的控制字符（`< 0x20`）。
-    #[error("JSON 字符串含未转义控制字符（偏移 {at}）")]
-    ControlCharInString { at: usize },
-    /// 非法转义序列。
-    #[error("JSON 非法转义 `\\{escape}`（偏移 {at}）")]
-    InvalidEscape { at: usize, escape: char },
-    /// `\uXXXX` 的十六进制位数非法。
-    #[error("JSON `\\u` 转义的十六进制位数非法（偏移 {at}）")]
-    InvalidUnicodeEscape { at: usize },
-    /// 代理对不成立（孤立代理，或高代理后不是低代理）。
-    #[error("JSON `\\u` 代理对不成立（偏移 {at}）")]
-    UnpairedSurrogate { at: usize },
-    /// 对象里同一个键出现两次。
-    #[error("JSON 对象重复键 {key:?}：拒绝（两个真值源）")]
-    DuplicateKey { key: String },
-    /// 数字带负号。
-    #[error("JSON 数字不允许负号（偏移 {at}）")]
-    NegativeNumber { at: usize },
-    /// 数字带小数部分。
-    #[error("JSON 数字不允许小数部分（偏移 {at}）")]
-    FractionalNumber { at: usize },
-    /// 数字带指数部分。
-    #[error("JSON 数字不允许指数部分（偏移 {at}）")]
-    ExponentNumber { at: usize },
-    /// 数字有前导零（`01`）。
-    #[error("JSON 数字不允许前导零（偏移 {at}）")]
-    LeadingZero { at: usize },
-    /// 数字带正号（`+1`）。
-    #[error("JSON 数字不允许正号（偏移 {at}）")]
-    LeadingPlus { at: usize },
-    /// 整数超过 `u64::MAX`。
-    #[error("JSON 整数超过 u64 上限（偏移 {at}）")]
-    NumberOutOfRange { at: usize },
-    /// 对象缺少必填字段。
-    #[error("JSON 对象缺少必填字段 {field:?}")]
-    MissingField { field: &'static str },
-    /// 字段存在但类型不符。
-    #[error("JSON 字段 {field:?} 期望{expected}")]
-    FieldTypeMismatch {
-        field: &'static str,
-        expected: &'static str,
-    },
+    /// 输入超过 [`MAX_JSON_BYTES`]（`0` = 上限，`1` = 实际字节数）。
+    #[error("JSON 输入 {1} 字节超过上限 {0} 字节：拒绝，不截断")]
+    InputTooLong(usize, usize),
+    /// 输入不是合法 UTF-8（参数 = 首个非法字节的偏移）。
+    #[error("JSON 输入不是合法 UTF-8（首个非法字节偏移 {0}）")]
+    NotUtf8(usize),
+    /// 嵌套超过 [`MAX_JSON_DEPTH`] 层（`0` = 上限，`1` = 超限处偏移）。
+    #[error("JSON 嵌套超过 {0} 层（偏移 {1}）")]
+    DepthExceeded(usize, usize),
+    /// 值还没读完，输入就结束了（参数 = 结束处的偏移）。
+    #[error("JSON 输入意外结束（偏移 {0}）")]
+    UnexpectedEnd(usize),
+    /// 遇到了不该出现的字节（`0` = 偏移，`1` = 人读的期望，`2` = 实际字节）。
+    #[error("JSON 偏移 {0} 处期望{1}，实际字节 {2:#04x}")]
+    UnexpectedByte(usize, &'static str, u8),
+    /// 顶层值之后还有多余字节（参数 = 多余字节的偏移）。
+    #[error("JSON 顶层值之后有多余字节（偏移 {0}）")]
+    TrailingBytes(usize),
+    /// 字符串没有闭合引号（参数 = 开引号的偏移）。
+    #[error("JSON 字符串未闭合（偏移 {0}）")]
+    UnterminatedString(usize),
+    /// 字符串里有未转义的控制字符（`< 0x20`；参数 = 偏移）。
+    #[error("JSON 字符串含未转义控制字符（偏移 {0}）")]
+    ControlCharInString(usize),
+    /// 非法转义序列（`0` = 反斜杠偏移，`1` = 其后的字符）。
+    #[error("JSON 非法转义 `\\{1}`（偏移 {0}）")]
+    InvalidEscape(usize, char),
+    /// `\uXXXX` 的十六进制位非法（参数 = 首个非法位的偏移）。
+    #[error("JSON `\\u` 转义的十六进制位数非法（偏移 {0}）")]
+    InvalidUnicodeEscape(usize),
+    /// 代理对不成立（孤立代理，或高代理后不是低代理；参数 = 转义起始偏移）。
+    #[error("JSON `\\u` 代理对不成立（偏移 {0}）")]
+    UnpairedSurrogate(usize),
+    /// 对象里同一个键出现两次（参数 = 重复的键）。
+    #[error("JSON 对象重复键 {0:?}：拒绝（两个真值源）")]
+    DuplicateKey(String),
+    /// 数字带负号（参数 = 数字起始偏移）。
+    #[error("JSON 数字不允许负号（偏移 {0}）")]
+    NegativeNumber(usize),
+    /// 数字带小数部分（参数 = 小数点偏移）。
+    #[error("JSON 数字不允许小数部分（偏移 {0}）")]
+    FractionalNumber(usize),
+    /// 数字带指数部分（参数 = 指数标记偏移）。
+    #[error("JSON 数字不允许指数部分（偏移 {0}）")]
+    ExponentNumber(usize),
+    /// 数字有前导零（`01`；参数 = 数字起始偏移）。
+    #[error("JSON 数字不允许前导零（偏移 {0}）")]
+    LeadingZero(usize),
+    /// 数字带正号（`+1`；参数 = 数字起始偏移）。
+    #[error("JSON 数字不允许正号（偏移 {0}）")]
+    LeadingPlus(usize),
+    /// 整数超过 `u64::MAX`（参数 = 数字起始偏移）。
+    #[error("JSON 整数超过 u64 上限（偏移 {0}）")]
+    NumberOutOfRange(usize),
+    /// 对象缺少必填字段（参数 = 字段名）。
+    #[error("JSON 对象缺少必填字段 {0:?}")]
+    MissingField(&'static str),
+    /// 字段存在但类型不符（`0` = 字段名，`1` = 人读的期望类型）。
+    #[error("JSON 字段 {0:?} 期望{1}")]
+    FieldTypeMismatch(&'static str, &'static str),
 }
 
 /// 解析 UTF-8 JSON 字节（契约 §5.3.1：载荷是 UTF-8 JSON、数字是整数）。
@@ -213,14 +207,10 @@ pub enum JsonError {
 /// [`JsonError`] 的每个变体对应一类可区分的失败（见变体文档）。
 pub fn parse(bytes: &[u8]) -> Result<Value, JsonError> {
     if bytes.len() > MAX_JSON_BYTES {
-        return Err(JsonError::InputTooLong {
-            limit: MAX_JSON_BYTES,
-            actual: bytes.len(),
-        });
+        return Err(JsonError::InputTooLong(MAX_JSON_BYTES, bytes.len()));
     }
-    let text = core::str::from_utf8(bytes).map_err(|error| JsonError::NotUtf8 {
-        at: error.valid_up_to(),
-    })?;
+    let text =
+        core::str::from_utf8(bytes).map_err(|error| JsonError::NotUtf8(error.valid_up_to()))?;
     let mut parser = Parser {
         bytes: text.as_bytes(),
         pos: 0,
@@ -229,7 +219,7 @@ pub fn parse(bytes: &[u8]) -> Result<Value, JsonError> {
     let value = parser.parse_value(0)?;
     parser.skip_whitespace();
     if parser.pos != text.len() {
-        return Err(JsonError::TrailingBytes { at: parser.pos });
+        return Err(JsonError::TrailingBytes(parser.pos));
     }
     Ok(value)
 }
@@ -317,21 +307,18 @@ impl Parser<'_> {
 
     fn parse_value(&mut self, depth: usize) -> Result<Value, JsonError> {
         if depth > MAX_JSON_DEPTH {
-            return Err(JsonError::DepthExceeded {
-                limit: MAX_JSON_DEPTH,
-                at: self.pos,
-            });
+            return Err(JsonError::DepthExceeded(MAX_JSON_DEPTH, self.pos));
         }
         match self.peek() {
-            None => Err(JsonError::UnexpectedEnd { at: self.pos }),
+            None => Err(JsonError::UnexpectedEnd(self.pos)),
             Some(b'{') => self.parse_object(depth),
             Some(b'[') => self.parse_array(depth),
             Some(b'"') => self.parse_string().map(Value::String),
             Some(b't') => self.parse_literal(b"true", Value::Bool(true)),
             Some(b'f') => self.parse_literal(b"false", Value::Bool(false)),
             Some(b'n') => self.parse_literal(b"null", Value::Null),
-            Some(b'-') => Err(JsonError::NegativeNumber { at: self.pos }),
-            Some(b'+') => Err(JsonError::LeadingPlus { at: self.pos }),
+            Some(b'-') => Err(JsonError::NegativeNumber(self.pos)),
+            Some(b'+') => Err(JsonError::LeadingPlus(self.pos)),
             Some(byte) if byte.is_ascii_digit() => self.parse_number(),
             Some(byte) => Err(unexpected_byte(self.pos, "JSON 值", byte)),
         }
@@ -342,7 +329,7 @@ impl Parser<'_> {
             match self.bump() {
                 Some(byte) if byte == *wanted => {}
                 Some(byte) => return Err(unexpected_byte(self.pos - 1, "字面量", byte)),
-                None => return Err(JsonError::UnexpectedEnd { at: self.pos }),
+                None => return Err(JsonError::UnexpectedEnd(self.pos)),
             }
         }
         Ok(value)
@@ -353,7 +340,7 @@ impl Parser<'_> {
         if self.bytes[self.pos] == b'0' {
             self.pos += 1;
             if matches!(self.peek(), Some(byte) if byte.is_ascii_digit()) {
-                return Err(JsonError::LeadingZero { at: start });
+                return Err(JsonError::LeadingZero(start));
             }
         }
         let mut value: u64 = 0;
@@ -366,11 +353,11 @@ impl Parser<'_> {
             value = value
                 .checked_mul(10)
                 .and_then(|partial| partial.checked_add(digit))
-                .ok_or(JsonError::NumberOutOfRange { at: start })?;
+                .ok_or(JsonError::NumberOutOfRange(start))?;
         }
         match self.peek() {
-            Some(b'.') => Err(JsonError::FractionalNumber { at: self.pos }),
-            Some(b'e' | b'E') => Err(JsonError::ExponentNumber { at: self.pos }),
+            Some(b'.') => Err(JsonError::FractionalNumber(self.pos)),
+            Some(b'e' | b'E') => Err(JsonError::ExponentNumber(self.pos)),
             _ => Ok(Value::Uint(value)),
         }
     }
@@ -386,14 +373,14 @@ impl Parser<'_> {
         loop {
             self.skip_whitespace();
             let Some(byte) = self.peek() else {
-                return Err(JsonError::UnexpectedEnd { at: self.pos });
+                return Err(JsonError::UnexpectedEnd(self.pos));
             };
             if byte != b'"' {
                 return Err(unexpected_byte(self.pos, "键名（JSON 字符串）", byte));
             }
             let key = self.parse_string()?;
             if entries.iter().any(|(existing, _)| *existing == key) {
-                return Err(JsonError::DuplicateKey { key });
+                return Err(JsonError::DuplicateKey(key));
             }
             self.skip_whitespace();
             self.expect_byte(b':', "冒号")?;
@@ -405,7 +392,7 @@ impl Parser<'_> {
                 Some(b',') => {}
                 Some(b'}') => return Ok(Value::Object(entries)),
                 Some(byte) => return Err(unexpected_byte(self.pos - 1, "逗号或右花括号", byte)),
-                None => return Err(JsonError::UnexpectedEnd { at: self.pos }),
+                None => return Err(JsonError::UnexpectedEnd(self.pos)),
             }
         }
     }
@@ -426,7 +413,7 @@ impl Parser<'_> {
                 Some(b',') => {}
                 Some(b']') => return Ok(Value::Array(items)),
                 Some(byte) => return Err(unexpected_byte(self.pos - 1, "逗号或右方括号", byte)),
-                None => return Err(JsonError::UnexpectedEnd { at: self.pos }),
+                None => return Err(JsonError::UnexpectedEnd(self.pos)),
             }
         }
     }
@@ -437,15 +424,15 @@ impl Parser<'_> {
         let mut bytes: Vec<u8> = Vec::new();
         loop {
             match self.bump() {
-                None => return Err(JsonError::UnterminatedString { at: start }),
+                None => return Err(JsonError::UnterminatedString(start)),
                 Some(b'"') => {
-                    return String::from_utf8(bytes).map_err(|error| JsonError::NotUtf8 {
-                        at: start + error.utf8_error().valid_up_to(),
+                    return String::from_utf8(bytes).map_err(|error| {
+                        JsonError::NotUtf8(start + error.utf8_error().valid_up_to())
                     })
                 }
                 Some(b'\\') => self.parse_escape(&mut bytes)?,
                 Some(byte) if byte < 0x20 => {
-                    return Err(JsonError::ControlCharInString { at: self.pos - 1 })
+                    return Err(JsonError::ControlCharInString(self.pos - 1))
                 }
                 Some(byte) => bytes.push(byte),
             }
@@ -456,7 +443,7 @@ impl Parser<'_> {
     fn parse_escape(&mut self, out: &mut Vec<u8>) -> Result<(), JsonError> {
         let at = self.pos - 1;
         let Some(escaped) = self.bump() else {
-            return Err(JsonError::UnexpectedEnd { at: self.pos });
+            return Err(JsonError::UnexpectedEnd(self.pos));
         };
         match escaped {
             b'"' => out.push(b'"'),
@@ -469,10 +456,7 @@ impl Parser<'_> {
             b't' => out.push(b'\t'),
             b'u' => return self.parse_unicode_escape(out, at),
             other => {
-                return Err(JsonError::InvalidEscape {
-                    at,
-                    escape: char::from(other),
-                })
+                return Err(JsonError::InvalidEscape(at, char::from(other)));
             }
         }
         Ok(())
@@ -485,24 +469,24 @@ impl Parser<'_> {
             0xD800..=0xDBFF => {
                 // 高代理：后面必须紧跟 `\uXXXX` 形式的低代理。
                 if self.peek() != Some(b'\\') || self.bytes.get(self.pos + 1) != Some(&b'u') {
-                    return Err(JsonError::UnpairedSurrogate { at });
+                    return Err(JsonError::UnpairedSurrogate(at));
                 }
                 self.pos += 2;
                 let low = self.parse_hex4()?;
                 if !(0xDC00..=0xDFFF).contains(&low) {
-                    return Err(JsonError::UnpairedSurrogate { at });
+                    return Err(JsonError::UnpairedSurrogate(at));
                 }
                 let combined = 0x1_0000 + ((code - 0xD800) << 10) + (low - 0xDC00);
                 let Some(character) = char::from_u32(combined) else {
-                    return Err(JsonError::UnpairedSurrogate { at });
+                    return Err(JsonError::UnpairedSurrogate(at));
                 };
                 let mut buffer = [0u8; 4];
                 out.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
             }
-            0xDC00..=0xDFFF => return Err(JsonError::UnpairedSurrogate { at }),
+            0xDC00..=0xDFFF => return Err(JsonError::UnpairedSurrogate(at)),
             _ => {
                 let Some(character) = char::from_u32(code) else {
-                    return Err(JsonError::UnpairedSurrogate { at });
+                    return Err(JsonError::UnpairedSurrogate(at));
                 };
                 let mut buffer = [0u8; 4];
                 out.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
@@ -515,13 +499,13 @@ impl Parser<'_> {
         let mut value: u32 = 0;
         for _ in 0..4 {
             let Some(byte) = self.bump() else {
-                return Err(JsonError::UnexpectedEnd { at: self.pos });
+                return Err(JsonError::UnexpectedEnd(self.pos));
             };
             let digit = match byte {
                 b'0'..=b'9' => u32::from(byte - b'0'),
                 b'a'..=b'f' => u32::from(byte - b'a') + 10,
                 b'A'..=b'F' => u32::from(byte - b'A') + 10,
-                _ => return Err(JsonError::InvalidUnicodeEscape { at: self.pos - 1 }),
+                _ => return Err(JsonError::InvalidUnicodeEscape(self.pos - 1)),
             };
             value = value * 16 + digit;
         }
@@ -532,7 +516,7 @@ impl Parser<'_> {
         match self.bump() {
             Some(byte) if byte == wanted => Ok(()),
             Some(byte) => Err(unexpected_byte(self.pos - 1, expected, byte)),
-            None => Err(JsonError::UnexpectedEnd { at: self.pos }),
+            None => Err(JsonError::UnexpectedEnd(self.pos)),
         }
     }
 }
@@ -567,17 +551,13 @@ impl ObjectBuilder {
 
 /// 字段类型不符错误的构造器（省去各处重复写全字段名）。
 fn mismatch(field: &'static str, expected: &'static str) -> JsonError {
-    JsonError::FieldTypeMismatch { field, expected }
+    JsonError::FieldTypeMismatch(field, expected)
 }
 
 /// 「期望 X，实际字节 Y」错误的构造器；`at` 由调用方给出
 /// （字节已被消费后的报错传 `pos - 1`）。
 fn unexpected_byte(at: usize, expected: &'static str, found: u8) -> JsonError {
-    JsonError::UnexpectedByte {
-        at,
-        expected,
-        found,
-    }
+    JsonError::UnexpectedByte(at, expected, found)
 }
 
 /// 保序 JSON 对象的带类型读取器：只按契约已知字段取值 ⇒ **未知字段自动忽略**
@@ -604,19 +584,13 @@ impl<'a> Fields<'a> {
     }
 
     pub(crate) fn required(&self, field: &'static str) -> Result<&'a Value, JsonError> {
-        self.raw(field).ok_or(JsonError::MissingField { field })
+        self.raw(field).ok_or(JsonError::MissingField(field))
     }
 
     pub(crate) fn uint(&self, field: &'static str) -> Result<u64, JsonError> {
         self.required(field)?
             .as_u64()
             .ok_or(mismatch(field, "非负整数"))
-    }
-
-    /// 必填的 u32 字段（超出 u32 范围也报错）。
-    pub(crate) fn u32(&self, field: &'static str) -> Result<u32, JsonError> {
-        let value = self.uint(field)?;
-        u32::try_from(value).map_err(|_| mismatch(field, "u32 范围内的整数"))
     }
 
     pub(crate) fn string(&self, field: &'static str) -> Result<String, JsonError> {
@@ -635,12 +609,6 @@ impl<'a> Fields<'a> {
                 .map(|text| Some(text.to_owned()))
                 .ok_or(mismatch(field, "字符串")),
         }
-    }
-
-    pub(crate) fn bool(&self, field: &'static str) -> Result<bool, JsonError> {
-        self.required(field)?
-            .as_bool()
-            .ok_or(mismatch(field, "布尔"))
     }
 
     /// 必填的数组字段。
@@ -665,13 +633,5 @@ impl<'a> Fields<'a> {
     /// 必填的**对象**字段。
     pub(crate) fn object(&self, field: &'static str) -> Result<Self, JsonError> {
         Self::new(self.required(field)?, field)
-    }
-
-    /// 必填的**对象数组**字段，逐元素返回读取器。
-    pub(crate) fn objects(&self, field: &'static str) -> Result<Vec<Self>, JsonError> {
-        self.array(field)?
-            .iter()
-            .map(|item| Self::new(item, field))
-            .collect()
     }
 }
