@@ -33,6 +33,7 @@ impl CommandRunner for RecordingRunner {
 #[cfg(unix)]
 struct RefusingRunner;
 
+#[cfg(unix)]
 impl CommandRunner for RefusingRunner {
     fn run(&self, command_line: &str) -> Result<(), String> {
         Err(format!(

@@ -37,8 +37,8 @@ impl CommandRunner for RecordingRunner {
 }
 
 /// 只要被调用就失败的执行器：钉住「POSIX 分支不碰 runner」。
-/// 消费方全是 `#[cfg(unix)]` 的 POSIX 实 IO 用例 ⇒ 随之门控。
-#[cfg(unix)]
+/// 除 `#[cfg(unix)]` 实 IO 用例外，`deregister_refuses_relative_manifest_path`
+/// 是无门控的 fail-closed 断言，也在全平台引用它 ⇒ 不门控，两平台都编译。
 struct RefusingRunner;
 
 impl CommandRunner for RefusingRunner {
