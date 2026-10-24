@@ -3,3 +3,9 @@ name = "lengsuo-browser-installer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+# 依赖说明（本卡基建：供 host manifest 安装层复用，⛔ 不引入新外部 crate）：
+#   lengsuo-native-host —— W3b-2c 已交付的 `render_host_manifest` / `plan_*` / `register`
+#     与 `CommandRunner`（契约 §5.4 要求安装器复用同一份实现，⛔ 不复制字节）。
+[dependencies]
+lengsuo-native-host = { path = "../lengsuo-native-host" }

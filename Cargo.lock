@@ -667,6 +667,9 @@ dependencies = [
 [[package]]
 name = "lengsuo-browser-installer"
 version = "0.1.0"
+dependencies = [
+ "lengsuo-native-host",
+]
 
 [[package]]
 name = "lengsuo-browser-launch"
