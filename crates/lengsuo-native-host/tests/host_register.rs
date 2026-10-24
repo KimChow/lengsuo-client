@@ -12,6 +12,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+// 仅 POSIX 实 IO 夹具消费；Windows 上那些用例被 `#[cfg(unix)]` 门掉 ⇒ 随之门控。
+#[cfg(unix)]
 use lengsuo_native_host::manifest::{render_host_manifest, Platform};
 use lengsuo_native_host::register::{
     deregister, plan_posix, plan_windows, register, CommandRunner, PosixPlan, RegisterError,
@@ -35,6 +37,8 @@ impl CommandRunner for RecordingRunner {
 }
 
 /// 只要被调用就失败的执行器：钉住「POSIX 分支不碰 runner」。
+/// 消费方全是 `#[cfg(unix)]` 的 POSIX 实 IO 用例 ⇒ 随之门控。
+#[cfg(unix)]
 struct RefusingRunner;
 
 impl CommandRunner for RefusingRunner {
@@ -59,6 +63,7 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
+#[cfg(unix)]
 const SYNTHETIC_MANIFEST: &str = "/opt/lengsuo/lengsuo-native-host";
 /// 合成的 Windows 绝对路径（命令行逐字断言用；不指向真实文件也没关系 —— 本卡不真跑）。
 const SYNTHETIC_MANIFEST_WIN: &str = r"C:\lengsuo\lengsuo-native-host.exe";
@@ -183,8 +188,25 @@ fn posix_plan_rejects_relative_dir_and_empty_manifest() {
     assert!(matches!(err, RegisterError::UserDataDirNotAbsolute { .. }));
 }
 
+/// Windows 对等夹具（上轮 Windows 实机复验观察到的事实，钉成绿用例防回退）：
+/// Windows 的 `unique_temp_dir()` 产出盘符形状目录 ⇒ `plan_posix` 必须 fail-closed 拒绝。
+#[cfg(windows)]
+#[test]
+fn windows_shaped_temp_dir_is_rejected_by_posix_plan() {
+    let dir = unique_temp_dir("win-posix-reject");
+    let err = plan_posix(&dir, SYNTHETIC_JSON).expect_err("盘符形状目录必须被拒");
+    assert!(
+        matches!(err, RegisterError::UserDataDirNotAbsolute { .. }),
+        "期望 UserDataDirNotAbsolute，得到 {err:?}"
+    );
+}
+
 // ----------------------------------------------------------- 注册（含 IO）
 
+// 以下 4 个是 POSIX 文件系统语义的实 IO 夹具：`unique_temp_dir()` 在 Windows 产出盘符
+// 形状目录，`plan_posix` 会按 POSIX 绝对路径判据**正确拒绝**（fail-closed，非产品缺陷）
+// ⇒ 门控到 Unix；Windows 侧对等钉住见 `windows_shaped_temp_dir_is_rejected_by_posix_plan`。
+#[cfg(unix)]
 #[test]
 fn posix_register_writes_file_read_back_identical_and_is_idempotent() {
     let dir = unique_temp_dir("posix-register");
@@ -206,6 +228,7 @@ fn posix_register_writes_file_read_back_identical_and_is_idempotent() {
     assert_eq!(again, SYNTHETIC_JSON.as_bytes());
 }
 
+#[cfg(unix)]
 #[test]
 fn posix_register_creates_missing_native_messaging_hosts_dir() {
     let dir = unique_temp_dir("posix-mkdir");
@@ -248,6 +271,7 @@ fn runner_failure_is_named_error() {
 
 // ----------------------------------------------------------- 撤销注册（IO）
 
+#[cfg(unix)]
 #[test]
 fn posix_deregister_removes_only_our_file_and_is_idempotent() {
     let dir = unique_temp_dir("posix-deregister");
@@ -284,6 +308,9 @@ fn deregister_refuses_relative_manifest_path() {
 
 // ------------------------------------------------------------ 一致性联测
 
+// POSIX 实 IO（落盘到 `unique_temp_dir`），同上门控；Windows 对等见
+// `windows_shaped_temp_dir_is_rejected_by_posix_plan`。
+#[cfg(unix)]
 #[test]
 fn rendered_manifest_round_trips_through_posix_register() {
     // 渲染 → 计划 → 落盘 → 读回 == 渲染（跨模块的粘合层不吞字节）。

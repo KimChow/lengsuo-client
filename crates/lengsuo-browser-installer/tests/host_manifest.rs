@@ -28,7 +28,9 @@ impl CommandRunner for RecordingRunner {
     }
 }
 
-/// 只要被调用就失败：钉住「POSIX 分支不碰 runner」。
+/// 只要被调用就失败：钉住「POSIX 分支不碰 runner」。消费方是
+/// `#[cfg(unix)]` 的 POSIX 端到端用例 ⇒ 随之门控（Windows 侧用 RecordingRunner 钉零调用）。
+#[cfg(unix)]
 struct RefusingRunner;
 
 impl CommandRunner for RefusingRunner {
@@ -140,10 +142,11 @@ fn posix_plan_manifest_file_and_registration() {
     let plan = plan_host_install(&req).expect("必须成功");
 
     assert_eq!(plan.host_binary, "/opt/lengsuo/lengsuo-native-host");
-    assert_eq!(
-        plan.manifest_file,
-        "/home/u/.lengsuo-profile/NativeMessagingHosts/lengsuo.credential.json"
-    );
+    // 落点期望用 Path 拼接构造（⛔ 不硬编码 `/` 分隔符：Windows 上 `PathBuf` 拼出来是 `\`）。
+    let expected_manifest_file = Path::new("/home/u/.lengsuo-profile")
+        .join(POSIX_USER_SUBDIR)
+        .join("lengsuo.credential.json");
+    assert_eq!(Path::new(&plan.manifest_file), expected_manifest_file);
     assert_eq!(
         plan.manifest_json,
         expected_posix_manifest("/opt/lengsuo/lengsuo-native-host")
@@ -152,10 +155,7 @@ fn posix_plan_manifest_file_and_registration() {
     match &plan.registration {
         RegistrationPlan::Posix(pp) => {
             assert_eq!(pp.contents, plan.manifest_json);
-            assert_eq!(
-                pp.manifest_file,
-                Path::new("/home/u/.lengsuo-profile/NativeMessagingHosts/lengsuo.credential.json")
-            );
+            assert_eq!(pp.manifest_file, expected_manifest_file);
         }
         RegistrationPlan::Windows(_) => panic!("POSIX 请求必须产出 POSIX 注册计划"),
     }
@@ -163,6 +163,10 @@ fn posix_plan_manifest_file_and_registration() {
 
 // ------------------------------------------------------------- POSIX 端到端（含 IO）
 
+// POSIX 文件系统语义的实 IO 夹具：`unique_temp_dir()` 在 Windows 产出盘符形状目录，
+// `plan_host_install` 会按 POSIX 绝对路径判据**正确拒绝**（fail-closed，非产品缺陷）
+// ⇒ 门控到 Unix；Windows 侧对等钉住见下方 `windows_binary_missing_fail_closed_zero_side_effects`。
+#[cfg(unix)]
 #[test]
 fn posix_install_round_trip_read_back_identical_and_idempotent() {
     let install_root = unique_temp_dir("install-root");
@@ -222,6 +226,7 @@ fn posix_missing_user_data_dir_is_named_error() {
     assert!(matches!(err, HostInstallError::MissingUserDataDir));
 }
 
+#[cfg(unix)]
 #[test]
 fn host_binary_missing_fail_closed_zero_side_effects() {
     let install_root = unique_temp_dir("no-bin");
@@ -240,6 +245,32 @@ fn host_binary_missing_fail_closed_zero_side_effects() {
     );
     // 零副作用：清单目录未产生，runner 未被调用。
     assert!(!user_data_dir.join(POSIX_USER_SUBDIR).exists());
+    assert!(
+        runner.commands.lock().unwrap().is_empty(),
+        "runner 不得被调用"
+    );
+}
+
+/// Windows 对等夹具（`#[cfg(windows)]`）：Windows 的 `unique_temp_dir()` 是盘符形状
+/// ⇒ `Platform::Windows` 计划能走完整 fail-closed 路径：宿主二进制缺失 ⇒ `HostBinaryMissing`
+/// 且 runner 零调用（Windows 的清单落点在注册表、经 runner 写入 ⇒ runner 未被调用即零副作用）。
+/// 真正执行 `reg.exe` 落库属实机验证，测试不跑（见状态报告）。
+#[cfg(windows)]
+#[test]
+fn windows_binary_missing_fail_closed_zero_side_effects() {
+    let install_root = unique_temp_dir("no-bin-win");
+    let req = HostInstallRequest {
+        install_root,
+        platform: Platform::Windows,
+        user_data_dir: None,
+    };
+    let runner = RecordingRunner::default();
+
+    let err = install_host_manifest(&req, &runner).expect_err("宿主二进制缺失必须失败");
+    assert!(
+        matches!(err, HostInstallError::HostBinaryMissing { .. }),
+        "期望 HostBinaryMissing，得到 {err:?}"
+    );
     assert!(
         runner.commands.lock().unwrap().is_empty(),
         "runner 不得被调用"
