@@ -184,27 +184,47 @@ async fn rust_vless_server(listener: TcpListener) {
 }
 
 /// Rust 客户端走 Mihomo 的 `mixed-port` 发一条 TCP 请求到 `target_port`。
+///
+/// ⚠️ Mihomo 的 mixed-port 在监听之后仍有一段初始化窗口：窗口内的 SOCKS5 握手会
+/// 被接受、CONNECT 也回成功，但拨号被静默丢弃（实测表现为 payload 后立刻 EOF）。
+/// 这是参考实现的时序行为，不是本仓缺陷 ⇒ 用重试跨过窗口，超次即 fail-closed。
+/// 证据：本仓 2026-10-25 实测（Mihomo Meta v1.19.20）——不重试时方向 2 随机失败，
+/// 重试后稳定通过；FP 实验（对 mixed-port 直说 HTTP）证明实例本身始终可用。
 async fn proxy_payload(mixed_port: u16, target_port: u16) {
+    let mut last = String::from("未尝试");
+    for _ in 0..20 {
+        match proxy_payload_once(mixed_port, target_port).await {
+            Ok(()) => return,
+            Err(error) => {
+                last = error;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+    panic!("SOCKS5 拨号在 20 次重试内未成功（窗口期过长？）：{last}");
+}
+/// 单次 SOCKS5 拨号；沿用无认证 + CONNECT 127.0.0.1:target_port。
+async fn proxy_payload_once(mixed_port: u16, target_port: u16) -> Result<(), String> {
     let mut stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, mixed_port))
         .await
-        .unwrap();
-    // SOCKS5：无认证 + CONNECT 127.0.0.1:target_port。
-    stream.write_all(&[5, 1, 0]).await.unwrap();
+        .map_err(|e| e.to_string())?;
+    stream.write_all(&[5, 1, 0]).await.map_err(|e| e.to_string())?;
     let mut choice = [0u8; 2];
-    stream.read_exact(&mut choice).await.unwrap();
+    stream.read_exact(&mut choice).await.map_err(|e| e.to_string())?;
     assert_eq!(choice, [5, 0]);
     let mut request = vec![5, 1, 0, 1, 127, 0, 0, 1];
     request.extend_from_slice(&target_port.to_be_bytes());
-    stream.write_all(&request).await.unwrap();
+    stream.write_all(&request).await.map_err(|e| e.to_string())?;
     let mut reply = [0u8; 10];
-    stream.read_exact(&mut reply).await.unwrap();
+    stream.read_exact(&mut reply).await.map_err(|e| e.to_string())?;
     assert_eq!(reply[1], 0, "SOCKS5 CONNECT 被拒：{reply:?}");
-    stream.write_all(PAYLOAD).await.unwrap();
-    stream.flush().await.unwrap();
+    stream.write_all(PAYLOAD).await.map_err(|e| e.to_string())?;
+    stream.flush().await.map_err(|e| e.to_string())?;
     let mut response = vec![0; PAYLOAD.len()];
-    stream.read_exact(&mut response).await.unwrap();
+    stream.read_exact(&mut response).await.map_err(|e| e.to_string())?;
     assert_eq!(response, PAYLOAD, "载荷未逐字节一致");
-    stream.shutdown().await.unwrap();
+    stream.shutdown().await.map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ------------------------------------------------------------------ 用例
@@ -272,7 +292,7 @@ async fn rust_roundtrip_baseline_tcp() {
 /// TODO(对齐 Mihomo listener/vless)：确认入站是否强制 TLS（`InboundTLSOptions`）；
 /// 若强制则本用例需带自签证书并让 Rust 侧走 TLS，否则按明文核对。
 #[tokio::test]
-#[ignore = "需要显式提供固定版本 Mihomo 二进制；本用例待与 listener/vless 逐段对齐后实跑"]
+#[ignore = "Mihomo 强制 vless inbound 走 TLS（实测 2026-10-25：Listener vless-in listen err: disallow using Vless without TLS）；需自签证书 + 本仓 vless TLS 传输层对齐后实跑"]
 async fn rust_client_to_clash_listener_tcp() {
     timeout(WAIT, async {
         let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -319,7 +339,7 @@ async fn rust_client_to_clash_listener_tcp() {
 ///
 /// TODO(对齐 Mihomo listener/vless)：入站 TLS 落地后补实跑。
 #[tokio::test]
-#[ignore = "需要显式提供固定版本 Mihomo 二进制；本用例待与 listener/vless 逐段对齐后实跑"]
+#[ignore = "Mihomo 强制 vless inbound 走 TLS（实测 2026-10-25：Listener vless-in listen err: disallow using Vless without TLS）；需自签证书 + 本仓 vless TLS 传输层对齐后实跑"]
 async fn wrong_uuid_is_rejected() {
     timeout(WAIT, async {
         let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
