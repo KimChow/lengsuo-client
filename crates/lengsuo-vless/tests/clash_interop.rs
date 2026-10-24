@@ -208,20 +208,35 @@ async fn proxy_payload_once(mixed_port: u16, target_port: u16) -> Result<(), Str
     let mut stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, mixed_port))
         .await
         .map_err(|e| e.to_string())?;
-    stream.write_all(&[5, 1, 0]).await.map_err(|e| e.to_string())?;
+    stream
+        .write_all(&[5, 1, 0])
+        .await
+        .map_err(|e| e.to_string())?;
     let mut choice = [0u8; 2];
-    stream.read_exact(&mut choice).await.map_err(|e| e.to_string())?;
+    stream
+        .read_exact(&mut choice)
+        .await
+        .map_err(|e| e.to_string())?;
     assert_eq!(choice, [5, 0]);
     let mut request = vec![5, 1, 0, 1, 127, 0, 0, 1];
     request.extend_from_slice(&target_port.to_be_bytes());
-    stream.write_all(&request).await.map_err(|e| e.to_string())?;
+    stream
+        .write_all(&request)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut reply = [0u8; 10];
-    stream.read_exact(&mut reply).await.map_err(|e| e.to_string())?;
+    stream
+        .read_exact(&mut reply)
+        .await
+        .map_err(|e| e.to_string())?;
     assert_eq!(reply[1], 0, "SOCKS5 CONNECT 被拒：{reply:?}");
     stream.write_all(PAYLOAD).await.map_err(|e| e.to_string())?;
     stream.flush().await.map_err(|e| e.to_string())?;
     let mut response = vec![0; PAYLOAD.len()];
-    stream.read_exact(&mut response).await.map_err(|e| e.to_string())?;
+    stream
+        .read_exact(&mut response)
+        .await
+        .map_err(|e| e.to_string())?;
     assert_eq!(response, PAYLOAD, "载荷未逐字节一致");
     stream.shutdown().await.map_err(|e| e.to_string())?;
     Ok(())
